@@ -138,9 +138,16 @@ with st.sidebar:
     )
 
     profile_presets = {
-        "Baixo risco": {"min_prob": 0.62, "min_ev": 0.03, "max_odd": 1.95, "min_books": 10},
-        "Medio risco": {"min_prob": 0.55, "min_ev": 0.02, "max_odd": 2.20, "min_books": 8},
-        "Alto risco": {"min_prob": 0.48, "min_ev": 0.01, "max_odd": 2.90, "min_books": 5},
+        "Baixo risco": {"min_prob": 0.58, "min_ev": 0.02, "max_odd": 2.30},
+        "Medio risco": {"min_prob": 0.50, "min_ev": 0.01, "max_odd": 2.80},
+        "Alto risco": {"min_prob": 0.40, "min_ev": 0.00, "max_odd": 4.00},
+    }
+
+    competition_min_books = {
+        "Brasileirao": {"Baixo risco": 2, "Medio risco": 2, "Alto risco": 1},
+        "Premier League": {"Baixo risco": 5, "Medio risco": 4, "Alto risco": 3},
+        "La Liga": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
+        "Copa do Mundo": {"Baixo risco": 10, "Medio risco": 8, "Alto risco": 5},
     }
 
     if risk_profile == "Personalizado":
@@ -153,7 +160,7 @@ with st.sidebar:
         min_prob = preset["min_prob"]
         min_ev = preset["min_ev"]
         max_odd = preset["max_odd"]
-        min_books = preset["min_books"]
+        min_books = competition_min_books.get(competition, {}).get(risk_profile, 3)
         st.caption(
             f"Filtro aplicado: Prob >= {min_prob:.2f} | "
             f"EV >= {min_ev:.2f} | Odd <= {max_odd:.2f} | Casas >= {min_books}"
@@ -206,12 +213,60 @@ safe_df = build_safe_bets_table(
     min_bookmakers=int(min_books),
 )
 
+relaxed_note = ""
+if safe_df.empty and risk_profile != "Personalizado":
+    relax_steps = [
+        (max(min_prob - 0.05, 0.35), max(min_ev - 0.01, -0.02), max_odd + 0.30, max(min_books - 1, 1)),
+        (max(min_prob - 0.10, 0.30), max(min_ev - 0.02, -0.05), max_odd + 0.70, 1),
+    ]
+    for rp, rev, rodd, rbooks in relax_steps:
+        safe_df = build_safe_bets_table(
+            matches_df=df,
+            bankroll=1000.0,
+            kelly_fractional=0.25,
+            min_model_prob=float(rp),
+            min_expected_value=float(rev),
+            max_odd=float(rodd),
+            min_bookmakers=int(rbooks),
+        )
+        if not safe_df.empty:
+            relaxed_note = (
+                f"Filtro do perfil foi relaxado automaticamente para exibir opcoes: "
+                f"Prob >= {rp:.2f} | EV >= {rev:.2f} | Odd <= {rodd:.2f} | Casas >= {rbooks}."
+            )
+            break
+
 tab1, tab2, tab3 = st.tabs(["Jogos Seguros", "Analise de Jogo", "Todos os Futuros"])
 
 with tab1:
     st.markdown('<div class="section-title">Ranking de Jogos Mais Seguros</div>', unsafe_allow_html=True)
+    if relaxed_note:
+        st.info(relaxed_note)
     if safe_df.empty:
         st.warning("Nenhum jogo passou no filtro atual. Reduza os filtros no menu lateral.")
+        fallback_df = build_safe_bets_table(
+            matches_df=df,
+            bankroll=1000.0,
+            kelly_fractional=0.25,
+            min_model_prob=0.35,
+            min_expected_value=-0.05,
+            max_odd=4.00,
+            min_bookmakers=1,
+        )
+        if not fallback_df.empty:
+            fallback_df = fallback_df.copy()
+            fallback_df["market_label"] = fallback_df.apply(
+                lambda r: market_label(str(r["market"]), str(r["home_team"]), str(r["away_team"])),
+                axis=1,
+            )
+            alt = fallback_df[
+                ["date_text", "home_team", "away_team", "market_label", "odd", "model_probability", "expected_value", "bookmakers"]
+            ].copy()
+            alt.columns = ["Data", "Mandante", "Visitante", "Resultado sugerido", "Odd", "Prob. Modelo", "EV", "Casas"]
+            alt["Prob. Modelo"] = (alt["Prob. Modelo"] * 100).round(2).astype(str) + "%"
+            alt["EV"] = (alt["EV"] * 100).round(2).astype(str) + "%"
+            st.markdown("#### Sugestoes alternativas (filtro amplo)")
+            st.dataframe(alt.head(12), use_container_width=True, hide_index=True)
     else:
         safe_df = safe_df.copy()
         safe_df["market_label"] = safe_df.apply(
