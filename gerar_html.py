@@ -263,7 +263,7 @@ def main() -> None:
   <div class="container">
     <section class="hero">
       <h1>Painel Moderno de Apostas (Sem API)</h1>
-      <p>Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} • Fonte: scraping de paginas publicas do BetExplorer • Foco em risco controlado</p>
+      <p>Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} • Fonte: scraping de paginas publicas do BetExplorer</p>
       <div class="grid">
         <div class="mini"><div class="n">4</div><div class="l">Competicoes monitoradas</div></div>
         <div class="mini"><div class="n">1X2</div><div class="l">Odds principais</div></div>

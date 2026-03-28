@@ -114,7 +114,7 @@ st.markdown(
     f"""
 <div class="dashboard-hero">
   <h1>Painel Inteligente de Apostas</h1>
-  <p>Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} • Dados web (sem API) • Foco em gestao de risco</p>
+  <p>Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
 </div>
 """,
     unsafe_allow_html=True,
