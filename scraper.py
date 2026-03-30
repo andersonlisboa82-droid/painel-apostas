@@ -16,7 +16,7 @@ USER_AGENT = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
-SOURCE_TIMEZONE = ZoneInfo("UTC")
+SOURCE_TIMEZONE = ZoneInfo("Europe/Prague")
 TARGET_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 COMPETITIONS = {
