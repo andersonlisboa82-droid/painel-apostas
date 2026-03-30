@@ -1,8 +1,13 @@
 ﻿from __future__ import annotations
 
+import json
+import os
+import time
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+import requests
 import streamlit as st
 
 from analytics import (
@@ -16,6 +21,15 @@ from scraper import COMPETITIONS, load_competition_matches
 st.set_page_config(page_title="Sistema Apostas Futebol", layout="wide")
 
 
+APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
+
+
+def current_app_timestamp() -> str:
+    return datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def get_data(competition: str) -> pd.DataFrame:
     return load_competition_matches(competition)
@@ -27,6 +41,308 @@ def market_label(market: str, home_team: str, away_team: str) -> str:
     if market == "Fora":
         return f"Vitoria {away_team}"
     return "Empate"
+
+
+def format_ai_analysis(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+
+    normalized = cleaned.replace("Resultado mais provável", "Resultado mais provavel")
+    normalized = normalized.replace("máximo", "maximo")
+
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    joined = "\n".join(lines)
+
+    label_map = {
+        "resultado mais provavel:": "Resultado mais provavel",
+        "melhor aposta por valor:": "Melhor aposta por valor",
+        "cuidado antes de apostar:": "Cuidado antes de apostar",
+    }
+    collected = {title: [] for title in label_map.values()}
+    current_title = None
+
+    for raw_line in joined.splitlines():
+        line = raw_line.strip()
+        lower_line = line.lower()
+        matched_title = None
+        for prefix, title in label_map.items():
+            if lower_line.startswith(prefix):
+                matched_title = title
+                current_title = title
+                remainder = line[len(prefix):].strip(" -")
+                if remainder:
+                    collected[title].append(remainder)
+                break
+        if matched_title:
+            continue
+        if current_title:
+            collected[current_title].append(line)
+
+    if any(collected.values()):
+        blocks = []
+        for title in ["Resultado mais provavel", "Melhor aposta por valor", "Cuidado antes de apostar"]:
+            body = " ".join(collected[title]).strip(" .:-")
+            if body:
+                blocks.append(f"**{title}**\n{body}.")
+        if blocks:
+            return "\n\n".join(blocks)
+
+    plain_text = " ".join(joined.split())
+    markers = [
+        ("Resultado mais provavel", ["O resultado mais provavel", "Resultado mais provavel"]),
+        ("Melhor aposta por valor", ["A melhor aposta por valor", "Melhor aposta por valor"]),
+        ("Cuidado antes de apostar", ["Antes de apostar", "Cuidado antes de apostar"]),
+    ]
+
+    spans: list[tuple[str, int, int]] = []
+    for title, options in markers:
+        best_pos = -1
+        best_token = ""
+        for token in options:
+            pos = plain_text.find(token)
+            if pos != -1 and (best_pos == -1 or pos < best_pos):
+                best_pos = pos
+                best_token = token
+        if best_pos != -1:
+            spans.append((title, best_pos, len(best_token)))
+
+    if spans:
+        spans.sort(key=lambda item: item[1])
+        blocks = []
+        for idx, (title, start, token_len) in enumerate(spans):
+            end = spans[idx + 1][1] if idx + 1 < len(spans) else len(plain_text)
+            body = plain_text[start + token_len:end].strip(" .:-")
+            if body:
+                blocks.append(f"**{title}**\n{body}.")
+        if blocks:
+            return "\n\n".join(blocks)
+
+    sentences = [item.strip(" .") for item in plain_text.split(".") if item.strip()]
+    labels = ["Resultado mais provavel", "Melhor aposta por valor", "Cuidado antes de apostar"]
+    blocks = []
+    for idx, sentence in enumerate(sentences[:3]):
+        blocks.append(f"**{labels[idx]}**\n{sentence}.")
+    return "\n\n".join(blocks) if blocks else cleaned
+
+
+def extract_ai_analysis_blocks(text: str) -> tuple[str, str, str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise ValueError("A IA retornou uma resposta vazia.")
+
+    normalized = cleaned.replace("Resultado mais provável", "Resultado mais provavel")
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+
+    label_map = {
+        "resultado mais provavel:": "resultado",
+        "melhor aposta por valor:": "valor",
+        "cuidado antes de apostar:": "cuidado",
+    }
+    collected = {"resultado": [], "valor": [], "cuidado": []}
+    current_key = None
+
+    for raw_line in lines:
+        lower_line = raw_line.lower()
+        matched = False
+        for prefix, key in label_map.items():
+            if lower_line.startswith(prefix):
+                current_key = key
+                remainder = raw_line[len(prefix):].strip(" -")
+                if remainder:
+                    collected[key].append(remainder)
+                matched = True
+                break
+        if matched:
+            continue
+        if current_key:
+            collected[current_key].append(raw_line)
+
+    if all(collected.values()):
+        return (
+            " ".join(collected["resultado"]).strip(" .:-"),
+            " ".join(collected["valor"]).strip(" .:-"),
+            " ".join(collected["cuidado"]).strip(" .:-"),
+        )
+
+    plain_text = " ".join(normalized.split())
+    sentences = [item.strip(" .") for item in plain_text.split(".") if item.strip()]
+    if len(sentences) >= 3:
+        return sentences[0], sentences[1], sentences[2]
+
+    raise ValueError("Nao foi possivel separar a resposta da IA em blocos.")
+
+
+def render_ai_analysis_blocks(resultado: str, valor: str, cuidado: str) -> str:
+    blocks = [
+        ("Resultado mais provavel", resultado),
+        ("Melhor aposta por valor", valor),
+        ("Cuidado antes de apostar", cuidado),
+    ]
+    rendered = []
+    for title, body in blocks:
+        cleaned_body = (body or "").strip().strip(".")
+        if cleaned_body:
+            rendered.append(f"**{title}**\n{cleaned_body}.")
+    return "\n\n".join(rendered)
+
+
+def generate_nvidia_match_analysis(
+    home_team: str,
+    away_team: str,
+    date_text: str,
+    odds_home: float,
+    odds_draw: float,
+    odds_away: float,
+    home_win_prob: float,
+    draw_prob: float,
+    away_win_prob: float,
+    probable_market: str,
+    probable_probability: float,
+    value_market: str,
+    value_probability: float,
+    value_implied_probability: float,
+    expected_value: float,
+) -> str:
+    api_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
+    if not api_key:
+        raise ValueError("Defina a variavel de ambiente NVIDIA_API_KEY para usar a analise com IA.")
+
+    prompt = f"""
+Analise o jogo em portugues do Brasil, de forma curta, clara e objetiva.
+Retorne apenas JSON valido.
+Nao mostre raciocinio interno, planejamento, notas, markdown ou texto fora do JSON.
+
+Jogo: {home_team} x {away_team}
+Data/Horario: {date_text} (horario de Sao Paulo)
+
+Odds 1X2:
+- Casa: {odds_home:.2f}
+- Empate: {odds_draw:.2f}
+- Fora: {odds_away:.2f}
+
+Probabilidades do modelo:
+- Vitoria {home_team}: {home_win_prob * 100:.2f}%
+- Empate: {draw_prob * 100:.2f}%
+- Vitoria {away_team}: {away_win_prob * 100:.2f}%
+
+Resultado mais provavel:
+- {probable_market} ({probable_probability * 100:.2f}%)
+
+Melhor aposta por valor:
+- {value_market}
+- Probabilidade do modelo: {value_probability * 100:.2f}%
+- Probabilidade implicita da odd: {value_implied_probability * 100:.2f}%
+- EV: {expected_value * 100:.2f}%
+
+Explique:
+1. Qual e o resultado mais provavel.
+2. Por que a melhor aposta por valor pode ser diferente.
+3. Um cuidado importante antes de apostar.
+
+Responda exatamente neste formato JSON:
+{{
+  "resultado_mais_provavel": "texto curto",
+  "melhor_aposta_por_valor": "texto curto",
+  "cuidado_antes_de_apostar": "texto curto"
+}}
+
+Cada valor deve ter 1 ou 2 frases curtas.
+Use tom simples, natural e direto.
+Evite repetir os nomes dos campos, os mesmos numeros e a mesma explicacao em mais de um bloco.
+Evite frases vagas como "as probabilidades podem variar" ou "a analise depende dos dados disponiveis".
+No bloco de cuidado, diga um risco concreto da aposta, como zebra, odd esticada, variancia ou necessidade de gestao de banca.
+No bloco de valor, explique a diferenca entre probabilidade do modelo e odd de forma humana, sem jargao excessivo.
+Nao invente dados.
+"""
+
+    payload = {
+        "model": NVIDIA_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Voce e um analista de apostas esportivas. "
+                    "Responda em portugues claro, curto, natural e honesto. "
+                    "Entregue somente JSON valido. "
+                    "Nunca exponha raciocinio interno. "
+                    "Evite repeticao e frases genericas."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "top_p": 0.8,
+        "max_tokens": 220,
+    }
+
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            response = requests.post(
+                NVIDIA_API_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=120,
+            )
+            response.raise_for_status()
+            data = response.json()
+            break
+        except requests.exceptions.ReadTimeout as exc:
+            last_error = exc
+            if attempt == 0:
+                time.sleep(1.5)
+                continue
+            raise TimeoutError(
+                "A NVIDIA demorou para responder. Tente novamente em alguns segundos."
+            ) from exc
+        except Exception as exc:
+            last_error = exc
+            raise
+    else:
+        raise last_error if last_error else RuntimeError("Falha desconhecida ao consultar a NVIDIA.")
+    choice = data["choices"][0]
+    message = choice.get("message", {}) if isinstance(choice, dict) else {}
+    content = message.get("content")
+
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text_value = item.get("text")
+                if isinstance(text_value, str) and text_value.strip():
+                    parts.append(text_value.strip())
+        if parts:
+            return "\n".join(parts)
+
+    reasoning_content = message.get("reasoning_content")
+    if isinstance(reasoning_content, str) and reasoning_content.strip():
+        return reasoning_content.strip()
+
+    reasoning = message.get("reasoning")
+    if isinstance(reasoning, str) and reasoning.strip():
+        cleaned_reasoning = reasoning.strip()
+        markers = [
+            "Estrutura da resposta:",
+            "Restrições:",
+            "Responda em no maximo",
+            "Preciso explicar:",
+            "Dados fornecidos:",
+        ]
+        if any(marker in cleaned_reasoning for marker in markers):
+            raise ValueError(
+                "A NVIDIA retornou apenas rascunho interno, sem resposta final. "
+                "Tente novamente ou troque o modelo."
+            )
+        return cleaned_reasoning
+
+    raise ValueError(f"Resposta da NVIDIA sem texto utilizavel: {data}")
 
 
 st.markdown(
@@ -83,13 +399,6 @@ st.markdown(
   color: var(--text);
   font-weight: 700;
 }
-.kpi-wrap {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: .2rem .2rem;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, .05);
-}
 .stDataFrame, div[data-testid="stDataFrame"] {
   border-radius: 12px;
   overflow: hidden;
@@ -114,7 +423,7 @@ st.markdown(
     f"""
 <div class="dashboard-hero">
   <h1>Painel Inteligente de Apostas</h1>
-  <p>Atualizado em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>
+  <p>Atualizado em {current_app_timestamp()} (horario de Sao Paulo)</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -170,6 +479,9 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
+    st.markdown("---")
+    st.caption("IA NVIDIA: defina a variavel de ambiente `NVIDIA_API_KEY` para habilitar a analise em linguagem natural.")
+
 try:
     df = get_data(competition)
 except Exception as exc:
@@ -179,25 +491,6 @@ except Exception as exc:
 finished = df[df["status"] == "Finalizado"].copy()
 fixtures = df[df["status"] == "Agendado"].copy()
 valid = fixtures.dropna(subset=["odds_home", "odds_draw", "odds_away"]).copy()
-
-k1, k2, k3, k4 = st.columns(4)
-with k1:
-    st.markdown('<div class="kpi-wrap">', unsafe_allow_html=True)
-    st.metric("Finalizados", len(finished))
-    st.markdown("</div>", unsafe_allow_html=True)
-with k2:
-    st.markdown('<div class="kpi-wrap">', unsafe_allow_html=True)
-    st.metric("Jogos futuros", len(fixtures))
-    st.markdown("</div>", unsafe_allow_html=True)
-with k3:
-    st.markdown('<div class="kpi-wrap">', unsafe_allow_html=True)
-    st.metric("Com odds", len(valid))
-    st.markdown("</div>", unsafe_allow_html=True)
-with k4:
-    st.markdown('<div class="kpi-wrap">', unsafe_allow_html=True)
-    hit = (len(valid) / len(fixtures) * 100) if len(fixtures) else 0
-    st.metric("Cobertura odds", f"{hit:.1f}%")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 if fixtures.empty:
     st.warning("Nao encontrei jogos futuros para esta competicao no momento.")
@@ -317,17 +610,24 @@ with tab2:
         st.info("Nao ha jogos futuros com odds 1X2 no momento.")
     else:
         valid = valid.reset_index(drop=True)
+        valid["match_option_id"] = valid.index.astype(str)
         valid["match_label"] = valid.apply(
             lambda r: f"{r['date_text']} | {r['home_team']} x {r['away_team']}",
             axis=1,
         )
-        selected_label = st.selectbox(
+        match_options = valid["match_option_id"].tolist()
+        labels_by_option = dict(zip(valid["match_option_id"], valid["match_label"]))
+
+        selected_option = st.selectbox(
             "Escolha o jogo",
-            options=valid["match_label"].tolist(),
+            options=match_options,
+            format_func=lambda option_id: labels_by_option.get(option_id, option_id),
             key=f"match_selector_label_{competition}",
         )
-        selected = valid[valid["match_label"] == selected_label].iloc[0]
-        st.caption(f"Jogo selecionado: {selected_label}")
+        selected = valid.loc[valid["match_option_id"] == selected_option].iloc[0]
+        selected_match_label = str(selected["match_label"])
+
+        st.caption(f"Jogo selecionado: {selected_match_label}")
         st.caption(f"Dados usados na analise: {selected['home_team']} x {selected['away_team']}")
 
         probs = calculate_match_probabilities(df, selected["home_team"], selected["away_team"])
@@ -340,6 +640,14 @@ with tab2:
             kelly_fractional=0.25,
         )
         readable_market = market_label(str(tip.best_market), str(selected["home_team"]), str(selected["away_team"]))
+        probable_market, probable_probability = max(
+            [
+                (f"Vitoria {selected['home_team']}", probs.home_win),
+                ("Empate", probs.draw),
+                (f"Vitoria {selected['away_team']}", probs.away_win),
+            ],
+            key=lambda item: item[1],
+        )
 
         c1, c2, c3 = st.columns(3)
         c1.metric(f"Vitoria {selected['home_team']}", f"{probs.home_win * 100:.1f}%")
@@ -351,19 +659,56 @@ with tab2:
         o2.metric("Odd Empate", f"{selected['odds_draw']:.2f}")
         o3.metric("Odd Fora", f"{selected['odds_away']:.2f}")
 
+        st.info(
+            f"Resultado mais provavel: {probable_market} "
+            f"({probable_probability * 100:.2f}% de chance pelo modelo)."
+        )
+
         if tip.expected_value > 0:
             st.success(
-                f"Resultado sugerido: {readable_market} | EV: {tip.expected_value * 100:.2f}%"
+                f"Melhor aposta por valor: {readable_market} | EV: {tip.expected_value * 100:.2f}%"
             )
         else:
             st.warning(
-                f"Sem EV positivo no 1X2. Melhor EV atual: {tip.expected_value * 100:.2f}% ({readable_market})."
+                f"Sem EV positivo no 1X2. Melhor aposta por valor no momento: "
+                f"{readable_market} (EV {tip.expected_value * 100:.2f}%)."
             )
 
         st.write(
-            f"Prob. modelo ({readable_market}): **{tip.model_probability * 100:.2f}%** | "
-            f"Prob. implicita: **{tip.implied_probability * 100:.2f}%**"
+            f"Prob. modelo da aposta por valor ({readable_market}): **{tip.model_probability * 100:.2f}%** | "
+            f"Prob. implicita da odd: **{tip.implied_probability * 100:.2f}%**"
         )
+
+        if st.button("Analisar com IA NVIDIA", key=f"nvidia_analysis_{competition}_{selected_option}"):
+            try:
+                with st.spinner("Consultando IA da NVIDIA..."):
+                    ai_analysis = generate_nvidia_match_analysis(
+                        home_team=str(selected["home_team"]),
+                        away_team=str(selected["away_team"]),
+                        date_text=str(selected["date_text"]),
+                        odds_home=float(selected["odds_home"]),
+                        odds_draw=float(selected["odds_draw"]),
+                        odds_away=float(selected["odds_away"]),
+                        home_win_prob=float(probs.home_win),
+                        draw_prob=float(probs.draw),
+                        away_win_prob=float(probs.away_win),
+                        probable_market=str(probable_market),
+                        probable_probability=float(probable_probability),
+                        value_market=str(readable_market),
+                        value_probability=float(tip.model_probability),
+                        value_implied_probability=float(tip.implied_probability),
+                        expected_value=float(tip.expected_value),
+                    )
+                parsed = json.loads(ai_analysis)
+                resultado_text = str(parsed.get("resultado_mais_provavel", "")).strip()
+                valor_text = str(parsed.get("melhor_aposta_por_valor", "")).strip()
+                cuidado_text = str(parsed.get("cuidado_antes_de_apostar", "")).strip()
+                if not (resultado_text and valor_text and cuidado_text):
+                    resultado_text, valor_text, cuidado_text = extract_ai_analysis_blocks(ai_analysis)
+                st.markdown("### Analise com IA NVIDIA")
+                st.markdown(render_ai_analysis_blocks(resultado_text, valor_text, cuidado_text))
+            except Exception as exc:
+                st.error(f"Nao foi possivel gerar a analise com IA da NVIDIA: {exc}")
 
         top_df = pd.DataFrame(probs.top_scorelines, columns=["Placar", "Probabilidade"])
         top_df["Probabilidade"] = (top_df["Probabilidade"] * 100).round(2).astype(str) + "%"
@@ -376,7 +721,7 @@ with tab2:
         home_ctx = get_team_context(df, str(selected["home_team"]))
         away_ctx = get_team_context(df, str(selected["away_team"]))
 
-        winner_line = (
+        value_bet_line = (
             f"Vitoria {selected['home_team']}"
             if tip.best_market == "Casa"
             else f"Vitoria {selected['away_team']}"
@@ -424,7 +769,8 @@ with tab2:
 **Jogo:** {selected['home_team']} x {selected['away_team']} ({selected['date_text']})  
 **Odds atuais (1X2):** Casa `{selected['odds_home']:.2f}` | Empate `{selected['odds_draw']:.2f}` | Fora `{selected['odds_away']:.2f}`  
 **Probabilidades do modelo:** Casa `{probs.home_win*100:.1f}%` | Empate `{probs.draw*100:.1f}%` | Fora `{probs.away_win*100:.1f}%`  
-**Resultado mais indicado:** **{winner_line}** (EV `{tip.expected_value*100:.2f}%`)  
+**Resultado mais provavel:** **{probable_market}** (`{probable_probability*100:.1f}%`)  
+**Melhor aposta por valor:** **{value_bet_line}** (EV `{tip.expected_value*100:.2f}%`)  
 **Mercados extras:** {btts_line} Prob. BTTS `{probs.btts_yes*100:.1f}%`. {goal_line} Under 2.5 `{probs.under_25*100:.1f}%` / Over 2.5 `{probs.over_25*100:.1f}%`.
 """
         )

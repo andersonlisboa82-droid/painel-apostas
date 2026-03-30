@@ -2,11 +2,19 @@
 
 from datetime import datetime
 from html import escape
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from analytics import build_safe_bets_table, calculate_match_probabilities, suggest_bet_strategy
 from scraper import COMPETITIONS, load_competition_matches
+
+
+APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+
+
+def _current_app_timestamp() -> str:
+    return datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
 
 
 def _fmt_odd(value: float | None) -> str:
@@ -263,7 +271,7 @@ def main() -> None:
   <div class="container">
     <section class="hero">
       <h1>Painel Moderno de Apostas (Sem API)</h1>
-      <p>Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} • Fonte: scraping de paginas publicas do BetExplorer</p>
+      <p>Gerado em {_current_app_timestamp()} • Horario de Sao Paulo • Fonte: scraping de paginas publicas do BetExplorer</p>
       <div class="grid">
         <div class="mini"><div class="n">4</div><div class="l">Competicoes monitoradas</div></div>
         <div class="mini"><div class="n">1X2</div><div class="l">Odds principais</div></div>

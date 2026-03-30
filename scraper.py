@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import re
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -14,6 +15,9 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/124.0.0.0 Safari/537.36"
 )
+
+SOURCE_TIMEZONE = ZoneInfo("UTC")
+TARGET_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 COMPETITIONS = {
     "Brasileirao": "https://www.betexplorer.com/br/football/brazil/serie-a-betano/",
@@ -98,6 +102,33 @@ def _get_bookmakers_count(td) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _infer_year(month: int, now_target: datetime) -> int:
+    year = now_target.year
+    if month <= 2 and now_target.month >= 11:
+        return year + 1
+    if month >= 11 and now_target.month <= 2:
+        return year - 1
+    return year
+
+
+def _convert_fixture_datetime_to_target(text: str) -> str:
+    clean = re.sub(r"\s+", " ", text).strip()
+    match = re.fullmatch(r"(\d{2})\.(\d{2})\.\s+(\d{2}):(\d{2})", clean)
+    if not match:
+        return clean
+
+    day = int(match.group(1))
+    month = int(match.group(2))
+    hour = int(match.group(3))
+    minute = int(match.group(4))
+
+    now_target = datetime.now(TARGET_TIMEZONE)
+    year = _infer_year(month, now_target)
+    source_dt = datetime(year, month, day, hour, minute, tzinfo=SOURCE_TIMEZONE)
+    target_dt = source_dt.astimezone(TARGET_TIMEZONE)
+    return target_dt.strftime("%d.%m. %H:%M")
+
+
 def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
     url = urljoin(base_url, "results/")
     soup = _fetch_soup(url)
@@ -177,6 +208,7 @@ def _parse_fixtures(competition: str, base_url: str) -> list[MatchRow]:
             last_datetime_text = datetime_text
         else:
             datetime_text = last_datetime_text
+        datetime_text = _convert_fixture_datetime_to_target(datetime_text)
 
         teams = _parse_match_text(match_anchor.get_text(" ", strip=True))
         if teams is None:
