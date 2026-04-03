@@ -3,316 +3,899 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Painel Moderno de Apostas</title>
+  <title>Painel de Apostas Inteligente</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
     :root {
-      --bg: #f4f7fb;
-      --card: #ffffff;
-      --line: #dbe4ef;
-      --text: #1a2433;
-      --muted: #5a6b82;
-      --accent: #0f766e;
-      --accent2: #0b5ed7;
+      --bg: #eef3f8;
+      --card: rgba(255,255,255,0.9);
+      --line: rgba(148,163,184,0.28);
+      --line-strong: rgba(148,163,184,0.42);
+      --text: #112031;
+      --muted: #5b6b7d;
+      --blue: #1d4ed8;
+      --teal: #0f766e;
+      --amber: #d97706;
+      --shadow: 0 22px 50px rgba(15,23,42,0.09);
     }
     * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
-      font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
       margin: 0;
+      font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
       color: var(--text);
       background:
-        radial-gradient(1200px 500px at -10% -10%, #dbeafe 0%, transparent 60%),
-        radial-gradient(900px 400px at 100% 0%, #dcfce7 0%, transparent 60%),
-        var(--bg);
+        radial-gradient(900px 420px at 0% 0%, rgba(59,130,246,0.16), transparent 55%),
+        radial-gradient(860px 420px at 100% 0%, rgba(16,185,129,0.14), transparent 50%),
+        linear-gradient(180deg, #f8fafc 0%, var(--bg) 65%, #e9eef5 100%);
     }
-    .container { max-width: 1240px; margin: 0 auto; padding: 20px; }
-    .hero {
-      background: linear-gradient(130deg, #0f172a 0%, #0b2239 55%, #0f766e 100%);
-      border: 1px solid #0f2a46;
-      border-radius: 18px;
-      padding: 18px;
-      color: #f8fafc;
-      box-shadow: 0 14px 28px rgba(15, 23, 42, 0.2);
-    }
-    .hero h1 { margin: 0; font-size: 1.55rem; }
-    .hero p { margin: 8px 0 0; color: #dbe8f6; font-size: 0.94rem; }
-    .grid { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin-top: 12px; }
-    .mini { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); border-radius: 12px; padding: 10px; }
-    .mini .n { font-weight: 700; font-size: 1.1rem; }
-    .mini .l { font-size: 0.82rem; color: #dbe8f6; }
-    .card {
-      margin-top: 14px;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 14px;
-      box-shadow: 0 8px 24px rgba(15,23,42,.06);
-    }
-    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-    h2 { margin: 0; font-size: 1.08rem; }
-    h3 { margin: 14px 0 8px; font-size: .98rem; color: #1f2d40; }
-    .badge { background: #ecfeff; color: #0f766e; border: 1px solid #bbf7d0; padding: 6px 10px; border-radius: 999px; font-size: 0.82rem; }
-    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
-    table { width: 100%; border-collapse: collapse; min-width: 780px; background: #fff; }
-    th, td { border-bottom: 1px solid #e8edf4; padding: 8px; text-align: left; font-size: 13px; }
-    th { background: #eef4fb; position: sticky; top: 0; }
-    .foot { margin-top: 14px; color: var(--muted); font-size: 0.86rem; }
-    .legend {
-      margin-top: 10px;
+    .container { max-width: 1320px; margin: 0 auto; padding: 24px 20px 44px; }
+    .topbar {
       display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      font-size: 12px;
-      color: #334155;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border-radius: 20px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid rgba(148,163,184,.22);
+      box-shadow: 0 16px 34px rgba(15,23,42,.05);
+      backdrop-filter: blur(16px);
     }
-    .legend .pill {
+    .brand-block { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #1d4ed8, #0f766e);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+    .brand-copy strong { display: block; font-size: .96rem; letter-spacing: -.02em; }
+    .brand-copy span { display: block; margin-top: 3px; color: var(--muted); font-size: .83rem; }
+    .topbar-meta { display: flex; flex-wrap: wrap; gap: 10px; }
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
       border-radius: 999px;
-      padding: 4px 10px;
-      border: 1px solid #cbd5e1;
       background: #f8fafc;
+      border: 1px solid rgba(148,163,184,.25);
+      color: #334155;
+      font-size: .82rem;
+      font-weight: 600;
     }
+    .meta-pill strong { color: #0f172a; }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34,197,94,.14);
+    }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 28px;
+      border-radius: 28px;
+      color: #f8fafc;
+      background: linear-gradient(135deg, #081625 0%, #14304f 54%, #0f766e 100%);
+      box-shadow: 0 28px 70px rgba(8,22,37,0.26);
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at top right, rgba(96,165,250,.22), transparent 28%),
+        linear-gradient(120deg, transparent 0%, rgba(255,255,255,.06) 100%);
+      pointer-events: none;
+    }
+    .hero-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.9fr); gap: 18px; align-items: end; }
+    .hero-grid, .metrics, .quick-nav { position: relative; z-index: 1; }
+    .hero-tag { display: inline-flex; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16); color: #dbeafe; }
+    .hero h1 { margin: 14px 0 0; max-width: 12ch; font-size: clamp(2.2rem, 4vw, 3.6rem); line-height: .96; letter-spacing: -.04em; }
+    .hero p { margin: 14px 0 0; max-width: 64ch; color: rgba(226,232,240,.88); line-height: 1.68; }
+    .hero-stack { display: grid; gap: 12px; }
+    .hero-note { padding: 16px 18px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    .hero-note span { display: block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #bfdbfe; }
+    .hero-note strong { display: block; margin-top: 8px; font-size: 1.7rem; line-height: 1.05; }
+    .hero-note p { margin-top: 8px; font-size: .9rem; color: rgba(226,232,240,.82); }
+    .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+    .metric { padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    .metric span { display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #cfe4ff; }
+    .metric strong { display: block; margin-top: 10px; font-size: 1.65rem; letter-spacing: -.04em; }
+    .metric p { margin: 8px 0 0; font-size: .86rem; color: rgba(226,232,240,.8); line-height: 1.45; }
+    .metric-track { margin-top: 12px; height: 7px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+    .metric-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #93c5fd, #6ee7b7); }
+    .quick-nav { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }
+    .quick-nav::before { content: "Areas monitoradas"; width: 100%; margin-bottom: 2px; font-size: .76rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #bfdbfe; }
+    .jump-link { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.12); color: #fff; text-decoration: none; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+    .jump-link span { font-size: .76rem; letter-spacing: .05em; text-transform: uppercase; color: #bfdbfe; }
+    .dashboard-shell {
+      display: grid;
+      grid-template-columns: minmax(250px, 280px) minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+      margin-top: 18px;
+    }
+    .side-rail {
+      position: sticky;
+      top: 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .rail-card {
+      padding: 18px;
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,249,252,.86));
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+    .rail-card h3 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .rail-card p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: .88rem;
+      line-height: 1.55;
+    }
+    .rail-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .rail-link {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 16px;
+      background: #fff;
+      border: 1px solid rgba(148,163,184,.22);
+      text-decoration: none;
+      color: inherit;
+    }
+    .rail-link-head, .rail-link-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .rail-link-head strong {
+      font-size: .92rem;
+      letter-spacing: -.02em;
+    }
+    .rail-link-head span, .rail-link-meta span {
+      color: var(--muted);
+      font-size: .78rem;
+    }
+    .rail-track {
+      height: 7px;
+      border-radius: 999px;
+      background: #e5edf7;
+      overflow: hidden;
+    }
+    .rail-track i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--blue), var(--teal));
+    }
+    .spark-card {
+      display: grid;
+      gap: 10px;
+    }
+    .spark-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+    .spark-head strong {
+      font-size: .92rem;
+    }
+    .spark-head span {
+      color: var(--muted);
+      font-size: .8rem;
+    }
+    .sparkline {
+      width: 100%;
+      height: 72px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #f8fbff, #eef5fb);
+      border: 1px solid rgba(148,163,184,.18);
+      padding: 10px;
+    }
+    .sparkline svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .sparkline polyline {
+      fill: none;
+      stroke: var(--blue);
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .sparkline path {
+      fill: rgba(29,78,216,.08);
+      stroke: none;
+    }
+    .dashboard-main {
+      min-width: 0;
+    }
+    .card { margin-top: 18px; padding: 20px; border-radius: 22px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
+    .controls { display: grid; gap: 18px; }
+    .controls::before {
+      content: "";
+      display: block;
+      height: 4px;
+      width: 120px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--blue), var(--teal));
+    }
+    .controls-head, .card-head, .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+    .eyebrow { display: inline-flex; margin-bottom: 8px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--blue); }
+    h2 { margin: 0; font-size: clamp(1.35rem, 2vw, 1.85rem); letter-spacing: -.03em; }
+    h3 { margin: 4px 0 0; font-size: 1.06rem; letter-spacing: -.02em; }
+    .copy, .section-copy, .panel-copy { margin: 8px 0 0; color: var(--muted); line-height: 1.6; }
+    .summary-box { min-width: min(100%, 280px); padding: 14px 16px; border-radius: 18px; background: linear-gradient(135deg, #eff6ff, #ecfeff); border: 1px solid rgba(59,130,246,.14); color: #15314a; font-size: .92rem; line-height: 1.55; box-shadow: inset 0 1px 0 rgba(255,255,255,.55); }
+    .filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .field { display: grid; gap: 8px; padding: 14px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.76)); border: 1px solid var(--line); }
+    .field label { font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #334155; }
+    .field input, .field select { height: 44px; border-radius: 12px; border: 1px solid var(--line-strong); padding: 0 14px; font: inherit; color: var(--text); background: rgba(255,255,255,.98); outline: none; }
+    .field input:focus, .field select:focus { border-color: rgba(29,78,216,.48); box-shadow: 0 0 0 4px rgba(29,78,216,.08); }
+    .hint { font-size: 12px; color: var(--muted); line-height: 1.45; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    .btn, .btn-link { height: 46px; padding: 0 16px; border-radius: 14px; border: 1px solid transparent; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
+    .btn.primary { background: linear-gradient(135deg, var(--blue), #2563eb); color: #fff; box-shadow: 0 16px 28px rgba(37,99,235,.22); }
+    .btn.secondary, .btn-link { background: #f8fafc; border-color: var(--line-strong); color: var(--text); }
+    .btn:hover, .btn-link:hover { transform: translateY(-1px); }
+    .legend { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.82); font-size: .84rem; }
+    .pill::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: .78; }
+    .competition-card {
+      position: relative;
+      padding: 22px;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.86)),
+        radial-gradient(circle at top right, rgba(37,99,235,.06), transparent 26%);
+    }
+    .competition-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 5px;
+      height: 100%;
+      background: linear-gradient(180deg, var(--blue), var(--teal));
+    }
+    .title-block { max-width: 760px; }
+    .title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .badge { padding: 8px 12px; border-radius: 999px; background: linear-gradient(135deg, #ecfeff, #eff6ff); border: 1px solid rgba(15,118,110,.16); color: var(--teal); font-size: .8rem; font-weight: 700; }
+    .stats-rail { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; min-width: min(100%, 320px); }
+    .stat-chip { padding: 14px; border-radius: 16px; background: linear-gradient(180deg, #fff, #f8fafc); border: 1px solid var(--line); }
+    .stat-chip span { display: block; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .stat-chip strong { display: block; margin-top: 8px; font-size: 1.34rem; letter-spacing: -.04em; }
+    .panel { margin-top: 18px; padding: 16px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.82)); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }
+    .panel-safe { border-color: rgba(16,185,129,.22); }
+    .panel-value { border-color: rgba(37,99,235,.22); }
+    .panel-agenda { border-color: rgba(245,158,11,.24); }
+    .panel-kicker { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--amber); }
+    .panel-safe .panel-kicker { color: #059669; }
+    .panel-value .panel-kicker { color: var(--blue); }
+    .panel-agenda .panel-kicker { color: var(--amber); }
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .panel-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: #f8fafc;
+      border: 1px solid rgba(148,163,184,.22);
+    }
+    .panel-icon svg {
+      width: 22px;
+      height: 22px;
+      display: block;
+    }
+    .panel-safe .panel-icon { color: #059669; background: rgba(16,185,129,.08); border-color: rgba(16,185,129,.18); }
+    .panel-value .panel-icon { color: var(--blue); background: rgba(29,78,216,.08); border-color: rgba(29,78,216,.18); }
+    .panel-agenda .panel-icon { color: var(--amber); background: rgba(245,158,11,.10); border-color: rgba(245,158,11,.2); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+    table { width: 100%; min-width: 780px; border-collapse: collapse; background: #fff; }
+    th, td { border-bottom: 1px solid #e8edf4; padding: 11px 12px; text-align: left; font-size: 13px; line-height: 1.5; }
+    th { position: sticky; top: 0; background: #eff6ff; color: #14324f; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+    tbody tr:hover td { background: #f8fbff; }
     tr.risk-low td { background: #ecfdf3; }
     tr.risk-med td { background: #fff7e6; }
     tr.risk-high td { background: #fff1f2; }
     tr.risk-none td { background: #f8fafc; }
-    .glossary {
-      margin-top: 14px;
-      background: #ffffff;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 12px 14px;
-      box-shadow: 0 8px 24px rgba(15,23,42,.06);
-    }
-    .glossary h3 { margin: 0 0 8px; }
-    .glossary ul { margin: 0; padding-left: 18px; }
-    .glossary li { margin: 6px 0; font-size: 13px; color: #334155; }
-    .controls {
-      margin-top: 12px;
-      background: #ffffff;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 10px;
+    .empty-state { margin: 16px 0 2px; padding: 14px 16px; border-radius: 14px; background: #fff7ed; border: 1px solid rgba(245,158,11,.22); color: #9a3412; font-size: .92rem; }
+    .glossary { display: grid; gap: 14px; }
+    .glossary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .glossary-item { padding: 16px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.76)); border: 1px solid var(--line); }
+    .glossary-item strong { display: block; margin-bottom: 6px; font-size: .95rem; }
+    .glossary-item p { margin: 0; color: var(--muted); line-height: 1.6; }
+    .foot { margin-top: 18px; color: var(--muted); font-size: .9rem; text-align: center; }
+    
+    .floating-actions {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
       display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      box-shadow: 0 8px 24px rgba(15,23,42,.06);
+      flex-direction: column;
+      gap: 12px;
+      z-index: 1000;
     }
-    .controls label { font-size: 12px; color: #334155; font-weight: 600; }
-    .controls input, .controls select, .controls button, .controls a {
-      height: 34px;
-      border-radius: 8px;
-      border: 1px solid #cbd5e1;
-      padding: 0 10px;
-      font-size: 13px;
-      background: #fff;
-      color: #0f172a;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      cursor: pointer;
-    }
-    .controls a, .controls button.primary {
-      background: #0b5ed7;
-      border-color: #0b5ed7;
+    .btn-float {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: var(--blue);
       color: #fff;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 12px 24px rgba(29,78,216,.3);
+      cursor: pointer;
+      border: none;
+      transition: transform .2s ease;
     }
-    @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); } }
+    .btn-float:hover { transform: scale(1.1); }
+    .btn-float svg { width: 24px; height: 24px; fill: currentColor; }
+    
+    @media (max-width: 1180px) {
+      .dashboard-shell { grid-template-columns: 1fr; }
+      .side-rail { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 1100px) { .hero-grid, .metrics, .filters, .glossary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 760px) {
+      .container { padding: 18px 14px 32px; }
+      .topbar { align-items: flex-start; }
+      .hero, .card, .competition-card { padding: 18px; }
+      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail { grid-template-columns: 1fr; }
+      .topbar, .brand-block, .topbar-meta { flex-direction: column; align-items: flex-start; }
+      .btn, .btn-link { width: 100%; }
+      table { min-width: 640px; }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <section class="hero">
-      <h1>Painel Moderno de Apostas (Sem API)</h1>
-      <p>Gerado em 29/03/2026 22:43:21 • Horario de Sao Paulo • Fonte: scraping de paginas publicas do BetExplorer</p>
-      <div class="grid">
-        <div class="mini"><div class="n">4</div><div class="l">Competicoes monitoradas</div></div>
-        <div class="mini"><div class="n">1X2</div><div class="l">Odds principais</div></div>
-        <div class="mini"><div class="n">EV + Kelly</div><div class="l">Filtro de estrategia</div></div>
-        <div class="mini"><div class="n">Top Seguros</div><div class="l">Ranking conservador</div></div>
+    <section class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark">FD</div>
+        <div class="brand-copy">
+          <strong>Football Data Desk</strong>
+          <span>Painel executivo para leitura rapida de oportunidades por competicao.</span>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> 03/04/2026 18:11:55</div>
+        <div class="meta-pill"><strong>4</strong> competicoes no radar</div>
+        <div class="meta-pill"><strong>13%</strong> cobertura de odds</div>
       </div>
     </section>
 
-    <section class="controls">
-      <label for="fcomp">Competicao</label>
-      <select id="fcomp">
-        <option value="">Todas</option>
-        <option>Brasileirao</option>
-        <option>La Liga</option>
-        <option>Premier League</option>
-        <option>Copa do Mundo</option>
-      </select>
-      <label for="frisk">Perfil de risco</label>
-      <select id="frisk">
-        <option>Baixo risco</option>
-        <option>Medio risco</option>
-        <option>Alto risco</option>
-        <option>Personalizado</option>
-      </select>
-      <label for="fteam">Time</label>
-      <input id="fteam" type="text" placeholder="Ex: Flamengo" />
-      <label for="foddmin">Odd min</label>
-      <input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" />
-      <label for="foddmax">Odd max</label>
-      <input id="foddmax" type="number" step="0.01" min="1.01" placeholder="2.20" />
-      <label for="fprobmin">Prob min</label>
-      <input id="fprobmin" type="number" step="0.01" min="0" max="1" placeholder="0.55" />
-      <label for="fevmin">EV min</label>
-      <input id="fevmin" type="number" step="0.005" min="0" max="1" placeholder="0.02" />
-      <label for="fbooks">Casas min</label>
-      <input id="fbooks" type="number" step="1" min="0" placeholder="8" />
-      <button id="applyFilter" class="primary" type="button">Aplicar filtro</button>
-      <button id="clearFilter" type="button">Limpar</button>
-      <a href="./atualizar_painel.bat">Atualizar dados (script)</a>
-      <button id="reloadPage" type="button">Recarregar pagina</button>
+    <section class="hero">
+      <div class="hero-grid">
+        <div>
+          <div class="hero-tag">Painel analitico sem API</div>
+          <h1>Mercados mais claros para decidir melhor</h1>
+          <p>Gerado em 03/04/2026 18:11:55 no horario de Sao Paulo a partir de scraping de paginas publicas do BetExplorer. A nova organizacao prioriza o que costuma responder mais rapido: selecoes conservadoras, entradas com valor e agenda de confrontos.</p>
+        </div>
+        <div class="hero-stack">
+          <div class="hero-note">
+            <span>Leitura sugerida</span>
+            <strong>1. Seguros  2. EV  3. Agenda</strong>
+            <p>Comece pelos blocos de menor risco, use as recomendacoes para comparar valor esperado e finalize a leitura na agenda com todas as odds principais.</p>
+          </div>
+          <div class="hero-note">
+            <span>Cobertura atual</span>
+            <strong>4 competicoes</strong>
+            <p>449 jogos futuros observados, 59 linhas com odds completas, 6 selecoes conservadoras e 691 jogos finalizados para base historica.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="metrics">
+        <div class="metric"><span>Competicoes</span><strong>4</strong><p>Torneios monitorados no painel.</p><div class="metric-track"><i style="width:100%"></i></div></div>
+        <div class="metric"><span>Jogos futuros</span><strong>449</strong><p>Partidas disponiveis para leitura.</p><div class="metric-track"><i style="width:100%"></i></div></div>
+        <div class="metric"><span>Odds completas</span><strong>59</strong><p>13% dos jogos futuros com linha principal completa.</p><div class="metric-track"><i style="width:13%"></i></div></div>
+        <div class="metric"><span>Top seguros</span><strong>6</strong><p>10% das linhas com odds entram no filtro conservador.</p><div class="metric-track"><i style="width:10%"></i></div></div>
+        <div class="metric"><span>Entradas EV</span><strong>59</strong><p>100% das linhas com odds geram sugestao de stake.</p><div class="metric-track"><i style="width:100%"></i></div></div>
+      </div>
+
+      <div class="quick-nav"><a href="#comp-brasileirao" class="jump-link">Brasileirao<span>0 seguros</span></a><a href="#comp-la-liga" class="jump-link">La Liga<span>3 seguros</span></a><a href="#comp-premier-league" class="jump-link">Premier League<span>3 seguros</span></a><a href="#comp-copa-do-mundo" class="jump-link">Copa do Mundo<span>0 seguros</span></a></div>
     </section>
-    <div class="legend">
-      <span class="pill">Verde = baixo risco</span>
-      <span class="pill">Amarelo = medio risco</span>
-      <span class="pill">Vermelho = alto risco</span>
-      <span class="pill">Cinza = fora dos criterios</span>
+
+    <div class="dashboard-shell">
+      <aside class="side-rail">
+        <section class="rail-card">
+          <div class="eyebrow">Radar lateral</div>
+          <h3>Navegacao rapida</h3>
+          <p>Use esta lateral para saltar entre competicoes e acompanhar a cobertura de odds sem perder o contexto.</p>
+          <div class="rail-list"><a href="#comp-brasileirao" class="rail-link"><div class="rail-link-head"><strong>Brasileirao</strong><span>290 jogos</span></div><div class="rail-link-meta"><span>0 seguros</span><span>20 odds</span></div><div class="rail-track"><i style="width:7%"></i></div></a><a href="#comp-la-liga" class="rail-link"><div class="rail-link-head"><strong>La Liga</strong><span>89 jogos</span></div><div class="rail-link-meta"><span>3 seguros</span><span>19 odds</span></div><div class="rail-track"><i style="width:21%"></i></div></a><a href="#comp-premier-league" class="rail-link"><div class="rail-link-head"><strong>Premier League</strong><span>70 jogos</span></div><div class="rail-link-meta"><span>3 seguros</span><span>20 odds</span></div><div class="rail-track"><i style="width:29%"></i></div></a><a href="#comp-copa-do-mundo" class="rail-link"><div class="rail-link-head"><strong>Copa do Mundo</strong><span>0 jogos</span></div><div class="rail-link-meta"><span>0 seguros</span><span>0 odds</span></div><div class="rail-track"><i style="width:0%"></i></div></a></div>
+        </section>
+        <section class="rail-card spark-card">
+          <div class="eyebrow">Leitura expressa</div>
+          <div class="spark-head"><strong>Cobertura de mercado</strong><span>13%</span></div>
+          <div class="sparkline" aria-hidden="true">
+            <svg viewBox="0 0 160 70" preserveAspectRatio="none">
+              <path d="M0 70 L0 50 L32 48 L64 44 L96 40 L128 28 L160 20 L160 70 Z"></path>
+              <polyline points="0,50 32,48 64,44 96,40 128,28 160,20"></polyline>
+            </svg>
+          </div>
+          <div class="spark-head"><strong>Filtro conservador</strong><span>10%</span></div>
+          <div class="sparkline" aria-hidden="true">
+            <svg viewBox="0 0 160 70" preserveAspectRatio="none">
+              <path d="M0 70 L0 58 L32 54 L64 48 L96 46 L128 42 L160 36 L160 70 Z"></path>
+              <polyline points="0,58 32,54 64,48 96,46 128,42 160,36"></polyline>
+            </svg>
+          </div>
+          <div class="spark-head"><strong>Entradas com EV</strong><span>100%</span></div>
+          <div class="sparkline" aria-hidden="true">
+            <svg viewBox="0 0 160 70" preserveAspectRatio="none">
+              <path d="M0 70 L0 56 L32 46 L64 40 L96 30 L128 18 L160 10 L160 70 Z"></path>
+              <polyline points="0,56 32,46 64,40 96,30 128,18 160,10"></polyline>
+            </svg>
+          </div>
+        </section>
+      </aside>
+
+      <main class="dashboard-main">
+        <section class="controls card">
+          <div class="controls-head">
+            <div>
+              <div class="eyebrow">Filtros inteligentes</div>
+              <h2>Refine o painel sem perder contexto</h2>
+              <p class="copy">Os filtros abaixo ajudam a reduzir ruido. O preset de risco preenche uma faixa inicial, mas voce pode personalizar os campos para buscar um perfil mais agressivo ou mais conservador.</p>
+            </div>
+            <div id="resultsSummary" class="summary-box">Mostrando todas as competicoes e tabelas disponiveis.</div>
+          </div>
+
+          <div class="filters">
+            <div class="field"><label for="fcomp">Competicao</label><select id="fcomp"><option value="">Todas</option><option>Brasileirao</option><option>La Liga</option><option>Premier League</option><option>Copa do Mundo</option></select><div class="hint">Filtra o painel para um campeonato especifico.</div></div>
+            <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para odd, probabilidade, EV e casas.</div></div>
+            <div class="field"><label for="fteam">Time</label><input id="fteam" type="text" placeholder="Ex: Flamengo" /><div class="hint">Busca o nome do time em qualquer tabela visivel.</div></div>
+            <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers.</div></div>
+            <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd.</div></div>
+            <div class="field"><label for="foddmax">Odd maxima</label><input id="foddmax" type="number" step="0.01" min="1.01" placeholder="2.20" /><div class="hint">Limita selecoes acima de uma odd alvo.</div></div>
+            <div class="field"><label for="fprobmin">Probabilidade minima</label><input id="fprobmin" type="number" step="0.01" min="0" max="1" placeholder="0.55" /><div class="hint">Usada apenas nas tabelas com leitura do modelo.</div></div>
+            <div class="field"><label for="fevmin">EV minimo</label><input id="fevmin" type="number" step="0.005" min="0" max="1" placeholder="0.02" /><div class="hint">Mostra entradas com vantagem esperada minima.</div></div>
+          </div>
+
+          <div class="actions">
+            <button id="applyFilter" class="btn primary" type="button">Aplicar filtro</button>
+            <button id="clearFilter" class="btn secondary" type="button">Limpar filtros</button>
+            <a href="./atualizar_painel.bat" class="btn-link">Atualizar dados</a>
+            <button id="reloadPage" class="btn secondary" type="button">Recarregar pagina</button>
+          </div>
+        </section>
+
+        <div class="legend">
+          <span class="pill" style="color:#15803d;">Baixo risco</span>
+          <span class="pill" style="color:#b45309;">Medio risco</span>
+          <span class="pill" style="color:#be123c;">Alto risco</span>
+          <span class="pill" style="color:#64748b;">Fora dos criterios</span>
+        </div>
+
+        
+<section class="card competition-card" id="comp-brasileirao" data-comp="Brasileirao">
+  <div class="card-head">
+    <div class="title-block">
+      <div class="eyebrow">Competicao monitorada</div>
+      <div class="title-row">
+        <h2>Brasileirao</h2>
+        <div class="badge">Leitura organizada por seguranca, valor e agenda</div>
+      </div>
     </div>
-
-    
-<section class="card" data-comp="Brasileirao">
-  <div class="card-head">
-    <h2>Brasileirao</h2>
-    <div class="badge">Finalizados 77 • Futuros 300 • Odds 20</div>
+    <div class="stats-rail">
+      <div class="stat-chip"><span>Finalizados</span><strong>87</strong></div>
+      <div class="stat-chip"><span>Futuros</span><strong>290</strong></div>
+      <div class="stat-chip"><span>Com odds</span><strong>20</strong></div>
+      <div class="stat-chip"><span>Top seguros</span><strong>0</strong></div>
+    </div>
   </div>
 
-  <h3>Jogos Mais Seguros (filtro conservador)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
-      <tbody><tr data-odd="1.88" data-prob="0.8124" data-ev="0.5274" data-books="18"><td>02.04. 21:30</td><td>Bragantino x Flamengo RJ</td><td>Vitoria Flamengo RJ</td><td>1.88</td><td>81.2%</td><td>52.74%</td><td>18</td><td>R$ 149.82</td></tr><tr data-odd="2.12" data-prob="0.5931" data-ev="0.2574" data-books="19"><td>04.04. 18:30</td><td>Sao Paulo x Cruzeiro</td><td>Vitoria Sao Paulo</td><td>2.12</td><td>59.3%</td><td>25.74%</td><td>19</td><td>R$ 57.45</td></tr></tbody>
-    </table>
+  <div class="panel panel-safe">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3l7 3v5c0 4.5-2.9 8.7-7 10-4.1-1.3-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path d="M9 12.2l2 2 4-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 1</div>
+        <h3>Jogos mais seguros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
+        <tbody><tr><td colspan="8">Nenhum jogo passou no filtro conservador.</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Melhores Entradas (EV/Kelly, banca R$1000)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
-      <tbody><tr data-odd="3.36" data-prob="0.3332" data-ev="0.1195" data-books="19"><td>01.04. 19:30</td><td>Botafogo RJ x Mirassol</td><td>Vitoria Mirassol</td><td>3.36</td><td>33.3%</td><td>11.95%</td><td>R$ 12.65</td></tr><tr data-odd="3.54" data-prob="0.5265" data-ev="0.8640" data-books="19"><td>01.04. 19:30</td><td>Internacional x Sao Paulo</td><td>Vitoria Sao Paulo</td><td>3.54</td><td>52.7%</td><td>86.40%</td><td>R$ 85.04</td></tr><tr data-odd="4.26" data-prob="0.5849" data-ev="1.4919" data-books="19"><td>01.04. 20:00</td><td>Bahia x Athletico-PR</td><td>Vitoria Athletico-PR</td><td>4.26</td><td>58.5%</td><td>149.19%</td><td>R$ 114.41</td></tr><tr data-odd="6.00" data-prob="0.6650" data-ev="2.9902" data-books="19"><td>01.04. 20:00</td><td>Cruzeiro x Vitoria</td><td>Vitoria Vitoria</td><td>6.00</td><td>66.5%</td><td>299.02%</td><td>R$ 149.51</td></tr><tr data-odd="2.84" data-prob="0.7719" data-ev="1.1923" data-books="19"><td>01.04. 20:30</td><td>Coritiba x Vasco</td><td>Vitoria Vasco</td><td>2.84</td><td>77.2%</td><td>119.23%</td><td>R$ 162.00</td></tr><tr data-odd="4.32" data-prob="0.2857" data-ev="0.2342" data-books="19"><td>01.04. 21:30</td><td>Fluminense x Corinthians</td><td>Vitoria Corinthians</td><td>4.32</td><td>28.6%</td><td>23.42%</td><td>R$ 17.64</td></tr><tr data-odd="2.81" data-prob="0.6731" data-ev="0.8913" data-books="18"><td>02.04. 19:00</td><td>Chapecoense-SC x Atletico-MG</td><td>Vitoria Chapecoense-SC</td><td>2.81</td><td>67.3%</td><td>89.13%</td><td>R$ 123.11</td></tr><tr data-odd="6.08" data-prob="0.4180" data-ev="1.5417" data-books="19"><td>02.04. 19:00</td><td>Santos x Remo</td><td>Vitoria Remo</td><td>6.08</td><td>41.8%</td><td>154.17%</td><td>R$ 75.87</td></tr><tr data-odd="1.88" data-prob="0.8124" data-ev="0.5274" data-books="18"><td>02.04. 21:30</td><td>Bragantino x Flamengo RJ</td><td>Vitoria Flamengo RJ</td><td>1.88</td><td>81.2%</td><td>52.74%</td><td>R$ 149.82</td></tr><tr data-odd="6.11" data-prob="0.1610" data-ev="-0.0160" data-books="18"><td>02.04. 21:30</td><td>Palmeiras x Gremio</td><td>Vitoria Gremio</td><td>6.11</td><td>16.1%</td><td>-1.60%</td><td>R$ 0.00</td></tr><tr data-odd="2.12" data-prob="0.5931" data-ev="0.2574" data-books="19"><td>04.04. 18:30</td><td>Sao Paulo x Cruzeiro</td><td>Vitoria Sao Paulo</td><td>2.12</td><td>59.3%</td><td>25.74%</td><td>R$ 57.45</td></tr><tr data-odd="2.33" data-prob="0.7647" data-ev="0.7818" data-books="19"><td>04.04. 20:30</td><td>Coritiba x Fluminense</td><td>Vitoria Fluminense</td><td>2.33</td><td>76.5%</td><td>78.18%</td><td>R$ 146.96</td></tr><tr data-odd="3.24" data-prob="0.6563" data-ev="1.1263" data-books="19"><td>04.04. 21:00</td><td>Vasco x Botafogo RJ</td><td>Vitoria Botafogo RJ</td><td>3.24</td><td>65.6%</td><td>112.63%</td><td>R$ 125.70</td></tr><tr data-odd="2.98" data-prob="0.4468" data-ev="0.3313" data-books="19"><td>05.04. 16:00</td><td>Chapecoense-SC x Vitoria</td><td>Vitoria Vitoria</td><td>2.98</td><td>44.7%</td><td>33.13%</td><td>R$ 41.83</td></tr><tr data-odd="4.20" data-prob="0.6011" data-ev="1.5245" data-books="19"><td>05.04. 17:30</td><td>Atletico-MG x Athletico-PR</td><td>Vitoria Athletico-PR</td><td>4.20</td><td>60.1%</td><td>152.45%</td><td>R$ 119.10</td></tr><tr data-odd="8.67" data-prob="0.2821" data-ev="1.4455" data-books="19"><td>05.04. 17:30</td><td>Flamengo RJ x Santos</td><td>Vitoria Santos</td><td>8.67</td><td>28.2%</td><td>144.55%</td><td>R$ 47.11</td></tr><tr data-odd="2.33" data-prob="0.7006" data-ev="0.6325" data-books="19"><td>05.04. 19:30</td><td>Bahia x Palmeiras</td><td>Vitoria Palmeiras</td><td>2.33</td><td>70.1%</td><td>63.25%</td><td>R$ 118.89</td></tr><tr data-odd="3.33" data-prob="0.3980" data-ev="0.3253" data-books="19"><td>05.04. 19:30</td><td>Corinthians x Internacional</td><td>Empate</td><td>3.33</td><td>39.8%</td><td>32.53%</td><td>R$ 34.91</td></tr><tr data-odd="3.28" data-prob="0.3083" data-ev="0.0113" data-books="19"><td>05.04. 20:00</td><td>Mirassol x Bragantino</td><td>Empate</td><td>3.28</td><td>30.8%</td><td>1.13%</td><td>R$ 1.24</td></tr><tr data-odd="6.77" data-prob="0.1892" data-ev="0.2812" data-books="19"><td>05.04. 20:30</td><td>Gremio x Remo</td><td>Vitoria Remo</td><td>6.77</td><td>18.9%</td><td>28.12%</td><td>R$ 12.18</td></tr></tbody>
-    </table>
+  <div class="panel panel-value">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 17l5-5 4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M15 7h5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 2</div>
+        <h3>Melhores entradas</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
+        <tbody><tr data-odd="2.20" data-prob="0.4851" data-ev="0.0671" data-books="20"><td>Amanhã 23:30</td><td>Sao Paulo x Cruzeiro</td><td>Vitoria Sao Paulo</td><td>2.20</td><td>48.5%</td><td>6.71%</td><td>R$ 13.99</td></tr><tr data-odd="2.32" data-prob="0.7411" data-ev="0.7194" data-books="20"><td>04.04. 20:30</td><td>Coritiba x Fluminense</td><td>Vitoria Fluminense</td><td>2.32</td><td>74.1%</td><td>71.94%</td><td>R$ 136.25</td></tr><tr data-odd="3.60" data-prob="0.5755" data-ev="1.0719" data-books="20"><td>04.04. 21:00</td><td>Vasco x Botafogo RJ</td><td>Vitoria Botafogo RJ</td><td>3.60</td><td>57.6%</td><td>107.19%</td><td>R$ 103.07</td></tr><tr data-odd="3.21" data-prob="0.3970" data-ev="0.2745" data-books="20"><td>05.04. 16:00</td><td>Chapecoense-SC x Vitoria</td><td>Empate</td><td>3.21</td><td>39.7%</td><td>27.45%</td><td>R$ 31.06</td></tr><tr data-odd="4.31" data-prob="0.4193" data-ev="0.8072" data-books="19"><td>05.04. 17:30</td><td>Atletico-MG x Athletico-PR</td><td>Vitoria Athletico-PR</td><td>4.31</td><td>41.9%</td><td>80.72%</td><td>R$ 60.97</td></tr><tr data-odd="9.24" data-prob="0.4713" data-ev="3.3552" data-books="19"><td>05.04. 17:30</td><td>Flamengo RJ x Santos</td><td>Vitoria Santos</td><td>9.24</td><td>47.1%</td><td>335.52%</td><td>R$ 101.79</td></tr><tr data-odd="2.63" data-prob="0.6475" data-ev="0.7030" data-books="19"><td>05.04. 19:30</td><td>Bahia x Palmeiras</td><td>Vitoria Palmeiras</td><td>2.63</td><td>64.8%</td><td>70.30%</td><td>R$ 107.83</td></tr><tr data-odd="3.75" data-prob="0.3887" data-ev="0.4577" data-books="19"><td>05.04. 19:30</td><td>Corinthians x Internacional</td><td>Vitoria Internacional</td><td>3.75</td><td>38.9%</td><td>45.77%</td><td>R$ 41.61</td></tr><tr data-odd="3.26" data-prob="0.3346" data-ev="0.0910" data-books="19"><td>05.04. 20:00</td><td>Mirassol x Bragantino</td><td>Empate</td><td>3.26</td><td>33.5%</td><td>9.10%</td><td>R$ 10.06</td></tr><tr data-odd="6.37" data-prob="0.1583" data-ev="0.0084" data-books="19"><td>05.04. 20:30</td><td>Gremio x Remo</td><td>Vitoria Remo</td><td>6.37</td><td>15.8%</td><td>0.84%</td><td>R$ 0.39</td></tr><tr data-odd="2.49" data-prob="0.7108" data-ev="0.7699" data-books="6"><td>11.04. 16:30</td><td>Remo x Vasco</td><td>Vitoria Vasco</td><td>2.49</td><td>71.1%</td><td>76.99%</td><td>R$ 129.18</td></tr><tr data-odd="2.66" data-prob="0.8237" data-ev="1.1910" data-books="6"><td>11.04. 16:30</td><td>Vitoria x Sao Paulo</td><td>Vitoria Sao Paulo</td><td>2.66</td><td>82.4%</td><td>119.10%</td><td>R$ 179.37</td></tr><tr data-odd="2.42" data-prob="0.7484" data-ev="0.8112" data-books="7"><td>11.04. 18:30</td><td>Fluminense x Flamengo RJ</td><td>Vitoria Flamengo RJ</td><td>2.42</td><td>74.8%</td><td>81.12%</td><td>R$ 142.82</td></tr><tr data-odd="2.89" data-prob="0.7491" data-ev="1.1650" data-books="6"><td>11.04. 18:30</td><td>Mirassol x Bahia</td><td>Vitoria Bahia</td><td>2.89</td><td>74.9%</td><td>116.50%</td><td>R$ 154.10</td></tr><tr data-odd="3.36" data-prob="0.5597" data-ev="0.8805" data-books="6"><td>11.04. 20:00</td><td>Santos x Atletico-MG</td><td>Vitoria Atletico-MG</td><td>3.36</td><td>56.0%</td><td>88.05%</td><td>R$ 93.28</td></tr><tr data-odd="3.31" data-prob="0.3866" data-ev="0.2798" data-books="7"><td>11.04. 20:30</td><td>Internacional x Gremio</td><td>Empate</td><td>3.31</td><td>38.7%</td><td>27.98%</td><td>R$ 30.28</td></tr><tr data-odd="1.56" data-prob="0.7840" data-ev="0.2231" data-books="6"><td>12.04. 11:00</td><td>Athletico-PR x Chapecoense-SC</td><td>Vitoria Athletico-PR</td><td>1.56</td><td>78.4%</td><td>22.31%</td><td>R$ 99.58</td></tr><tr data-odd="4.49" data-prob="0.8268" data-ev="2.7125" data-books="6"><td>12.04. 16:00</td><td>Botafogo RJ x Coritiba</td><td>Vitoria Coritiba</td><td>4.49</td><td>82.7%</td><td>271.25%</td><td>R$ 194.31</td></tr><tr data-odd="2.48" data-prob="0.6590" data-ev="0.6344" data-books="6"><td>12.04. 18:30</td><td>Corinthians x Palmeiras</td><td>Vitoria Palmeiras</td><td>2.48</td><td>65.9%</td><td>63.44%</td><td>R$ 107.17</td></tr><tr data-odd="4.94" data-prob="0.4043" data-ev="0.9971" data-books="6"><td>12.04. 18:30</td><td>Cruzeiro x Bragantino</td><td>Vitoria Bragantino</td><td>4.94</td><td>40.4%</td><td>99.71%</td><td>R$ 63.27</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Agenda de Jogos Futuros (top 40)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
-      <tbody><tr data-odd-home="2.14" data-odd-draw="3.37" data-odd-away="3.36"><td>01.04. 19:30</td><td>Botafogo RJ</td><td>Mirassol</td><td>2.14</td><td>3.37</td><td>3.36</td><td>19.0</td></tr><tr data-odd-home="2.24" data-odd-draw="3.00" data-odd-away="3.54"><td>01.04. 19:30</td><td>Internacional</td><td>Sao Paulo</td><td>2.24</td><td>3.00</td><td>3.54</td><td>19.0</td></tr><tr data-odd-home="1.82" data-odd-draw="3.58" data-odd-away="4.26"><td>01.04. 20:00</td><td>Bahia</td><td>Athletico-PR</td><td>1.82</td><td>3.58</td><td>4.26</td><td>19.0</td></tr><tr data-odd-home="1.58" data-odd-draw="3.80" data-odd-away="6.00"><td>01.04. 20:00</td><td>Cruzeiro</td><td>Vitoria</td><td>1.58</td><td>3.80</td><td>6.00</td><td>19.0</td></tr><tr data-odd-home="2.56" data-odd-draw="3.13" data-odd-away="2.84"><td>01.04. 20:30</td><td>Coritiba</td><td>Vasco</td><td>2.56</td><td>3.13</td><td>2.84</td><td>19.0</td></tr><tr data-odd-home="1.89" data-odd-draw="3.29" data-odd-away="4.32"><td>01.04. 21:30</td><td>Fluminense</td><td>Corinthians</td><td>1.89</td><td>3.29</td><td>4.32</td><td>19.0</td></tr><tr data-odd-home="2.81" data-odd-draw="3.31" data-odd-away="2.44"><td>02.04. 19:00</td><td>Chapecoense-SC</td><td>Atletico-MG</td><td>2.81</td><td>3.31</td><td>2.44</td><td>18.0</td></tr><tr data-odd-home="1.51" data-odd-draw="4.13" data-odd-away="6.08"><td>02.04. 19:00</td><td>Santos</td><td>Remo</td><td>1.51</td><td>4.13</td><td>6.08</td><td>19.0</td></tr><tr data-odd-home="4.23" data-odd-draw="3.35" data-odd-away="1.88"><td>02.04. 21:30</td><td>Bragantino</td><td>Flamengo RJ</td><td>4.23</td><td>3.35</td><td>1.88</td><td>18.0</td></tr><tr data-odd-home="1.52" data-odd-draw="4.05" data-odd-away="6.11"><td>02.04. 21:30</td><td>Palmeiras</td><td>Gremio</td><td>1.52</td><td>4.05</td><td>6.11</td><td>18.0</td></tr><tr data-odd-home="2.12" data-odd-draw="3.20" data-odd-away="3.54"><td>04.04. 18:30</td><td>Sao Paulo</td><td>Cruzeiro</td><td>2.12</td><td>3.20</td><td>3.54</td><td>19.0</td></tr><tr data-odd-home="3.23" data-odd-draw="3.04" data-odd-away="2.33"><td>04.04. 20:30</td><td>Coritiba</td><td>Fluminense</td><td>3.23</td><td>3.04</td><td>2.33</td><td>19.0</td></tr><tr data-odd-home="2.20" data-odd-draw="3.29" data-odd-away="3.24"><td>04.04. 21:00</td><td>Vasco</td><td>Botafogo RJ</td><td>2.20</td><td>3.29</td><td>3.24</td><td>19.0</td></tr><tr data-odd-home="2.39" data-odd-draw="3.19" data-odd-away="2.98"><td>05.04. 16:00</td><td>Chapecoense-SC</td><td>Vitoria</td><td>2.39</td><td>3.19</td><td>2.98</td><td>19.0</td></tr><tr data-odd-home="1.87" data-odd-draw="3.38" data-odd-away="4.20"><td>05.04. 17:30</td><td>Atletico-MG</td><td>Athletico-PR</td><td>1.87</td><td>3.38</td><td>4.20</td><td>19.0</td></tr><tr data-odd-home="1.35" data-odd-draw="4.67" data-odd-away="8.67"><td>05.04. 17:30</td><td>Flamengo RJ</td><td>Santos</td><td>1.35</td><td>4.67</td><td>8.67</td><td>19.0</td></tr><tr data-odd-home="2.97" data-odd-draw="3.31" data-odd-away="2.33"><td>05.04. 19:30</td><td>Bahia</td><td>Palmeiras</td><td>2.97</td><td>3.31</td><td>2.33</td><td>19.0</td></tr><tr data-odd-home="2.00" data-odd-draw="3.33" data-odd-away="3.75"><td>05.04. 19:30</td><td>Corinthians</td><td>Internacional</td><td>2.00</td><td>3.33</td><td>3.75</td><td>19.0</td></tr><tr data-odd-home="2.01" data-odd-draw="3.28" data-odd-away="3.78"><td>05.04. 20:00</td><td>Mirassol</td><td>Bragantino</td><td>2.01</td><td>3.28</td><td>3.78</td><td>19.0</td></tr><tr data-odd-home="1.45" data-odd-draw="4.32" data-odd-away="6.77"><td>05.04. 20:30</td><td>Gremio</td><td>Remo</td><td>1.45</td><td>4.32</td><td>6.77</td><td>19.0</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>11.04. 16:30</td><td>Remo</td><td>Vasco</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>11.04. 16:30</td><td>Vitoria</td><td>Sao Paulo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>11.04. 18:30</td><td>Fluminense</td><td>Flamengo RJ</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>11.04. 18:30</td><td>Mirassol</td><td>Bahia</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>11.04. 20:00</td><td>Santos</td><td>Atletico-MG</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>11.04. 20:30</td><td>Internacional</td><td>Gremio</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>12.04. 11:00</td><td>Athletico-PR</td><td>Chapecoense-SC</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>12.04. 16:00</td><td>Botafogo RJ</td><td>Coritiba</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>12.04. 18:30</td><td>Corinthians</td><td>Palmeiras</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>12.04. 18:30</td><td>Cruzeiro</td><td>Bragantino</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 18:30</td><td>Chapecoense-SC</td><td>Botafogo RJ</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 18:30</td><td>Vasco</td><td>Sao Paulo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 20:00</td><td>Vitoria</td><td>Corinthians</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 20:30</td><td>Cruzeiro</td><td>Gremio</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 11:00</td><td>Internacional</td><td>Mirassol</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 16:00</td><td>Coritiba</td><td>Atletico-MG</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 16:00</td><td>Santos</td><td>Fluminense</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 18:30</td><td>Bragantino</td><td>Remo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 18:30</td><td>Palmeiras</td><td>Athletico-PR</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 19:30</td><td>Flamengo RJ</td><td>Bahia</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr></tbody>
-    </table>
+  <div class="panel panel-agenda">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 3</div>
+        <h3>Agenda de jogos futuros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
+        <tbody><tr data-odd-home="2.20" data-odd-draw="3.16" data-odd-away="3.47"><td>Amanhã 23:30</td><td>Sao Paulo</td><td>Cruzeiro</td><td>2.20</td><td>3.16</td><td>3.47</td><td>20.0</td></tr><tr data-odd-home="3.23" data-odd-draw="3.15" data-odd-away="2.32"><td>04.04. 20:30</td><td>Coritiba</td><td>Fluminense</td><td>3.23</td><td>3.15</td><td>2.32</td><td>20.0</td></tr><tr data-odd-home="2.07" data-odd-draw="3.33" data-odd-away="3.60"><td>04.04. 21:00</td><td>Vasco</td><td>Botafogo RJ</td><td>2.07</td><td>3.33</td><td>3.60</td><td>20.0</td></tr><tr data-odd-home="2.49" data-odd-draw="3.21" data-odd-away="2.89"><td>05.04. 16:00</td><td>Chapecoense-SC</td><td>Vitoria</td><td>2.49</td><td>3.21</td><td>2.89</td><td>20.0</td></tr><tr data-odd-home="1.90" data-odd-draw="3.31" data-odd-away="4.31"><td>05.04. 17:30</td><td>Atletico-MG</td><td>Athletico-PR</td><td>1.90</td><td>3.31</td><td>4.31</td><td>19.0</td></tr><tr data-odd-home="1.35" data-odd-draw="4.68" data-odd-away="9.24"><td>05.04. 17:30</td><td>Flamengo RJ</td><td>Santos</td><td>1.35</td><td>4.68</td><td>9.24</td><td>19.0</td></tr><tr data-odd-home="2.81" data-odd-draw="3.07" data-odd-away="2.63"><td>05.04. 19:30</td><td>Bahia</td><td>Palmeiras</td><td>2.81</td><td>3.07</td><td>2.63</td><td>19.0</td></tr><tr data-odd-home="2.06" data-odd-draw="3.24" data-odd-away="3.75"><td>05.04. 19:30</td><td>Corinthians</td><td>Internacional</td><td>2.06</td><td>3.24</td><td>3.75</td><td>19.0</td></tr><tr data-odd-home="2.19" data-odd-draw="3.26" data-odd-away="3.36"><td>05.04. 20:00</td><td>Mirassol</td><td>Bragantino</td><td>2.19</td><td>3.26</td><td>3.36</td><td>19.0</td></tr><tr data-odd-home="1.50" data-odd-draw="4.17" data-odd-away="6.37"><td>05.04. 20:30</td><td>Gremio</td><td>Remo</td><td>1.50</td><td>4.17</td><td>6.37</td><td>19.0</td></tr><tr data-odd-home="2.71" data-odd-draw="3.35" data-odd-away="2.49"><td>11.04. 16:30</td><td>Remo</td><td>Vasco</td><td>2.71</td><td>3.35</td><td>2.49</td><td>6.0</td></tr><tr data-odd-home="2.67" data-odd-draw="3.15" data-odd-away="2.66"><td>11.04. 16:30</td><td>Vitoria</td><td>Sao Paulo</td><td>2.67</td><td>3.15</td><td>2.66</td><td>6.0</td></tr><tr data-odd-home="2.92" data-odd-draw="3.21" data-odd-away="2.42"><td>11.04. 18:30</td><td>Fluminense</td><td>Flamengo RJ</td><td>2.92</td><td>3.21</td><td>2.42</td><td>7.0</td></tr><tr data-odd-home="2.36" data-odd-draw="3.40" data-odd-away="2.89"><td>11.04. 18:30</td><td>Mirassol</td><td>Bahia</td><td>2.36</td><td>3.40</td><td>2.89</td><td>6.0</td></tr><tr data-odd-home="2.15" data-odd-draw="3.28" data-odd-away="3.36"><td>11.04. 20:00</td><td>Santos</td><td>Atletico-MG</td><td>2.15</td><td>3.28</td><td>3.36</td><td>6.0</td></tr><tr data-odd-home="2.11" data-odd-draw="3.31" data-odd-away="3.49"><td>11.04. 20:30</td><td>Internacional</td><td>Gremio</td><td>2.11</td><td>3.31</td><td>3.49</td><td>7.0</td></tr><tr data-odd-home="1.56" data-odd-draw="4.02" data-odd-away="5.79"><td>12.04. 11:00</td><td>Athletico-PR</td><td>Chapecoense-SC</td><td>1.56</td><td>4.02</td><td>5.79</td><td>6.0</td></tr><tr data-odd-home="1.82" data-odd-draw="3.43" data-odd-away="4.49"><td>12.04. 16:00</td><td>Botafogo RJ</td><td>Coritiba</td><td>1.82</td><td>3.43</td><td>4.49</td><td>6.0</td></tr><tr data-odd-home="2.82" data-odd-draw="3.24" data-odd-away="2.48"><td>12.04. 18:30</td><td>Corinthians</td><td>Palmeiras</td><td>2.82</td><td>3.24</td><td>2.48</td><td>6.0</td></tr><tr data-odd-home="1.68" data-odd-draw="3.72" data-odd-away="4.94"><td>12.04. 18:30</td><td>Cruzeiro</td><td>Bragantino</td><td>1.68</td><td>3.72</td><td>4.94</td><td>6.0</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 18:30</td><td>Chapecoense-SC</td><td>Botafogo RJ</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 18:30</td><td>Vasco</td><td>Sao Paulo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 20:00</td><td>Vitoria</td><td>Corinthians</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>18.04. 20:30</td><td>Cruzeiro</td><td>Gremio</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 11:00</td><td>Internacional</td><td>Mirassol</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 16:00</td><td>Coritiba</td><td>Atletico-MG</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 16:00</td><td>Santos</td><td>Fluminense</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 18:30</td><td>Bragantino</td><td>Remo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 18:30</td><td>Palmeiras</td><td>Athletico-PR</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>19.04. 19:30</td><td>Flamengo RJ</td><td>Bahia</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 18:30</td><td>Bahia</td><td>Santos</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 18:30</td><td>Botafogo RJ</td><td>Internacional</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 18:30</td><td>Remo</td><td>Cruzeiro</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 21:00</td><td>Sao Paulo</td><td>Mirassol</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 16:00</td><td>Corinthians</td><td>Vasco</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 16:00</td><td>Gremio</td><td>Coritiba</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 18:30</td><td>Athletico-PR</td><td>Vitoria</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 18:30</td><td>Bragantino</td><td>Palmeiras</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 20:30</td><td>Atletico-MG</td><td>Flamengo RJ</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 20:30</td><td>Fluminense</td><td>Chapecoense-SC</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr></tbody>
+      </table>
+    </div>
   </div>
+
+  <p class="empty-state" hidden>Nenhuma linha desta competicao atende aos filtros atuais.</p>
 </section>
 
-<section class="card" data-comp="La Liga">
+<section class="card competition-card" id="comp-la-liga" data-comp="La Liga">
   <div class="card-head">
-    <h2>La Liga</h2>
-    <div class="badge">Finalizados 290 • Futuros 90 • Odds 20</div>
+    <div class="title-block">
+      <div class="eyebrow">Competicao monitorada</div>
+      <div class="title-row">
+        <h2>La Liga</h2>
+        <div class="badge">Leitura organizada por seguranca, valor e agenda</div>
+      </div>
+    </div>
+    <div class="stats-rail">
+      <div class="stat-chip"><span>Finalizados</span><strong>291</strong></div>
+      <div class="stat-chip"><span>Futuros</span><strong>89</strong></div>
+      <div class="stat-chip"><span>Com odds</span><strong>19</strong></div>
+      <div class="stat-chip"><span>Top seguros</span><strong>3</strong></div>
+    </div>
   </div>
 
-  <h3>Jogos Mais Seguros (filtro conservador)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
-      <tbody><tr data-odd="1.60" data-prob="0.8328" data-ev="0.3325" data-books="19"><td>04.04. 11:15</td><td>Mallorca x Real Madrid</td><td>Vitoria Real Madrid</td><td>1.60</td><td>83.3%</td><td>33.25%</td><td>19</td><td>R$ 138.54</td></tr><tr data-odd="2.16" data-prob="0.7012" data-ev="0.5145" data-books="19"><td>04.04. 16:00</td><td>Atl. Madrid x Barcelona</td><td>Vitoria Barcelona</td><td>2.16</td><td>70.1%</td><td>51.45%</td><td>19</td><td>R$ 110.89</td></tr></tbody>
-    </table>
+  <div class="panel panel-safe">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3l7 3v5c0 4.5-2.9 8.7-7 10-4.1-1.3-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path d="M9 12.2l2 2 4-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 1</div>
+        <h3>Jogos mais seguros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
+        <tbody><tr data-odd="1.55" data-prob="0.8336" data-ev="0.2921" data-books="20"><td>Amanhã 16:15</td><td>Mallorca x Real Madrid</td><td>Vitoria Real Madrid</td><td>1.55</td><td>83.4%</td><td>29.21%</td><td>20</td><td>R$ 132.77</td></tr><tr data-odd="2.15" data-prob="0.7022" data-ev="0.5098" data-books="20"><td>Amanhã 21:00</td><td>Atl. Madrid x Barcelona</td><td>Vitoria Barcelona</td><td>2.15</td><td>70.2%</td><td>50.98%</td><td>20</td><td>R$ 110.83</td></tr><tr data-odd="2.14" data-prob="0.6567" data-ev="0.4054" data-books="8"><td>11.04. 16:00</td><td>Sevilla x Atl. Madrid</td><td>Vitoria Atl. Madrid</td><td>2.14</td><td>65.7%</td><td>40.54%</td><td>8</td><td>R$ 88.89</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Melhores Entradas (EV/Kelly, banca R$1000)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
-      <tbody><tr data-odd="4.73" data-prob="0.5219" data-ev="1.4686" data-books="19"><td>03.04. 16:00</td><td>Rayo Vallecano x Elche</td><td>Vitoria Elche</td><td>4.73</td><td>52.2%</td><td>146.86%</td><td>R$ 98.43</td></tr><tr data-odd="5.11" data-prob="0.2991" data-ev="0.5284" data-books="19"><td>04.04. 09:00</td><td>Real Sociedad x Levante</td><td>Vitoria Levante</td><td>5.11</td><td>29.9%</td><td>52.84%</td><td>R$ 32.14</td></tr><tr data-odd="1.60" data-prob="0.8328" data-ev="0.3325" data-books="19"><td>04.04. 11:15</td><td>Mallorca x Real Madrid</td><td>Vitoria Real Madrid</td><td>1.60</td><td>83.3%</td><td>33.25%</td><td>R$ 138.54</td></tr><tr data-odd="4.13" data-prob="0.3713" data-ev="0.5336" data-books="19"><td>04.04. 13:30</td><td>Betis x Espanyol</td><td>Vitoria Espanyol</td><td>4.13</td><td>37.1%</td><td>53.36%</td><td>R$ 42.62</td></tr><tr data-odd="2.16" data-prob="0.7012" data-ev="0.5145" data-books="19"><td>04.04. 16:00</td><td>Atl. Madrid x Barcelona</td><td>Vitoria Barcelona</td><td>2.16</td><td>70.1%</td><td>51.45%</td><td>R$ 110.89</td></tr><tr data-odd="2.65" data-prob="0.4700" data-ev="0.2454" data-books="19"><td>05.04. 09:00</td><td>Getafe x Ath Bilbao</td><td>Vitoria Ath Bilbao</td><td>2.65</td><td>47.0%</td><td>24.54%</td><td>R$ 37.18</td></tr><tr data-odd="3.10" data-prob="0.5618" data-ev="0.7415" data-books="19"><td>05.04. 11:15</td><td>Valencia x Celta Vigo</td><td>Vitoria Celta Vigo</td><td>3.10</td><td>56.2%</td><td>74.15%</td><td>R$ 88.27</td></tr><tr data-odd="2.59" data-prob="0.8353" data-ev="1.1634" data-books="19"><td>05.04. 13:30</td><td>Oviedo x Sevilla</td><td>Vitoria Sevilla</td><td>2.59</td><td>83.5%</td><td>116.34%</td><td>R$ 182.93</td></tr><tr data-odd="3.15" data-prob="0.3327" data-ev="0.0481" data-books="19"><td>05.04. 16:00</td><td>Alaves x Osasuna</td><td>Empate</td><td>3.15</td><td>33.3%</td><td>4.81%</td><td>R$ 5.60</td></tr><tr data-odd="2.28" data-prob="0.6817" data-ev="0.5543" data-books="9"><td>06.04. 16:00</td><td>Girona x Villarreal</td><td>Vitoria Villarreal</td><td>2.28</td><td>68.2%</td><td>55.43%</td><td>R$ 108.26</td></tr><tr data-odd="10.83" data-prob="0.1343" data-ev="0.4548" data-books="6"><td>10.04. 16:00</td><td>Real Madrid x Girona</td><td>Vitoria Girona</td><td>10.83</td><td>13.4%</td><td>45.48%</td><td>R$ 11.57</td></tr><tr data-odd="4.63" data-prob="0.3300" data-ev="0.5280" data-books="6"><td>11.04. 09:00</td><td>Real Sociedad x Alaves</td><td>Vitoria Alaves</td><td>4.63</td><td>33.0%</td><td>52.80%</td><td>R$ 36.36</td></tr><tr data-odd="2.94" data-prob="0.5011" data-ev="0.4731" data-books="6"><td>11.04. 11:15</td><td>Elche x Valencia</td><td>Vitoria Valencia</td><td>2.94</td><td>50.1%</td><td>47.31%</td><td>R$ 60.97</td></tr><tr data-odd="11.53" data-prob="0.2187" data-ev="1.5219" data-books="6"><td>11.04. 13:30</td><td>Barcelona x Espanyol</td><td>Vitoria Espanyol</td><td>11.53</td><td>21.9%</td><td>152.19%</td><td>R$ 36.13</td></tr><tr data-odd="2.08" data-prob="0.6556" data-ev="0.3637" data-books="6"><td>11.04. 16:00</td><td>Sevilla x Atl. Madrid</td><td>Vitoria Atl. Madrid</td><td>2.08</td><td>65.6%</td><td>36.37%</td><td>R$ 84.18</td></tr><tr data-odd="2.89" data-prob="0.3809" data-ev="0.1007" data-books="6"><td>12.04. 09:00</td><td>Osasuna x Betis</td><td>Vitoria Betis</td><td>2.89</td><td>38.1%</td><td>10.07%</td><td>R$ 13.32</td></tr><tr data-odd="2.71" data-prob="0.5159" data-ev="0.3980" data-books="6"><td>12.04. 11:15</td><td>Mallorca x Rayo Vallecano</td><td>Vitoria Rayo Vallecano</td><td>2.71</td><td>51.6%</td><td>39.80%</td><td>R$ 58.18</td></tr><tr data-odd="4.89" data-prob="0.2966" data-ev="0.4503" data-books="5"><td>12.04. 13:30</td><td>Celta Vigo x Oviedo</td><td>Vitoria Oviedo</td><td>4.89</td><td>29.7%</td><td>45.03%</td><td>R$ 28.94</td></tr><tr data-odd="2.85" data-prob="0.7062" data-ev="1.0127" data-books="6"><td>12.04. 16:00</td><td>Ath Bilbao x Villarreal</td><td>Vitoria Villarreal</td><td>2.85</td><td>70.6%</td><td>101.27%</td><td>R$ 136.85</td></tr><tr data-odd="2.84" data-prob="0.5093" data-ev="0.4465" data-books="6"><td>13.04. 16:00</td><td>Levante x Getafe</td><td>Vitoria Getafe</td><td>2.84</td><td>50.9%</td><td>44.65%</td><td>R$ 60.66</td></tr></tbody>
-    </table>
+  <div class="panel panel-value">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 17l5-5 4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M15 7h5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 2</div>
+        <h3>Melhores entradas</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
+        <tbody><tr data-odd="5.46" data-prob="0.2998" data-ev="0.6371" data-books="20"><td>Amanhã 14:00</td><td>Real Sociedad x Levante</td><td>Vitoria Levante</td><td>5.46</td><td>30.0%</td><td>63.71%</td><td>R$ 35.71</td></tr><tr data-odd="1.55" data-prob="0.8336" data-ev="0.2921" data-books="20"><td>Amanhã 16:15</td><td>Mallorca x Real Madrid</td><td>Vitoria Real Madrid</td><td>1.55</td><td>83.4%</td><td>29.21%</td><td>R$ 132.77</td></tr><tr data-odd="4.55" data-prob="0.3722" data-ev="0.6934" data-books="20"><td>Amanhã 18:30</td><td>Betis x Espanyol</td><td>Vitoria Espanyol</td><td>4.55</td><td>37.2%</td><td>69.34%</td><td>R$ 48.83</td></tr><tr data-odd="2.15" data-prob="0.7022" data-ev="0.5098" data-books="20"><td>Amanhã 21:00</td><td>Atl. Madrid x Barcelona</td><td>Vitoria Barcelona</td><td>2.15</td><td>70.2%</td><td>50.98%</td><td>R$ 110.83</td></tr><tr data-odd="2.67" data-prob="0.4710" data-ev="0.2575" data-books="20"><td>05.04. 09:00</td><td>Getafe x Ath Bilbao</td><td>Vitoria Ath Bilbao</td><td>2.67</td><td>47.1%</td><td>25.75%</td><td>R$ 38.55</td></tr><tr data-odd="3.11" data-prob="0.5628" data-ev="0.7504" data-books="20"><td>05.04. 11:15</td><td>Valencia x Celta Vigo</td><td>Vitoria Celta Vigo</td><td>3.11</td><td>56.3%</td><td>75.04%</td><td>R$ 88.91</td></tr><tr data-odd="2.74" data-prob="0.8362" data-ev="1.2911" data-books="20"><td>05.04. 13:30</td><td>Oviedo x Sevilla</td><td>Vitoria Sevilla</td><td>2.74</td><td>83.6%</td><td>129.11%</td><td>R$ 185.51</td></tr><tr data-odd="3.11" data-prob="0.3323" data-ev="0.0334" data-books="19"><td>05.04. 16:00</td><td>Alaves x Osasuna</td><td>Empate</td><td>3.11</td><td>33.2%</td><td>3.34%</td><td>R$ 3.95</td></tr><tr data-odd="2.23" data-prob="0.6828" data-ev="0.5226" data-books="19"><td>06.04. 16:00</td><td>Girona x Villarreal</td><td>Vitoria Villarreal</td><td>2.23</td><td>68.3%</td><td>52.26%</td><td>R$ 106.23</td></tr><tr data-odd="10.74" data-prob="0.1347" data-ev="0.4462" data-books="17"><td>10.04. 16:00</td><td>Real Madrid x Girona</td><td>Vitoria Girona</td><td>10.74</td><td>13.5%</td><td>44.62%</td><td>R$ 11.45</td></tr><tr data-odd="4.65" data-prob="0.3308" data-ev="0.5381" data-books="8"><td>11.04. 09:00</td><td>Real Sociedad x Alaves</td><td>Vitoria Alaves</td><td>4.65</td><td>33.1%</td><td>53.81%</td><td>R$ 36.86</td></tr><tr data-odd="2.97" data-prob="0.4880" data-ev="0.4494" data-books="8"><td>11.04. 11:15</td><td>Elche x Valencia</td><td>Vitoria Valencia</td><td>2.97</td><td>48.8%</td><td>44.94%</td><td>R$ 57.03</td></tr><tr data-odd="10.22" data-prob="0.2193" data-ev="1.2414" data-books="8"><td>11.04. 13:30</td><td>Barcelona x Espanyol</td><td>Vitoria Espanyol</td><td>10.22</td><td>21.9%</td><td>124.14%</td><td>R$ 33.66</td></tr><tr data-odd="2.14" data-prob="0.6567" data-ev="0.4054" data-books="8"><td>11.04. 16:00</td><td>Sevilla x Atl. Madrid</td><td>Vitoria Atl. Madrid</td><td>2.14</td><td>65.7%</td><td>40.54%</td><td>R$ 88.89</td></tr><tr data-odd="2.88" data-prob="0.3817" data-ev="0.0993" data-books="8"><td>12.04. 09:00</td><td>Osasuna x Betis</td><td>Vitoria Betis</td><td>2.88</td><td>38.2%</td><td>9.93%</td><td>R$ 13.21</td></tr><tr data-odd="2.68" data-prob="0.5303" data-ev="0.4212" data-books="8"><td>12.04. 11:15</td><td>Mallorca x Rayo Vallecano</td><td>Vitoria Rayo Vallecano</td><td>2.68</td><td>53.0%</td><td>42.12%</td><td>R$ 62.67</td></tr><tr data-odd="5.01" data-prob="0.2973" data-ev="0.4893" data-books="7"><td>12.04. 13:30</td><td>Celta Vigo x Oviedo</td><td>Vitoria Oviedo</td><td>5.01</td><td>29.7%</td><td>48.93%</td><td>R$ 30.51</td></tr><tr data-odd="2.88" data-prob="0.7073" data-ev="1.0370" data-books="8"><td>12.04. 16:00</td><td>Ath Bilbao x Villarreal</td><td>Vitoria Villarreal</td><td>2.88</td><td>70.7%</td><td>103.70%</td><td>R$ 137.90</td></tr><tr data-odd="2.83" data-prob="0.5104" data-ev="0.4444" data-books="8"><td>13.04. 16:00</td><td>Levante x Getafe</td><td>Vitoria Getafe</td><td>2.83</td><td>51.0%</td><td>44.44%</td><td>R$ 60.71</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Agenda de Jogos Futuros (top 40)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
-      <tbody><tr data-odd-home="1.74" data-odd-draw="3.57" data-odd-away="4.73"><td>03.04. 16:00</td><td>Rayo Vallecano</td><td>Elche</td><td>1.74</td><td>3.57</td><td>4.73</td><td>19.0</td></tr><tr data-odd-home="1.62" data-odd-draw="3.91" data-odd-away="5.11"><td>04.04. 09:00</td><td>Real Sociedad</td><td>Levante</td><td>1.62</td><td>3.91</td><td>5.11</td><td>19.0</td></tr><tr data-odd-home="5.03" data-odd-draw="4.09" data-odd-away="1.60"><td>04.04. 11:15</td><td>Mallorca</td><td>Real Madrid</td><td>5.03</td><td>4.09</td><td>1.60</td><td>19.0</td></tr><tr data-odd-home="1.78" data-odd-draw="3.77" data-odd-away="4.13"><td>04.04. 13:30</td><td>Betis</td><td>Espanyol</td><td>1.78</td><td>3.77</td><td>4.13</td><td>19.0</td></tr><tr data-odd-home="3.04" data-odd-draw="3.59" data-odd-away="2.16"><td>04.04. 16:00</td><td>Atl. Madrid</td><td>Barcelona</td><td>3.04</td><td>3.59</td><td>2.16</td><td>19.0</td></tr><tr data-odd-home="2.94" data-odd-draw="2.86" data-odd-away="2.65"><td>05.04. 09:00</td><td>Getafe</td><td>Ath Bilbao</td><td>2.94</td><td>2.86</td><td>2.65</td><td>19.0</td></tr><tr data-odd-home="2.29" data-odd-draw="3.24" data-odd-away="3.10"><td>05.04. 11:15</td><td>Valencia</td><td>Celta Vigo</td><td>2.29</td><td>3.24</td><td>3.10</td><td>19.0</td></tr><tr data-odd-home="2.93" data-odd-draw="2.94" data-odd-away="2.59"><td>05.04. 13:30</td><td>Oviedo</td><td>Sevilla</td><td>2.93</td><td>2.94</td><td>2.59</td><td>19.0</td></tr><tr data-odd-home="2.37" data-odd-draw="3.15" data-odd-away="3.04"><td>05.04. 16:00</td><td>Alaves</td><td>Osasuna</td><td>2.37</td><td>3.15</td><td>3.04</td><td>19.0</td></tr><tr data-odd-home="3.02" data-odd-draw="3.35" data-odd-away="2.28"><td>06.04. 16:00</td><td>Girona</td><td>Villarreal</td><td>3.02</td><td>3.35</td><td>2.28</td><td>9.0</td></tr><tr data-odd-home="1.22" data-odd-draw="6.86" data-odd-away="10.83"><td>10.04. 16:00</td><td>Real Madrid</td><td>Girona</td><td>1.22</td><td>6.86</td><td>10.83</td><td>6.0</td></tr><tr data-odd-home="1.78" data-odd-draw="3.47" data-odd-away="4.63"><td>11.04. 09:00</td><td>Real Sociedad</td><td>Alaves</td><td>1.78</td><td>3.47</td><td>4.63</td><td>6.0</td></tr><tr data-odd-home="2.41" data-odd-draw="3.24" data-odd-away="2.94"><td>11.04. 11:15</td><td>Elche</td><td>Valencia</td><td>2.41</td><td>3.24</td><td>2.94</td><td>6.0</td></tr><tr data-odd-home="1.20" data-odd-draw="6.99" data-odd-away="11.53"><td>11.04. 13:30</td><td>Barcelona</td><td>Espanyol</td><td>1.20</td><td>6.99</td><td>11.53</td><td>6.0</td></tr><tr data-odd-home="3.48" data-odd-draw="3.38" data-odd-away="2.08"><td>11.04. 16:00</td><td>Sevilla</td><td>Atl. Madrid</td><td>3.48</td><td>3.38</td><td>2.08</td><td>6.0</td></tr><tr data-odd-home="2.37" data-odd-draw="3.39" data-odd-away="2.89"><td>12.04. 09:00</td><td>Osasuna</td><td>Betis</td><td>2.37</td><td>3.39</td><td>2.89</td><td>6.0</td></tr><tr data-odd-home="2.57" data-odd-draw="3.28" data-odd-away="2.71"><td>12.04. 11:15</td><td>Mallorca</td><td>Rayo Vallecano</td><td>2.57</td><td>3.28</td><td>2.71</td><td>6.0</td></tr><tr data-odd-home="1.68" data-odd-draw="3.75" data-odd-away="4.89"><td>12.04. 13:30</td><td>Celta Vigo</td><td>Oviedo</td><td>1.68</td><td>3.75</td><td>4.89</td><td>5.0</td></tr><tr data-odd-home="2.35" data-odd-draw="3.49" data-odd-away="2.85"><td>12.04. 16:00</td><td>Ath Bilbao</td><td>Villarreal</td><td>2.35</td><td>3.49</td><td>2.85</td><td>6.0</td></tr><tr data-odd-home="2.67" data-odd-draw="2.97" data-odd-away="2.84"><td>13.04. 16:00</td><td>Levante</td><td>Getafe</td><td>2.67</td><td>2.97</td><td>2.84</td><td>6.0</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Alaves</td><td>Mallorca</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Atl. Madrid</td><td>Ath Bilbao</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Betis</td><td>Real Madrid</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Espanyol</td><td>Levante</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Getafe</td><td>Barcelona</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Osasuna</td><td>Sevilla</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Rayo Vallecano</td><td>Real Sociedad</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Oviedo</td><td>Elche</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Valencia</td><td>Girona</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Villarreal</td><td>Celta Vigo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Ath Bilbao</td><td>Osasuna</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Barcelona</td><td>Celta Vigo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Elche</td><td>Atl. Madrid</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Girona</td><td>Betis</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Levante</td><td>Sevilla</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Mallorca</td><td>Valencia</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Rayo Vallecano</td><td>Espanyol</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Real Madrid</td><td>Alaves</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Oviedo</td><td>Villarreal</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Real Sociedad</td><td>Getafe</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr></tbody>
-    </table>
+  <div class="panel panel-agenda">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 3</div>
+        <h3>Agenda de jogos futuros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
+        <tbody><tr data-odd-home="1.58" data-odd-draw="4.15" data-odd-away="5.46"><td>Amanhã 14:00</td><td>Real Sociedad</td><td>Levante</td><td>1.58</td><td>4.15</td><td>5.46</td><td>20.0</td></tr><tr data-odd-home="5.54" data-odd-draw="4.36" data-odd-away="1.55"><td>Amanhã 16:15</td><td>Mallorca</td><td>Real Madrid</td><td>5.54</td><td>4.36</td><td>1.55</td><td>20.0</td></tr><tr data-odd-home="1.72" data-odd-draw="3.89" data-odd-away="4.55"><td>Amanhã 18:30</td><td>Betis</td><td>Espanyol</td><td>1.72</td><td>3.89</td><td>4.55</td><td>20.0</td></tr><tr data-odd-home="3.07" data-odd-draw="3.74" data-odd-away="2.15"><td>Amanhã 21:00</td><td>Atl. Madrid</td><td>Barcelona</td><td>3.07</td><td>3.74</td><td>2.15</td><td>20.0</td></tr><tr data-odd-home="3.01" data-odd-draw="2.82" data-odd-away="2.67"><td>05.04. 09:00</td><td>Getafe</td><td>Ath Bilbao</td><td>3.01</td><td>2.82</td><td>2.67</td><td>20.0</td></tr><tr data-odd-home="2.32" data-odd-draw="3.23" data-odd-away="3.11"><td>05.04. 11:15</td><td>Valencia</td><td>Celta Vigo</td><td>2.32</td><td>3.23</td><td>3.11</td><td>20.0</td></tr><tr data-odd-home="2.76" data-odd-draw="2.98" data-odd-away="2.74"><td>05.04. 13:30</td><td>Oviedo</td><td>Sevilla</td><td>2.76</td><td>2.98</td><td>2.74</td><td>20.0</td></tr><tr data-odd-home="2.46" data-odd-draw="3.11" data-odd-away="3.01"><td>05.04. 16:00</td><td>Alaves</td><td>Osasuna</td><td>2.46</td><td>3.11</td><td>3.01</td><td>19.0</td></tr><tr data-odd-home="3.15" data-odd-draw="3.38" data-odd-away="2.23"><td>06.04. 16:00</td><td>Girona</td><td>Villarreal</td><td>3.15</td><td>3.38</td><td>2.23</td><td>19.0</td></tr><tr data-odd-home="1.21" data-odd-draw="6.74" data-odd-away="10.74"><td>10.04. 16:00</td><td>Real Madrid</td><td>Girona</td><td>1.21</td><td>6.74</td><td>10.74</td><td>17.0</td></tr><tr data-odd-home="1.77" data-odd-draw="3.47" data-odd-away="4.65"><td>11.04. 09:00</td><td>Real Sociedad</td><td>Alaves</td><td>1.77</td><td>3.47</td><td>4.65</td><td>8.0</td></tr><tr data-odd-home="2.38" data-odd-draw="3.23" data-odd-away="2.97"><td>11.04. 11:15</td><td>Elche</td><td>Valencia</td><td>2.38</td><td>3.23</td><td>2.97</td><td>8.0</td></tr><tr data-odd-home="1.23" data-odd-draw="6.61" data-odd-away="10.22"><td>11.04. 13:30</td><td>Barcelona</td><td>Espanyol</td><td>1.23</td><td>6.61</td><td>10.22</td><td>8.0</td></tr><tr data-odd-home="3.26" data-odd-draw="3.43" data-odd-away="2.14"><td>11.04. 16:00</td><td>Sevilla</td><td>Atl. Madrid</td><td>3.26</td><td>3.43</td><td>2.14</td><td>8.0</td></tr><tr data-odd-home="2.36" data-odd-draw="3.39" data-odd-away="2.88"><td>12.04. 09:00</td><td>Osasuna</td><td>Betis</td><td>2.36</td><td>3.39</td><td>2.88</td><td>8.0</td></tr><tr data-odd-home="2.57" data-odd-draw="3.30" data-odd-away="2.68"><td>12.04. 11:15</td><td>Mallorca</td><td>Rayo Vallecano</td><td>2.57</td><td>3.30</td><td>2.68</td><td>8.0</td></tr><tr data-odd-home="1.63" data-odd-draw="3.97" data-odd-away="5.01"><td>12.04. 13:30</td><td>Celta Vigo</td><td>Oviedo</td><td>1.63</td><td>3.97</td><td>5.01</td><td>7.0</td></tr><tr data-odd-home="2.32" data-odd-draw="3.47" data-odd-away="2.88"><td>12.04. 16:00</td><td>Ath Bilbao</td><td>Villarreal</td><td>2.32</td><td>3.47</td><td>2.88</td><td>8.0</td></tr><tr data-odd-home="2.67" data-odd-draw="2.96" data-odd-away="2.83"><td>13.04. 16:00</td><td>Levante</td><td>Getafe</td><td>2.67</td><td>2.96</td><td>2.83</td><td>8.0</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Alaves</td><td>Mallorca</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Atl. Madrid</td><td>Ath Bilbao</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Betis</td><td>Real Madrid</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Espanyol</td><td>Levante</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Getafe</td><td>Barcelona</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Osasuna</td><td>Sevilla</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Rayo Vallecano</td><td>Real Sociedad</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Oviedo</td><td>Elche</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Valencia</td><td>Girona</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:00</td><td>Villarreal</td><td>Celta Vigo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Ath Bilbao</td><td>Osasuna</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Barcelona</td><td>Celta Vigo</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Elche</td><td>Atl. Madrid</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Girona</td><td>Betis</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Levante</td><td>Sevilla</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Mallorca</td><td>Valencia</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Rayo Vallecano</td><td>Espanyol</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Real Madrid</td><td>Alaves</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Oviedo</td><td>Villarreal</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>22.04. 13:00</td><td>Real Sociedad</td><td>Getafe</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>03.05. 13:00</td><td>Alaves</td><td>Ath Bilbao</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr></tbody>
+      </table>
+    </div>
   </div>
+
+  <p class="empty-state" hidden>Nenhuma linha desta competicao atende aos filtros atuais.</p>
 </section>
 
-<section class="card" data-comp="Premier League">
+<section class="card competition-card" id="comp-premier-league" data-comp="Premier League">
   <div class="card-head">
-    <h2>Premier League</h2>
-    <div class="badge">Finalizados 309 • Futuros 70 • Odds 20</div>
+    <div class="title-block">
+      <div class="eyebrow">Competicao monitorada</div>
+      <div class="title-row">
+        <h2>Premier League</h2>
+        <div class="badge">Leitura organizada por seguranca, valor e agenda</div>
+      </div>
+    </div>
+    <div class="stats-rail">
+      <div class="stat-chip"><span>Finalizados</span><strong>309</strong></div>
+      <div class="stat-chip"><span>Futuros</span><strong>70</strong></div>
+      <div class="stat-chip"><span>Com odds</span><strong>20</strong></div>
+      <div class="stat-chip"><span>Top seguros</span><strong>3</strong></div>
+    </div>
   </div>
 
-  <h3>Jogos Mais Seguros (filtro conservador)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
-      <tbody><tr><td colspan="8">Nenhum jogo passou no filtro conservador.</td></tr></tbody>
-    </table>
+  <div class="panel panel-safe">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3l7 3v5c0 4.5-2.9 8.7-7 10-4.1-1.3-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path d="M9 12.2l2 2 4-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 1</div>
+        <h3>Jogos mais seguros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
+        <tbody><tr data-odd="1.73" data-prob="0.7040" data-ev="0.2180" data-books="9"><td>11.04. 11:00</td><td>Burnley x Brighton</td><td>Vitoria Brighton</td><td>1.73</td><td>70.4%</td><td>21.80%</td><td>9</td><td>R$ 74.66</td></tr><tr data-odd="2.13" data-prob="0.5976" data-ev="0.2729" data-books="9"><td>12.04. 12:30</td><td>Chelsea x Manchester City</td><td>Vitoria Manchester City</td><td>2.13</td><td>59.8%</td><td>27.29%</td><td>9</td><td>R$ 60.37</td></tr><tr data-odd="1.80" data-prob="0.5802" data-ev="0.0443" data-books="18"><td>10.04. 16:00</td><td>West Ham x Wolves</td><td>Vitoria West Ham</td><td>1.80</td><td>58.0%</td><td>4.43%</td><td>18</td><td>R$ 13.84</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Melhores Entradas (EV/Kelly, banca R$1000)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
-      <tbody><tr data-odd="1.79" data-prob="0.5802" data-ev="0.0385" data-books="7"><td>10.04. 16:00</td><td>West Ham x Wolves</td><td>Vitoria West Ham</td><td>1.79</td><td>58.0%</td><td>3.85%</td><td>R$ 12.18</td></tr><tr data-odd="7.35" data-prob="0.2315" data-ev="0.7013" data-books="7"><td>11.04. 08:30</td><td>Arsenal x Bournemouth</td><td>Vitoria Bournemouth</td><td>7.35</td><td>23.1%</td><td>70.13%</td><td>R$ 27.61</td></tr><tr data-odd="3.28" data-prob="0.3650" data-ev="0.1973" data-books="7"><td>11.04. 11:00</td><td>Brentford x Everton</td><td>Vitoria Everton</td><td>3.28</td><td>36.5%</td><td>19.73%</td><td>R$ 21.64</td></tr><tr data-odd="1.74" data-prob="0.7040" data-ev="0.2250" data-books="7"><td>11.04. 11:00</td><td>Burnley x Brighton</td><td>Vitoria Brighton</td><td>1.74</td><td>70.4%</td><td>22.50%</td><td>R$ 76.03</td></tr><tr data-odd="5.23" data-prob="0.3547" data-ev="0.8553" data-books="7"><td>11.04. 13:30</td><td>Liverpool x Fulham</td><td>Vitoria Fulham</td><td>5.23</td><td>35.5%</td><td>85.53%</td><td>R$ 50.55</td></tr><tr data-odd="3.48" data-prob="0.3151" data-ev="0.0967" data-books="7"><td>12.04. 10:00</td><td>Crystal Palace x Newcastle</td><td>Empate</td><td>3.48</td><td>31.5%</td><td>9.67%</td><td>R$ 9.75</td></tr><tr data-odd="2.68" data-prob="0.6160" data-ev="0.6510" data-books="7"><td>12.04. 10:00</td><td>Nottingham x Aston Villa</td><td>Vitoria Aston Villa</td><td>2.68</td><td>61.6%</td><td>65.10%</td><td>R$ 96.88</td></tr><tr data-odd="2.62" data-prob="0.4006" data-ev="0.0497" data-books="7"><td>12.04. 10:00</td><td>Sunderland x Tottenham</td><td>Vitoria Sunderland</td><td>2.62</td><td>40.1%</td><td>4.97%</td><td>R$ 7.66</td></tr><tr data-odd="2.18" data-prob="0.5976" data-ev="0.3027" data-books="7"><td>12.04. 12:30</td><td>Chelsea x Manchester City</td><td>Vitoria Manchester City</td><td>2.18</td><td>59.8%</td><td>30.27%</td><td>R$ 64.14</td></tr><tr data-odd="5.22" data-prob="0.3031" data-ev="0.5821" data-books="7"><td>13.04. 16:00</td><td>Manchester Utd x Leeds</td><td>Vitoria Leeds</td><td>5.22</td><td>30.3%</td><td>58.21%</td><td>R$ 34.49</td></tr><tr data-odd="3.27" data-prob="0.3650" data-ev="0.1937" data-books="7"><td>18.04. 08:30</td><td>Brentford x Fulham</td><td>Vitoria Fulham</td><td>3.27</td><td>36.5%</td><td>19.37%</td><td>R$ 21.33</td></tr><tr data-odd="1.65" data-prob="0.6275" data-ev="0.0354" data-books="7"><td>18.04. 11:00</td><td>Leeds x Wolves</td><td>Vitoria Leeds</td><td>1.65</td><td>62.8%</td><td>3.54%</td><td>R$ 13.61</td></tr><tr data-odd="3.62" data-prob="0.4383" data-ev="0.5867" data-books="7"><td>18.04. 11:00</td><td>Newcastle x Bournemouth</td><td>Vitoria Bournemouth</td><td>3.62</td><td>43.8%</td><td>58.67%</td><td>R$ 55.98</td></tr><tr data-odd="2.68" data-prob="0.4953" data-ev="0.3274" data-books="7"><td>18.04. 13:30</td><td>Tottenham x Brighton</td><td>Vitoria Brighton</td><td>2.68</td><td>49.5%</td><td>32.74%</td><td>R$ 48.73</td></tr><tr data-odd="3.07" data-prob="0.5025" data-ev="0.5427" data-books="7"><td>18.04. 16:00</td><td>Chelsea x Manchester Utd</td><td>Vitoria Manchester Utd</td><td>3.07</td><td>50.3%</td><td>54.27%</td><td>R$ 65.54</td></tr><tr data-odd="5.53" data-prob="0.2830" data-ev="0.5648" data-books="6"><td>19.04. 10:00</td><td>Aston Villa x Sunderland</td><td>Vitoria Sunderland</td><td>5.53</td><td>28.3%</td><td>56.48%</td><td>R$ 31.17</td></tr><tr data-odd="3.54" data-prob="0.2865" data-ev="0.0142" data-books="6"><td>19.04. 10:00</td><td>Everton x Liverpool</td><td>Empate</td><td>3.54</td><td>28.7%</td><td>1.42%</td><td>R$ 1.40</td></tr><tr data-odd="6.05" data-prob="0.4782" data-ev="1.8934" data-books="6"><td>19.04. 10:00</td><td>Nottingham x Burnley</td><td>Vitoria Burnley</td><td>6.05</td><td>47.8%</td><td>189.34%</td><td>R$ 93.73</td></tr><tr data-odd="3.13" data-prob="0.4928" data-ev="0.5425" data-books="6"><td>19.04. 12:30</td><td>Manchester City x Arsenal</td><td>Vitoria Arsenal</td><td>3.13</td><td>49.3%</td><td>54.25%</td><td>R$ 63.67</td></tr><tr data-odd="3.33" data-prob="0.3214" data-ev="0.0702" data-books="6"><td>20.04. 16:00</td><td>Crystal Palace x West Ham</td><td>Vitoria West Ham</td><td>3.33</td><td>32.1%</td><td>7.02%</td><td>R$ 7.53</td></tr></tbody>
-    </table>
+  <div class="panel panel-value">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 17l5-5 4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M15 7h5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 2</div>
+        <h3>Melhores entradas</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
+        <tbody><tr data-odd="1.80" data-prob="0.5802" data-ev="0.0443" data-books="18"><td>10.04. 16:00</td><td>West Ham x Wolves</td><td>Vitoria West Ham</td><td>1.80</td><td>58.0%</td><td>4.43%</td><td>R$ 13.84</td></tr><tr data-odd="7.44" data-prob="0.2315" data-ev="0.7222" data-books="9"><td>11.04. 08:30</td><td>Arsenal x Bournemouth</td><td>Vitoria Bournemouth</td><td>7.44</td><td>23.1%</td><td>72.22%</td><td>R$ 28.03</td></tr><tr data-odd="3.29" data-prob="0.3650" data-ev="0.2010" data-books="9"><td>11.04. 11:00</td><td>Brentford x Everton</td><td>Vitoria Everton</td><td>3.29</td><td>36.5%</td><td>20.10%</td><td>R$ 21.94</td></tr><tr data-odd="1.73" data-prob="0.7040" data-ev="0.2180" data-books="9"><td>11.04. 11:00</td><td>Burnley x Brighton</td><td>Vitoria Brighton</td><td>1.73</td><td>70.4%</td><td>21.80%</td><td>R$ 74.66</td></tr><tr data-odd="5.24" data-prob="0.3547" data-ev="0.8588" data-books="9"><td>11.04. 13:30</td><td>Liverpool x Fulham</td><td>Vitoria Fulham</td><td>5.24</td><td>35.5%</td><td>85.88%</td><td>R$ 50.64</td></tr><tr data-odd="3.47" data-prob="0.3151" data-ev="0.0936" data-books="9"><td>12.04. 10:00</td><td>Crystal Palace x Newcastle</td><td>Empate</td><td>3.47</td><td>31.5%</td><td>9.36%</td><td>R$ 9.47</td></tr><tr data-odd="2.65" data-prob="0.6160" data-ev="0.6325" data-books="9"><td>12.04. 10:00</td><td>Nottingham x Aston Villa</td><td>Vitoria Aston Villa</td><td>2.65</td><td>61.6%</td><td>63.25%</td><td>R$ 95.84</td></tr><tr data-odd="2.65" data-prob="0.4006" data-ev="0.0617" data-books="9"><td>12.04. 10:00</td><td>Sunderland x Tottenham</td><td>Vitoria Sunderland</td><td>2.65</td><td>40.1%</td><td>6.17%</td><td>R$ 9.34</td></tr><tr data-odd="2.13" data-prob="0.5976" data-ev="0.2729" data-books="9"><td>12.04. 12:30</td><td>Chelsea x Manchester City</td><td>Vitoria Manchester City</td><td>2.13</td><td>59.8%</td><td>27.29%</td><td>R$ 60.37</td></tr><tr data-odd="5.24" data-prob="0.3031" data-ev="0.5882" data-books="9"><td>13.04. 16:00</td><td>Manchester Utd x Leeds</td><td>Vitoria Leeds</td><td>5.24</td><td>30.3%</td><td>58.82%</td><td>R$ 34.68</td></tr><tr data-odd="3.26" data-prob="0.3650" data-ev="0.1900" data-books="7"><td>18.04. 08:30</td><td>Brentford x Fulham</td><td>Vitoria Fulham</td><td>3.26</td><td>36.5%</td><td>19.00%</td><td>R$ 21.02</td></tr><tr data-odd="1.67" data-prob="0.6275" data-ev="0.0479" data-books="7"><td>18.04. 11:00</td><td>Leeds x Wolves</td><td>Vitoria Leeds</td><td>1.67</td><td>62.8%</td><td>4.79%</td><td>R$ 17.89</td></tr><tr data-odd="3.62" data-prob="0.4383" data-ev="0.5867" data-books="7"><td>18.04. 11:00</td><td>Newcastle x Bournemouth</td><td>Vitoria Bournemouth</td><td>3.62</td><td>43.8%</td><td>58.67%</td><td>R$ 55.98</td></tr><tr data-odd="2.66" data-prob="0.4953" data-ev="0.3175" data-books="7"><td>18.04. 13:30</td><td>Tottenham x Brighton</td><td>Vitoria Brighton</td><td>2.66</td><td>49.5%</td><td>31.75%</td><td>R$ 47.82</td></tr><tr data-odd="3.07" data-prob="0.5025" data-ev="0.5427" data-books="7"><td>18.04. 16:00</td><td>Chelsea x Manchester Utd</td><td>Vitoria Manchester Utd</td><td>3.07</td><td>50.3%</td><td>54.27%</td><td>R$ 65.54</td></tr><tr data-odd="5.59" data-prob="0.2830" data-ev="0.5818" data-books="7"><td>19.04. 10:00</td><td>Aston Villa x Sunderland</td><td>Vitoria Sunderland</td><td>5.59</td><td>28.3%</td><td>58.18%</td><td>R$ 31.69</td></tr><tr data-odd="3.53" data-prob="0.2865" data-ev="0.0114" data-books="7"><td>19.04. 10:00</td><td>Everton x Liverpool</td><td>Empate</td><td>3.53</td><td>28.7%</td><td>1.14%</td><td>R$ 1.12</td></tr><tr data-odd="5.90" data-prob="0.4782" data-ev="1.8217" data-books="7"><td>19.04. 10:00</td><td>Nottingham x Burnley</td><td>Vitoria Burnley</td><td>5.90</td><td>47.8%</td><td>182.17%</td><td>R$ 92.94</td></tr><tr data-odd="3.14" data-prob="0.4928" data-ev="0.5474" data-books="7"><td>19.04. 12:30</td><td>Manchester City x Arsenal</td><td>Vitoria Arsenal</td><td>3.14</td><td>49.3%</td><td>54.74%</td><td>R$ 63.95</td></tr><tr data-odd="3.38" data-prob="0.3214" data-ev="0.0863" data-books="7"><td>20.04. 16:00</td><td>Crystal Palace x West Ham</td><td>Vitoria West Ham</td><td>3.38</td><td>32.1%</td><td>8.63%</td><td>R$ 9.06</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Agenda de Jogos Futuros (top 40)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
-      <tbody><tr data-odd-home="1.79" data-odd-draw="3.68" data-odd-away="4.25"><td>10.04. 16:00</td><td>West Ham</td><td>Wolves</td><td>1.79</td><td>3.68</td><td>4.25</td><td>7.0</td></tr><tr data-odd-home="1.41" data-odd-draw="4.61" data-odd-away="7.35"><td>11.04. 08:30</td><td>Arsenal</td><td>Bournemouth</td><td>1.41</td><td>4.61</td><td>7.35</td><td>7.0</td></tr><tr data-odd-home="2.18" data-odd-draw="3.33" data-odd-away="3.28"><td>11.04. 11:00</td><td>Brentford</td><td>Everton</td><td>2.18</td><td>3.33</td><td>3.28</td><td>7.0</td></tr><tr data-odd-home="4.36" data-odd-draw="3.84" data-odd-away="1.74"><td>11.04. 11:00</td><td>Burnley</td><td>Brighton</td><td>4.36</td><td>3.84</td><td>1.74</td><td>7.0</td></tr><tr data-odd-home="1.55" data-odd-draw="4.43" data-odd-away="5.23"><td>11.04. 13:30</td><td>Liverpool</td><td>Fulham</td><td>1.55</td><td>4.43</td><td>5.23</td><td>7.0</td></tr><tr data-odd-home="2.74" data-odd-draw="3.48" data-odd-away="2.44"><td>12.04. 10:00</td><td>Crystal Palace</td><td>Newcastle</td><td>2.74</td><td>3.48</td><td>2.44</td><td>7.0</td></tr><tr data-odd-home="2.56" data-odd-draw="3.35" data-odd-away="2.68"><td>12.04. 10:00</td><td>Nottingham</td><td>Aston Villa</td><td>2.56</td><td>3.35</td><td>2.68</td><td>7.0</td></tr><tr data-odd-home="2.62" data-odd-draw="3.36" data-odd-away="2.61"><td>12.04. 10:00</td><td>Sunderland</td><td>Tottenham</td><td>2.62</td><td>3.36</td><td>2.61</td><td>7.0</td></tr><tr data-odd-home="2.91" data-odd-draw="3.81" data-odd-away="2.18"><td>12.04. 12:30</td><td>Chelsea</td><td>Manchester City</td><td>2.91</td><td>3.81</td><td>2.18</td><td>7.0</td></tr><tr data-odd-home="1.59" data-odd-draw="4.12" data-odd-away="5.22"><td>13.04. 16:00</td><td>Manchester Utd</td><td>Leeds</td><td>1.59</td><td>4.12</td><td>5.22</td><td>7.0</td></tr><tr data-odd-home="2.11" data-odd-draw="3.56" data-odd-away="3.27"><td>18.04. 08:30</td><td>Brentford</td><td>Fulham</td><td>2.11</td><td>3.56</td><td>3.27</td><td>7.0</td></tr><tr data-odd-home="1.65" data-odd-draw="3.84" data-odd-away="5.18"><td>18.04. 11:00</td><td>Leeds</td><td>Wolves</td><td>1.65</td><td>3.84</td><td>5.18</td><td>7.0</td></tr><tr data-odd-home="1.88" data-odd-draw="3.92" data-odd-away="3.62"><td>18.04. 11:00</td><td>Newcastle</td><td>Bournemouth</td><td>1.88</td><td>3.92</td><td>3.62</td><td>7.0</td></tr><tr data-odd-home="2.42" data-odd-draw="3.63" data-odd-away="2.68"><td>18.04. 13:30</td><td>Tottenham</td><td>Brighton</td><td>2.42</td><td>3.63</td><td>2.68</td><td>7.0</td></tr><tr data-odd-home="2.19" data-odd-draw="3.55" data-odd-away="3.07"><td>18.04. 16:00</td><td>Chelsea</td><td>Manchester Utd</td><td>2.19</td><td>3.55</td><td>3.07</td><td>7.0</td></tr><tr data-odd-home="1.60" data-odd-draw="3.88" data-odd-away="5.53"><td>19.04. 10:00</td><td>Aston Villa</td><td>Sunderland</td><td>1.60</td><td>3.88</td><td>5.53</td><td>6.0</td></tr><tr data-odd-home="3.31" data-odd-draw="3.54" data-odd-away="2.09"><td>19.04. 10:00</td><td>Everton</td><td>Liverpool</td><td>3.31</td><td>3.54</td><td>2.09</td><td>6.0</td></tr><tr data-odd-home="1.50" data-odd-draw="4.21" data-odd-away="6.05"><td>19.04. 10:00</td><td>Nottingham</td><td>Burnley</td><td>1.50</td><td>4.21</td><td>6.05</td><td>6.0</td></tr><tr data-odd-home="2.20" data-odd-draw="3.41" data-odd-away="3.13"><td>19.04. 12:30</td><td>Manchester City</td><td>Arsenal</td><td>2.20</td><td>3.41</td><td>3.13</td><td>6.0</td></tr><tr data-odd-home="2.11" data-odd-draw="3.38" data-odd-away="3.33"><td>20.04. 16:00</td><td>Crystal Palace</td><td>West Ham</td><td>2.11</td><td>3.38</td><td>3.33</td><td>6.0</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>24.04. 16:00</td><td>Sunderland</td><td>Nottingham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 08:30</td><td>Fulham</td><td>Aston Villa</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>Bournemouth</td><td>Leeds</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>Liverpool</td><td>Crystal Palace</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>West Ham</td><td>Everton</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>Wolves</td><td>Tottenham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:30</td><td>Arsenal</td><td>Newcastle</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 10:00</td><td>Burnley</td><td>Manchester City</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 12:30</td><td>Brighton</td><td>Chelsea</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>27.04. 16:00</td><td>Manchester Utd</td><td>Brentford</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>01.05. 16:00</td><td>Leeds</td><td>Burnley</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 08:30</td><td>Aston Villa</td><td>Tottenham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Bournemouth</td><td>Crystal Palace</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Brentford</td><td>West Ham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Newcastle</td><td>Brighton</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Wolves</td><td>Sunderland</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 13:30</td><td>Arsenal</td><td>Fulham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>03.05. 11:30</td><td>Manchester Utd</td><td>Liverpool</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>04.05. 11:00</td><td>Chelsea</td><td>Nottingham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>04.05. 16:00</td><td>Everton</td><td>Manchester City</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr></tbody>
-    </table>
+  <div class="panel panel-agenda">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 3</div>
+        <h3>Agenda de jogos futuros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
+        <tbody><tr data-odd-home="1.80" data-odd-draw="3.63" data-odd-away="4.25"><td>10.04. 16:00</td><td>West Ham</td><td>Wolves</td><td>1.80</td><td>3.63</td><td>4.25</td><td>18.0</td></tr><tr data-odd-home="1.41" data-odd-draw="4.58" data-odd-away="7.44"><td>11.04. 08:30</td><td>Arsenal</td><td>Bournemouth</td><td>1.41</td><td>4.58</td><td>7.44</td><td>9.0</td></tr><tr data-odd-home="2.18" data-odd-draw="3.31" data-odd-away="3.29"><td>11.04. 11:00</td><td>Brentford</td><td>Everton</td><td>2.18</td><td>3.31</td><td>3.29</td><td>9.0</td></tr><tr data-odd-home="4.36" data-odd-draw="3.91" data-odd-away="1.73"><td>11.04. 11:00</td><td>Burnley</td><td>Brighton</td><td>4.36</td><td>3.91</td><td>1.73</td><td>9.0</td></tr><tr data-odd-home="1.54" data-odd-draw="4.38" data-odd-away="5.24"><td>11.04. 13:30</td><td>Liverpool</td><td>Fulham</td><td>1.54</td><td>4.38</td><td>5.24</td><td>9.0</td></tr><tr data-odd-home="2.73" data-odd-draw="3.47" data-odd-away="2.44"><td>12.04. 10:00</td><td>Crystal Palace</td><td>Newcastle</td><td>2.73</td><td>3.47</td><td>2.44</td><td>9.0</td></tr><tr data-odd-home="2.59" data-odd-draw="3.32" data-odd-away="2.65"><td>12.04. 10:00</td><td>Nottingham</td><td>Aston Villa</td><td>2.59</td><td>3.32</td><td>2.65</td><td>9.0</td></tr><tr data-odd-home="2.65" data-odd-draw="3.34" data-odd-away="2.58"><td>12.04. 10:00</td><td>Sunderland</td><td>Tottenham</td><td>2.65</td><td>3.34</td><td>2.58</td><td>9.0</td></tr><tr data-odd-home="3.01" data-odd-draw="3.77" data-odd-away="2.13"><td>12.04. 12:30</td><td>Chelsea</td><td>Manchester City</td><td>3.01</td><td>3.77</td><td>2.13</td><td>9.0</td></tr><tr data-odd-home="1.59" data-odd-draw="4.10" data-odd-away="5.24"><td>13.04. 16:00</td><td>Manchester Utd</td><td>Leeds</td><td>1.59</td><td>4.10</td><td>5.24</td><td>9.0</td></tr><tr data-odd-home="2.10" data-odd-draw="3.57" data-odd-away="3.26"><td>18.04. 08:30</td><td>Brentford</td><td>Fulham</td><td>2.10</td><td>3.57</td><td>3.26</td><td>7.0</td></tr><tr data-odd-home="1.67" data-odd-draw="3.75" data-odd-away="5.11"><td>18.04. 11:00</td><td>Leeds</td><td>Wolves</td><td>1.67</td><td>3.75</td><td>5.11</td><td>7.0</td></tr><tr data-odd-home="1.87" data-odd-draw="3.92" data-odd-away="3.62"><td>18.04. 11:00</td><td>Newcastle</td><td>Bournemouth</td><td>1.87</td><td>3.92</td><td>3.62</td><td>7.0</td></tr><tr data-odd-home="2.45" data-odd-draw="3.60" data-odd-away="2.66"><td>18.04. 13:30</td><td>Tottenham</td><td>Brighton</td><td>2.45</td><td>3.60</td><td>2.66</td><td>7.0</td></tr><tr data-odd-home="2.17" data-odd-draw="3.59" data-odd-away="3.07"><td>18.04. 16:00</td><td>Chelsea</td><td>Manchester Utd</td><td>2.17</td><td>3.59</td><td>3.07</td><td>7.0</td></tr><tr data-odd-home="1.61" data-odd-draw="3.85" data-odd-away="5.59"><td>19.04. 10:00</td><td>Aston Villa</td><td>Sunderland</td><td>1.61</td><td>3.85</td><td>5.59</td><td>7.0</td></tr><tr data-odd-home="3.31" data-odd-draw="3.53" data-odd-away="2.09"><td>19.04. 10:00</td><td>Everton</td><td>Liverpool</td><td>3.31</td><td>3.53</td><td>2.09</td><td>7.0</td></tr><tr data-odd-home="1.53" data-odd-draw="4.07" data-odd-away="5.90"><td>19.04. 10:00</td><td>Nottingham</td><td>Burnley</td><td>1.53</td><td>4.07</td><td>5.90</td><td>7.0</td></tr><tr data-odd-home="2.19" data-odd-draw="3.47" data-odd-away="3.14"><td>19.04. 12:30</td><td>Manchester City</td><td>Arsenal</td><td>2.19</td><td>3.47</td><td>3.14</td><td>7.0</td></tr><tr data-odd-home="2.13" data-odd-draw="3.31" data-odd-away="3.38"><td>20.04. 16:00</td><td>Crystal Palace</td><td>West Ham</td><td>2.13</td><td>3.31</td><td>3.38</td><td>7.0</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>24.04. 16:00</td><td>Sunderland</td><td>Nottingham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 08:30</td><td>Fulham</td><td>Aston Villa</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>Bournemouth</td><td>Leeds</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>Liverpool</td><td>Crystal Palace</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>West Ham</td><td>Everton</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 11:00</td><td>Wolves</td><td>Tottenham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>25.04. 13:30</td><td>Arsenal</td><td>Newcastle</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 10:00</td><td>Burnley</td><td>Manchester City</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>26.04. 12:30</td><td>Brighton</td><td>Chelsea</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>27.04. 16:00</td><td>Manchester Utd</td><td>Brentford</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>01.05. 16:00</td><td>Leeds</td><td>Burnley</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 08:30</td><td>Aston Villa</td><td>Tottenham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Bournemouth</td><td>Crystal Palace</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Brentford</td><td>West Ham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Newcastle</td><td>Brighton</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 11:00</td><td>Wolves</td><td>Sunderland</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>02.05. 13:30</td><td>Arsenal</td><td>Fulham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>03.05. 11:30</td><td>Manchester Utd</td><td>Liverpool</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>04.05. 11:00</td><td>Chelsea</td><td>Nottingham</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr><tr data-odd-home="-" data-odd-draw="-" data-odd-away="-"><td>04.05. 16:00</td><td>Everton</td><td>Manchester City</td><td>-</td><td>-</td><td>-</td><td>nan</td></tr></tbody>
+      </table>
+    </div>
   </div>
+
+  <p class="empty-state" hidden>Nenhuma linha desta competicao atende aos filtros atuais.</p>
 </section>
 
-<section class="card" data-comp="Copa do Mundo">
+<section class="card competition-card" id="comp-copa-do-mundo" data-comp="Copa do Mundo">
   <div class="card-head">
-    <h2>Copa do Mundo</h2>
-    <div class="badge">Finalizados 2 • Futuros 2 • Odds 2</div>
+    <div class="title-block">
+      <div class="eyebrow">Competicao monitorada</div>
+      <div class="title-row">
+        <h2>Copa do Mundo</h2>
+        <div class="badge">Leitura organizada por seguranca, valor e agenda</div>
+      </div>
+    </div>
+    <div class="stats-rail">
+      <div class="stat-chip"><span>Finalizados</span><strong>4</strong></div>
+      <div class="stat-chip"><span>Futuros</span><strong>0</strong></div>
+      <div class="stat-chip"><span>Com odds</span><strong>0</strong></div>
+      <div class="stat-chip"><span>Top seguros</span><strong>0</strong></div>
+    </div>
   </div>
 
-  <h3>Jogos Mais Seguros (filtro conservador)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
-      <tbody><tr><td colspan="8">Nenhum jogo passou no filtro conservador.</td></tr></tbody>
-    </table>
+  <div class="panel panel-safe">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3l7 3v5c0 4.5-2.9 8.7-7 10-4.1-1.3-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+            <path d="M9 12.2l2 2 4-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 1</div>
+        <h3>Jogos mais seguros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
+        <tbody><tr><td colspan="8">Nenhum jogo passou no filtro conservador.</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Melhores Entradas (EV/Kelly, banca R$1000)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
-      <tbody><tr data-odd="4.55" data-prob="0.3456" data-ev="0.5723" data-books="18"><td>Amanhã 23:00</td><td>D.R. Congo x Jamaica</td><td>Vitoria Jamaica</td><td>4.55</td><td>34.6%</td><td>57.23%</td><td>R$ 40.30</td></tr><tr data-odd="2.87" data-prob="0.3456" data-ev="-0.0082" data-books="17"><td>01.04. 00:00</td><td>Iraq x Bolivia</td><td>Vitoria Bolivia</td><td>2.87</td><td>34.6%</td><td>-0.82%</td><td>R$ 0.00</td></tr></tbody>
-    </table>
+  <div class="panel panel-value">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M4 17l5-5 4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M15 7h5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 2</div>
+        <h3>Melhores entradas</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
+        <tbody><tr><td colspan="7">Sem recomendacoes disponiveis.</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
-  <h3>Agenda de Jogos Futuros (top 40)</h3>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
-      <tbody><tr data-odd-home="1.91" data-odd-draw="3.02" data-odd-away="4.55"><td>Amanhã 23:00</td><td>D.R. Congo</td><td>Jamaica</td><td>1.91</td><td>3.02</td><td>4.55</td><td>18.0</td></tr><tr data-odd-home="2.43" data-odd-draw="3.17" data-odd-away="2.87"><td>01.04. 00:00</td><td>Iraq</td><td>Bolivia</td><td>2.43</td><td>3.17</td><td>2.87</td><td>17.0</td></tr></tbody>
-    </table>
+  <div class="panel panel-agenda">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Prioridade 3</div>
+        <h3>Agenda de jogos futuros</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
+        <tbody><tr><td colspan="7">Sem jogos futuros.</td></tr></tbody>
+      </table>
+    </div>
   </div>
+
+  <p class="empty-state" hidden>Nenhuma linha desta competicao atende aos filtros atuais.</p>
 </section>
 
 
-    <section class="glossary">
-      <h3>Glossario de siglas e estatisticas</h3>
-      <ul>
-        <li><b>1X2</b>: Mercado principal do jogo. <b>1</b> = vitoria mandante, <b>X</b> = empate, <b>2</b> = vitoria visitante.</li>
-        <li><b>Odd</b>: Cotacao da aposta. Exemplo: odd 2.00 retorna R$ 2,00 para cada R$ 1,00 apostado (retorno bruto).</li>
-        <li><b>Prob. Modelo</b>: Probabilidade estimada pelo modelo para o resultado sugerido.</li>
-        <li><b>EV</b> (Valor Esperado): Indicador matematico da vantagem da aposta. EV positivo tende a ser melhor no longo prazo.</li>
-        <li><b>Casas</b> (B's): Quantidade de casas de apostas consideradas naquela linha de odd.</li>
-        <li><b>Stake</b>: Valor sugerido para apostar naquele jogo, com base em banca e Kelly fracionado.</li>
-      </ul>
-    </section>
+        <section class="glossary card">
+          <div>
+            <div class="eyebrow">Guia rapido</div>
+            <h2>Glossario de siglas e metricas</h2>
+          </div>
+          <div class="glossary-grid">
+            <div class="glossary-item"><strong>1X2</strong><p>Mercado principal do jogo. 1 = vitoria mandante, X = empate, 2 = vitoria visitante.</p></div>
+            <div class="glossary-item"><strong>Odd</strong><p>Cotacao da aposta. Exemplo: odd 2.00 retorna R$ 2,00 para cada R$ 1,00 apostado em retorno bruto.</p></div>
+            <div class="glossary-item"><strong>Prob. Modelo</strong><p>Probabilidade estimada pelo modelo para o resultado sugerido na linha.</p></div>
+            <div class="glossary-item"><strong>EV</strong><p>Valor esperado da aposta. EV positivo indica vantagem matematica no longo prazo.</p></div>
+            <div class="glossary-item"><strong>Casas</strong><p>Quantidade de casas de apostas consideradas na linha de odd usada na comparacao.</p></div>
+            <div class="glossary-item"><strong>Stake</strong><p>Valor sugerido para a aposta com base em banca e Kelly fracionado.</p></div>
+          </div>
+        </section>
 
-    <div class="foot">Aposta envolve risco. O painel ajuda na selecao, mas nao elimina perdas.</div>
+        <div class="foot">Aposta envolve risco. O painel ajuda na leitura e comparacao, mas nao elimina perdas nem substitui gestao de banca.</div>
+      </main>
+    </div>
   </div>
+
+  <div class="floating-actions">
+    <button id="scrollToTop" class="btn-float" title="Voltar ao topo" style="display:none;">
+      <svg viewBox="0 0 24 24"><path d="M12 4l-8 8h16l-8-8z"/></svg>
+    </button>
+    <button id="quickRefresh" class="btn-float" title="Recarregar dados" onclick="window.location.reload();">
+      <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+    </button>
+  </div>
+
   <script>
+    const scrollBtn = document.getElementById('scrollToTop');
+    window.onscroll = function() {
+      if (document.body.scrollTop > 300 || document.documentElement.scrollTop > 300) {
+        scrollBtn.style.display = "grid";
+      } else {
+        scrollBtn.style.display = "none";
+      }
+    };
+    scrollBtn.onclick = function() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     const riskPresets = {
       "Baixo risco": { oddMin: 1.20, oddMax: 1.95, probMin: 0.62, evMin: 0.03, booksMin: 10 },
       "Medio risco": { oddMin: 1.20, oddMax: 2.20, probMin: 0.55, evMin: 0.02, booksMin: 8 },
@@ -322,13 +905,13 @@
     function applyRiskPreset() {
       const risk = document.getElementById('frisk').value;
       if (risk === 'Personalizado') return;
-      const p = riskPresets[risk];
-      if (!p) return;
-      document.getElementById('foddmin').value = p.oddMin.toFixed(2);
-      document.getElementById('foddmax').value = p.oddMax.toFixed(2);
-      document.getElementById('fprobmin').value = p.probMin.toFixed(2);
-      document.getElementById('fevmin').value = p.evMin.toFixed(3);
-      document.getElementById('fbooks').value = String(p.booksMin);
+      const preset = riskPresets[risk];
+      if (!preset) return;
+      document.getElementById('foddmin').value = preset.oddMin.toFixed(2);
+      document.getElementById('foddmax').value = preset.oddMax.toFixed(2);
+      document.getElementById('fprobmin').value = preset.probMin.toFixed(2);
+      document.getElementById('fevmin').value = preset.evMin.toFixed(3);
+      document.getElementById('fbooks').value = String(preset.booksMin);
     }
 
     function classifyRowsByRisk() {
@@ -343,16 +926,25 @@
           row.classList.add('risk-none');
           return;
         }
-        if (prob >= 0.62 && ev >= 0.03 && odd <= 1.95 && books >= 10) {
-          row.classList.add('risk-low');
-        } else if (prob >= 0.55 && ev >= 0.02 && odd <= 2.20 && books >= 8) {
-          row.classList.add('risk-med');
-        } else if (prob >= 0.48 && ev >= 0.01 && odd <= 2.90 && books >= 5) {
-          row.classList.add('risk-high');
-        } else {
-          row.classList.add('risk-none');
-        }
+        if (prob >= 0.62 && ev >= 0.03 && odd <= 1.95 && books >= 10) row.classList.add('risk-low');
+        else if (prob >= 0.55 && ev >= 0.02 && odd <= 2.20 && books >= 8) row.classList.add('risk-med');
+        else if (prob >= 0.48 && ev >= 0.01 && odd <= 2.90 && books >= 5) row.classList.add('risk-high');
+        else row.classList.add('risk-none');
       });
+    }
+
+    function updateResultsSummary(shownCards, visibleRows) {
+      const competition = document.getElementById('fcomp').value || 'todas as competicoes';
+      const risk = document.getElementById('frisk').value;
+      const team = (document.getElementById('fteam').value || '').trim();
+      const summary = document.getElementById('resultsSummary');
+      const parts = [
+        shownCards + (shownCards === 1 ? ' competicao visivel' : ' competicoes visiveis'),
+        visibleRows + (visibleRows === 1 ? ' linha encontrada' : ' linhas encontradas'),
+        'perfil ' + risk.toLowerCase(),
+      ];
+      if (team) parts.push('busca por "' + team + '"');
+      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' • ') + '.';
     }
 
     function applyFilters() {
@@ -369,59 +961,65 @@
       const evMin = evMinRaw ? parseFloat(evMinRaw) : null;
       const booksMin = booksMinRaw ? parseInt(booksMinRaw, 10) : null;
       const cards = Array.from(document.querySelectorAll('.card[data-comp]'));
+      let shownCards = 0;
+      let visibleRows = 0;
 
       cards.forEach(card => {
         const cardComp = (card.getAttribute('data-comp') || '').toLowerCase();
         const showCard = !comp || cardComp === comp;
+        const emptyState = card.querySelector('.empty-state');
         card.style.display = showCard ? '' : 'none';
-        if (!showCard) return;
+        if (!showCard) {
+          if (emptyState) emptyState.hidden = true;
+          return;
+        }
 
-        const rows = card.querySelectorAll('tbody tr');
+        shownCards += 1;
+        const rows = Array.from(card.querySelectorAll('tbody tr'));
         rows.forEach(row => {
           const txt = (row.textContent || '').toLowerCase();
           const teamOk = !team || txt.includes(team);
-
           let oddOk = true;
           const oneOdd = row.getAttribute('data-odd');
           if (oneOdd) {
-            const v = parseFloat(oneOdd);
-            if (!Number.isNaN(v)) {
-              if (oddMin !== null && v < oddMin) oddOk = false;
-              if (oddMax !== null && v > oddMax) oddOk = false;
+            const value = parseFloat(oneOdd);
+            if (!Number.isNaN(value)) {
+              if (oddMin !== null && value < oddMin) oddOk = false;
+              if (oddMax !== null && value > oddMax) oddOk = false;
             }
-            const rp = parseFloat(row.getAttribute('data-prob') || '');
-            const re = parseFloat(row.getAttribute('data-ev') || '');
-            const rb = parseInt(row.getAttribute('data-books') || '', 10);
-            if (probMin !== null && !Number.isNaN(rp) && rp < probMin) oddOk = false;
-            if (evMin !== null && !Number.isNaN(re) && re < evMin) oddOk = false;
-            if (booksMin !== null && !Number.isNaN(rb) && rb < booksMin) oddOk = false;
+            const rowProb = parseFloat(row.getAttribute('data-prob') || '');
+            const rowEv = parseFloat(row.getAttribute('data-ev') || '');
+            const rowBooks = parseInt(row.getAttribute('data-books') || '', 10);
+            if (probMin !== null && !Number.isNaN(rowProb) && rowProb < probMin) oddOk = false;
+            if (evMin !== null && !Number.isNaN(rowEv) && rowEv < evMin) oddOk = false;
+            if (booksMin !== null && !Number.isNaN(rowBooks) && rowBooks < booksMin) oddOk = false;
           } else {
-            const oh = parseFloat(row.getAttribute('data-odd-home') || '');
-            const od = parseFloat(row.getAttribute('data-odd-draw') || '');
-            const oa = parseFloat(row.getAttribute('data-odd-away') || '');
-            const vals = [oh, od, oa].filter(v => !Number.isNaN(v));
-            if (vals.length > 0) {
-              const minV = Math.min(...vals);
-              const maxV = Math.max(...vals);
-              if (oddMin !== null && maxV < oddMin) oddOk = false;
-              if (oddMax !== null && minV > oddMax) oddOk = false;
+            const odds = ['data-odd-home', 'data-odd-draw', 'data-odd-away']
+              .map(attr => parseFloat(row.getAttribute(attr) || ''))
+              .filter(value => !Number.isNaN(value));
+            if (odds.length > 0) {
+              const minValue = Math.min(...odds);
+              const maxValue = Math.max(...odds);
+              if (oddMin !== null && maxValue < oddMin) oddOk = false;
+              if (oddMax !== null && minValue > oddMax) oddOk = false;
             }
           }
-
-          row.style.display = (teamOk && oddOk) ? '' : 'none';
+          row.style.display = teamOk && oddOk ? '' : 'none';
         });
+
+        const cardVisibleRows = rows.filter(row => row.style.display !== 'none').length;
+        if (emptyState) emptyState.hidden = cardVisibleRows !== 0;
+        visibleRows += cardVisibleRows;
       });
+
       classifyRowsByRisk();
+      updateResultsSummary(shownCards, visibleRows);
     }
 
     document.getElementById('applyFilter').addEventListener('click', applyFilters);
     document.getElementById('fcomp').addEventListener('change', applyFilters);
     document.getElementById('fteam').addEventListener('input', applyFilters);
-    document.getElementById('frisk').addEventListener('change', () => {
-      applyRiskPreset();
-      applyFilters();
-    });
-
+    document.getElementById('frisk').addEventListener('change', () => { applyRiskPreset(); applyFilters(); });
     document.getElementById('clearFilter').addEventListener('click', () => {
       document.getElementById('fcomp').value = '';
       document.getElementById('frisk').value = 'Baixo risco';
@@ -434,10 +1032,7 @@
       applyRiskPreset();
       applyFilters();
     });
-
-    document.getElementById('reloadPage').addEventListener('click', () => {
-      window.location.reload();
-    });
+    document.getElementById('reloadPage').addEventListener('click', () => { window.location.reload(); });
 
     applyRiskPreset();
     applyFilters();

@@ -1,8 +1,9 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time as dt_time
 import re
+import unicodedata
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
@@ -111,22 +112,79 @@ def _infer_year(month: int, now_target: datetime) -> int:
     return year
 
 
-def _convert_fixture_datetime_to_target(text: str) -> str:
-    clean = re.sub(r"\s+", " ", text).strip()
-    match = re.fullmatch(r"(\d{2})\.(\d{2})\.\s+(\d{2}):(\d{2})", clean)
-    if not match:
-        return clean
+def _strip_accents(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    return "".join(char for char in normalized if not unicodedata.combining(char))
 
-    day = int(match.group(1))
-    month = int(match.group(2))
-    hour = int(match.group(3))
-    minute = int(match.group(4))
 
+def _format_target_datetime(target_dt: datetime, include_time: bool) -> str:
     now_target = datetime.now(TARGET_TIMEZONE)
-    year = _infer_year(month, now_target)
-    source_dt = datetime(year, month, day, hour, minute, tzinfo=SOURCE_TIMEZONE)
-    target_dt = source_dt.astimezone(TARGET_TIMEZONE)
-    return target_dt.strftime("%d.%m. %H:%M")
+    day_diff = (target_dt.date() - now_target.date()).days
+
+    if include_time:
+        if day_diff == 0:
+            return target_dt.strftime("Hoje %H:%M")
+        if day_diff == -1:
+            return target_dt.strftime("Ontem %H:%M")
+        if day_diff == 1:
+            return target_dt.strftime("Amanha %H:%M")
+        return target_dt.strftime("%d.%m. %H:%M")
+
+    if day_diff == 0:
+        return "Hoje"
+    if day_diff == -1:
+        return "Ontem"
+    if day_diff == 1:
+        return "Amanha"
+    return target_dt.strftime("%d.%m.")
+
+
+def _convert_source_datetime_to_target(text: str) -> str:
+    clean = re.sub(r"\s+", " ", text).strip()
+    ascii_clean = _strip_accents(clean).casefold()
+
+    relative_with_time = re.fullmatch(r"(hoje|ontem|amanha)\s+(\d{2}):(\d{2})", ascii_clean)
+    if relative_with_time:
+        label = relative_with_time.group(1)
+        hour = int(relative_with_time.group(2))
+        minute = int(relative_with_time.group(3))
+        source_now = datetime.now(SOURCE_TIMEZONE)
+        offset_days = {"ontem": -1, "hoje": 0, "amanha": 1}[label]
+        source_date = source_now.date().fromordinal(source_now.date().toordinal() + offset_days)
+        source_dt = datetime.combine(source_date, dt_time(hour=hour, minute=minute), tzinfo=SOURCE_TIMEZONE)
+        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=True)
+
+    relative_no_time = re.fullmatch(r"(hoje|ontem|amanha)", ascii_clean)
+    if relative_no_time:
+        label = relative_no_time.group(1)
+        source_now = datetime.now(SOURCE_TIMEZONE)
+        offset_days = {"ontem": -1, "hoje": 0, "amanha": 1}[label]
+        source_date = source_now.date().fromordinal(source_now.date().toordinal() + offset_days)
+        source_dt = datetime.combine(source_date, dt_time(hour=12, minute=0), tzinfo=SOURCE_TIMEZONE)
+        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=False)
+
+    full_match = re.fullmatch(r"(\d{2})\.(\d{2})\.\s+(\d{2}):(\d{2})", clean)
+    if full_match:
+        day = int(full_match.group(1))
+        month = int(full_match.group(2))
+        hour = int(full_match.group(3))
+        minute = int(full_match.group(4))
+
+        now_target = datetime.now(TARGET_TIMEZONE)
+        year = _infer_year(month, now_target)
+        source_dt = datetime(year, month, day, hour, minute, tzinfo=SOURCE_TIMEZONE)
+        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=True)
+
+    date_only_match = re.fullmatch(r"(\d{2})\.(\d{2})\.", clean)
+    if date_only_match:
+        day = int(date_only_match.group(1))
+        month = int(date_only_match.group(2))
+        now_target = datetime.now(TARGET_TIMEZONE)
+        year = _infer_year(month, now_target)
+        source_dt = datetime(year, month, day, 12, 0, tzinfo=SOURCE_TIMEZONE)
+        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=False)
+
+    return clean
 
 
 def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
@@ -161,7 +219,7 @@ def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
         odd_d = _extract_odd(odds_cells[1]) if len(odds_cells) > 1 else None
         odd_a = _extract_odd(odds_cells[2]) if len(odds_cells) > 2 else None
 
-        date_text = cells[-1].get_text(" ", strip=True)
+        date_text = _convert_source_datetime_to_target(cells[-1].get_text(" ", strip=True))
         href = match_anchor.get("href")
 
         rows.append(
@@ -208,7 +266,7 @@ def _parse_fixtures(competition: str, base_url: str) -> list[MatchRow]:
             last_datetime_text = datetime_text
         else:
             datetime_text = last_datetime_text
-        datetime_text = _convert_fixture_datetime_to_target(datetime_text)
+        datetime_text = _convert_source_datetime_to_target(datetime_text)
 
         teams = _parse_match_text(match_anchor.get_text(" ", strip=True))
         if teams is None:
