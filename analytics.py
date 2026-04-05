@@ -30,6 +30,9 @@ class BettingSuggestion:
     suggested_stake: float
 
 
+PROBABILITY_CALIBRATION_BINS = [0.0, 0.20, 0.35, 0.50, 0.65, 1.01]
+
+
 def _poisson_pmf(k: int, lam: float) -> float:
     if lam <= 0:
         return 1.0 if k == 0 else 0.0
@@ -70,16 +73,12 @@ def _expected_goals(played: pd.DataFrame, home_team: str, away_team: str) -> tup
     return expected_home, expected_away
 
 
-def calculate_match_probabilities(
-    matches_df: pd.DataFrame,
+def _calculate_raw_match_probabilities(
+    played: pd.DataFrame,
     home_team: str,
     away_team: str,
     max_goals: int = 5,
 ) -> MatchProbabilities:
-    played = matches_df[matches_df["status"] == "Finalizado"].copy()
-    if played.empty:
-        raise ValueError("Nao ha jogos finalizados suficientes para calcular probabilidades.")
-
     expected_home, expected_away = _expected_goals(played, home_team, away_team)
 
     probs_home = [_poisson_pmf(i, expected_home) for i in range(max_goals + 1)]
@@ -133,6 +132,186 @@ def calculate_match_probabilities(
         over_25=over_25,
         top_scorelines=top_scorelines,
     )
+
+
+def _bucket_for_probability(probability: float, bins: list[float]) -> int:
+    clamped = max(0.0, min(1.0, float(probability)))
+    for idx in range(len(bins) - 1):
+        lower = bins[idx]
+        upper = bins[idx + 1]
+        if lower <= clamped < upper:
+            return idx
+    return max(0, len(bins) - 2)
+
+
+def build_probability_calibration(
+    matches_df: pd.DataFrame,
+    *,
+    min_history_matches: int = 40,
+    min_bucket_matches: int = 8,
+    max_goals: int = 5,
+) -> dict[str, object]:
+    if "status" in matches_df.columns:
+        finished = matches_df[matches_df["status"] == "Finalizado"].copy()
+    else:
+        finished = matches_df.copy()
+    finished = _sort_finished_matches_for_backtest(finished)
+    finished = finished.dropna(subset=["home_goals", "away_goals"])
+
+    if finished.empty or len(finished) <= min_history_matches:
+        return {
+            "bins": PROBABILITY_CALIBRATION_BINS,
+            "min_bucket_matches": min_bucket_matches,
+            "markets": {},
+            "market_base": {},
+        }
+
+    rows: list[dict[str, object]] = []
+    for idx in range(min_history_matches, len(finished)):
+        row = finished.iloc[idx]
+        history = finished.iloc[:idx].copy()
+        try:
+            probs = _calculate_raw_match_probabilities(
+                history,
+                str(row["home_team"]),
+                str(row["away_team"]),
+                max_goals=max_goals,
+            )
+        except Exception:
+            continue
+
+        actual_market = result_to_market(float(row["home_goals"]), float(row["away_goals"]))
+        for market, probability in probability_map(probs).items():
+            rows.append(
+                {
+                    "market": market,
+                    "bucket": _bucket_for_probability(float(probability), PROBABILITY_CALIBRATION_BINS),
+                    "hit": market == actual_market,
+                }
+            )
+
+    if not rows:
+        return {
+            "bins": PROBABILITY_CALIBRATION_BINS,
+            "min_bucket_matches": min_bucket_matches,
+            "markets": {},
+            "market_base": {},
+        }
+
+    calibration_df = pd.DataFrame(rows)
+    market_base = (
+        calibration_df.groupby("market", observed=False)["hit"].mean().to_dict()
+        if not calibration_df.empty
+        else {}
+    )
+
+    markets: dict[str, dict[int, dict[str, float | int]]] = {}
+    grouped = calibration_df.groupby(["market", "bucket"], observed=False)["hit"].agg(["mean", "size"]).reset_index()
+    for item in grouped.itertuples(index=False):
+        market = str(item.market)
+        bucket = int(item.bucket)
+        markets.setdefault(market, {})[bucket] = {
+            "hit_rate": float(item.mean),
+            "samples": int(item.size),
+        }
+
+    return {
+        "bins": PROBABILITY_CALIBRATION_BINS,
+        "min_bucket_matches": min_bucket_matches,
+        "markets": markets,
+        "market_base": {str(k): float(v) for k, v in market_base.items()},
+    }
+
+
+def _get_probability_calibration(
+    matches_df: pd.DataFrame,
+    *,
+    min_history_matches: int,
+    min_bucket_matches: int,
+    max_goals: int,
+) -> dict[str, object]:
+    cache = matches_df.attrs.setdefault("_probability_calibration_cache", {})
+    cache_key = (min_history_matches, min_bucket_matches, max_goals, len(matches_df))
+    if cache_key not in cache:
+        cache[cache_key] = build_probability_calibration(
+            matches_df,
+            min_history_matches=min_history_matches,
+            min_bucket_matches=min_bucket_matches,
+            max_goals=max_goals,
+        )
+    return cache[cache_key]
+
+
+def _apply_probability_calibration(
+    probs: MatchProbabilities,
+    calibration: dict[str, object],
+) -> MatchProbabilities:
+    market_map = probability_map(probs)
+    bins = calibration.get("bins", PROBABILITY_CALIBRATION_BINS)
+    min_bucket_matches = int(calibration.get("min_bucket_matches", 0))
+    calibration_markets = calibration.get("markets", {})
+    market_base = calibration.get("market_base", {})
+
+    adjusted: dict[str, float] = {}
+    for market, raw_probability in market_map.items():
+        bucket = _bucket_for_probability(float(raw_probability), list(bins))
+        bucket_info = calibration_markets.get(market, {}).get(bucket)
+        if not bucket_info:
+            adjusted[market] = float(raw_probability)
+            continue
+
+        samples = int(bucket_info.get("samples", 0))
+        if samples < min_bucket_matches:
+            adjusted[market] = float(raw_probability)
+            continue
+
+        empirical_rate = float(bucket_info.get("hit_rate", raw_probability))
+        baseline_rate = float(market_base.get(market, empirical_rate))
+        stabilized_rate = empirical_rate * 0.8 + baseline_rate * 0.2
+        weight = min(0.7, (samples / 30.0) * 0.7)
+        adjusted_probability = (float(raw_probability) * (1.0 - weight)) + (stabilized_rate * weight)
+        adjusted[market] = max(0.01, adjusted_probability)
+
+    normalizer = sum(adjusted.values())
+    if normalizer <= 0:
+        return probs
+
+    return MatchProbabilities(
+        home_win=adjusted["Casa"] / normalizer,
+        draw=adjusted["Empate"] / normalizer,
+        away_win=adjusted["Fora"] / normalizer,
+        expected_home_goals=probs.expected_home_goals,
+        expected_away_goals=probs.expected_away_goals,
+        btts_yes=probs.btts_yes,
+        under_25=probs.under_25,
+        over_25=probs.over_25,
+        top_scorelines=probs.top_scorelines,
+    )
+
+
+def calculate_match_probabilities(
+    matches_df: pd.DataFrame,
+    home_team: str,
+    away_team: str,
+    max_goals: int = 5,
+    *,
+    min_calibration_history: int = 40,
+    min_calibration_bucket: int = 8,
+) -> MatchProbabilities:
+    played = matches_df[matches_df["status"] == "Finalizado"].copy()
+    if played.empty:
+        raise ValueError("Nao ha jogos finalizados suficientes para calcular probabilidades.")
+
+    raw_probs = _calculate_raw_match_probabilities(played, home_team, away_team, max_goals=max_goals)
+    calibration = _get_probability_calibration(
+        matches_df,
+        min_history_matches=min_calibration_history,
+        min_bucket_matches=min_calibration_bucket,
+        max_goals=max_goals,
+    )
+    if not calibration.get("markets"):
+        return raw_probs
+    return _apply_probability_calibration(raw_probs, calibration)
 
 
 def get_team_context(matches_df: pd.DataFrame, team: str, recent_n: int = 5) -> dict:

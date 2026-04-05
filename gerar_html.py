@@ -279,6 +279,13 @@ def _fmt_odd(value: float | None) -> str:
     return f"{float(value):.2f}"
 
 
+def _fmt_score(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    number = float(value)
+    return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
 def _market_label(market: str, home_team: str, away_team: str) -> str:
     if market == "Casa":
         return f"Vitoria {home_team}"
@@ -287,18 +294,111 @@ def _market_label(market: str, home_team: str, away_team: str) -> str:
     return "Empate"
 
 
+def _actual_market_label(home_goals: float | None, away_goals: float | None, home_team: str, away_team: str) -> str:
+    if home_goals is None or away_goals is None or pd.isna(home_goals) or pd.isna(away_goals):
+        return "-"
+    if float(home_goals) > float(away_goals):
+        return f"Vitoria {home_team}"
+    if float(home_goals) < float(away_goals):
+        return f"Vitoria {away_team}"
+    return "Empate"
+
+
 def _slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def _sort_matches_for_display(frame: pd.DataFrame, *, ascending: bool) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    out = frame.copy()
+    if "event_timestamp" in out.columns:
+        out["_event_dt"] = pd.to_datetime(out["event_timestamp"], errors="coerce", utc=True)
+        if out["_event_dt"].notna().any():
+            out = out.sort_values(by=["_event_dt", "home_team", "away_team"], ascending=ascending)
+            return out.drop(columns="_event_dt")
+    return out.reset_index(drop=True)
+
+
+def _best_model_result(probs, home_team: str, away_team: str) -> tuple[str, float]:
+    options = [
+        (f"Vitoria {home_team}", float(probs.home_win)),
+        ("Empate", float(probs.draw)),
+        (f"Vitoria {away_team}", float(probs.away_win)),
+    ]
+    return max(options, key=lambda item: item[1])
+
+
+def _risk_stage_from_metrics(probability: float, expected_value: float, odd: float, bookmakers: int) -> str:
+    if probability >= 0.62 and expected_value >= 0.03 and 1.0 < odd <= 1.95 and bookmakers >= 10:
+        return "Baixo risco"
+    if probability >= 0.55 and expected_value >= 0.02 and 1.0 < odd <= 2.20 and bookmakers >= 8:
+        return "Medio risco"
+    if probability >= 0.48 and expected_value >= 0.01 and 1.0 < odd <= 2.90 and bookmakers >= 5:
+        return "Alto risco"
+    return "Fora dos criterios"
+
+
+def _risk_stage_context(stage: str, suggested_label: str, has_valid_odd: bool = True) -> str:
+    if stage == "Baixo risco":
+        return f"{suggested_label} entra no perfil mais conservador, com odd mais controlada e boa sustentacao estatistica."
+    if stage == "Medio risco":
+        return f"{suggested_label} fica no perfil equilibrado, combinando boa confianca do modelo com retorno potencial moderado."
+    if stage == "Alto risco":
+        return f"{suggested_label} entra no perfil agressivo, aceitando maior variacao para buscar edge mais alto."
+    if not has_valid_odd:
+        return "Sem odd valida para enquadrar o jogo na regua principal de risco do portal."
+    return f"{suggested_label} existe na leitura, mas ainda fica fora da regua principal de risco do portal."
+
+
+def _classify_model_risk(row, probs, home_team: str, away_team: str) -> tuple[str, str]:
+    market_rows = [
+        ("Casa", f"Vitoria {home_team}", float(probs.home_win), getattr(row, "odds_home", None)),
+        ("Empate", "Empate", float(probs.draw), getattr(row, "odds_draw", None)),
+        ("Fora", f"Vitoria {away_team}", float(probs.away_win), getattr(row, "odds_away", None)),
+    ]
+    best_market, best_label, best_prob, best_odd = max(market_rows, key=lambda item: item[2])
+
+    odd_value = float(best_odd) if best_odd is not None and not pd.isna(best_odd) and float(best_odd) > 1.0 else 0.0
+    bookmakers = int(getattr(row, "bookmakers", 0)) if getattr(row, "bookmakers", None) is not None and not pd.isna(getattr(row, "bookmakers", None)) else 0
+    expected_value = (best_prob * odd_value) - 1.0 if odd_value > 1.0 else -1.0
+
+    stage = _risk_stage_from_metrics(best_prob, expected_value, odd_value, bookmakers)
+    return stage, _risk_stage_context(stage, best_label, has_valid_odd=odd_value > 1.0)
 
 
 def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
     home_ctx = get_team_context(df, str(row.home_team))
     away_ctx = get_team_context(df, str(row.away_team))
+    status = str(getattr(row, "status", ""))
+    final_score = ""
+    actual_result = ""
+    model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
+    model_risk_stage, model_risk_context = _classify_model_risk(row, probs, str(row.home_team), str(row.away_team))
+    model_hit = ""
+    if status == "Finalizado":
+        final_score = f"{_fmt_score(getattr(row, 'home_goals', None))} x {_fmt_score(getattr(row, 'away_goals', None))}"
+        actual_result = _actual_market_label(
+            getattr(row, "home_goals", None),
+            getattr(row, "away_goals", None),
+            str(row.home_team),
+            str(row.away_team),
+        )
+        if actual_result != "-":
+            model_hit = "Acertou" if actual_result == model_result else "Errou"
 
     data = {
         "home": str(row.home_team),
         "away": str(row.away_team),
         "date": str(row.date_text),
+        "status": status,
+        "final_score": final_score,
+        "actual_result": actual_result,
+        "model_result": model_result,
+        "model_probability": round(model_probability * 100, 1),
+        "model_risk_stage": model_risk_stage,
+        "model_risk_context": model_risk_context,
+        "model_hit": model_hit,
         "probs": {
             "home": round(probs.home_win * 100, 1),
             "draw": round(probs.draw * 100, 1),
@@ -323,16 +423,39 @@ def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
             "ev": round(tip.expected_value * 100, 2),
             "stake": round(tip.suggested_stake, 2),
         }
-    return escape(json.dumps(data))
+    return json.dumps(data, ensure_ascii=False)
 
 
-def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[str, int | str]]:
+def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[str, int | str], dict[str, object], list[dict[str, object]]]:
     finished = df[df["status"] == "Finalizado"].copy()
     fixtures = df[df["status"] == "Agendado"].copy()
+    finished = _sort_matches_for_display(finished, ascending=False)
+    fixtures = _sort_matches_for_display(fixtures, ascending=True)
     fixtures_valid = fixtures.dropna(subset=["odds_home", "odds_draw", "odds_away"])
+    comp_id = f"comp-{_slugify(name)}"
 
     rows_html = []
     rec_rows = []
+    finished_rows = []
+    analysis_options = []
+    detail_store: dict[str, object] = {}
+    risk_entries: list[dict[str, object]] = []
+    detail_index = 0
+    finished_hits = 0
+    finished_evaluated = 0
+
+    def register_detail(detail_json: str) -> str:
+        nonlocal detail_index
+        try:
+            detail_data = json.loads(detail_json)
+        except json.JSONDecodeError:
+            return ""
+        if not detail_data:
+            return ""
+        detail_index += 1
+        detail_key = f"{comp_id}-detail-{detail_index}"
+        detail_store[detail_key] = detail_data
+        return detail_key
 
     for row in fixtures.head(40).itertuples(index=False):
         detail_json = "{}"
@@ -341,13 +464,13 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             detail_json = _get_detail_json(df, row, probs)
         except Exception:
             pass
+        detail_key = register_detail(detail_json)
 
         rows_html.append(
             "<tr "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
             f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
-            f"data-details=\"{detail_json}\""
             ">"
             f"<td>{escape(str(row.date_text))}</td>"
             f"<td>{escape(str(row.home_team))}</td>"
@@ -356,8 +479,19 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             f"<td>{escape(_fmt_odd(row.odds_draw))}</td>"
             f"<td>{escape(_fmt_odd(row.odds_away))}</td>"
             f"<td>{escape(str(row.bookmakers) if row.bookmakers is not None else '-')}</td>"
-            "<td><button class='btn-mini' onclick='showMatchDetails(this)'>Visualizar</button></td>"
+            f"<td><button class='btn-mini' data-detail-key='{escape(detail_key)}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
             "</tr>"
+        )
+
+    for row in fixtures_valid.head(20).itertuples(index=False):
+        try:
+            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            detail_json = _get_detail_json(df, row, probs)
+        except Exception:
+            detail_json = "{}"
+        detail_key = register_detail(detail_json)
+        analysis_options.append(
+            f"<option data-detail-key=\"{escape(detail_key)}\">[Agendado] {escape(str(row.date_text))} | {escape(str(row.home_team))} x {escape(str(row.away_team))}</option>"
         )
 
     for row in fixtures_valid.head(20).itertuples(index=False):
@@ -372,8 +506,26 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 kelly_fractional=0.25,
             )
             detail_json = _get_detail_json(df, row, probs, tip)
+            detail_key = register_detail(detail_json)
+            bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
+            risk_stage = _risk_stage_from_metrics(float(tip.model_probability), float(tip.expected_value), float(tip.best_odd), bookmakers)
+            if risk_stage != "Fora dos criterios":
+                risk_entries.append(
+                    {
+                        "stage": risk_stage,
+                        "competition": name,
+                        "date_text": str(row.date_text),
+                        "matchup": f"{row.home_team} x {row.away_team}",
+                        "suggestion": _market_label(tip.best_market, str(row.home_team), str(row.away_team)),
+                        "odd": float(tip.best_odd),
+                        "probability": float(tip.model_probability),
+                        "ev": float(tip.expected_value),
+                        "bookmakers": bookmakers,
+                        "detail_key": detail_key,
+                    }
+                )
             rec_rows.append(
-                f"<tr data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{int(row.bookmakers) if row.bookmakers is not None else 0}\" data-details=\"{detail_json}\">"
+                f"<tr data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
                 f"<td>{escape(str(row.date_text))}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
@@ -381,11 +533,62 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 f"<td>{tip.model_probability * 100:.1f}%</td>"
                 f"<td>{tip.expected_value * 100:.2f}%</td>"
                 f"<td>R$ {tip.suggested_stake:.2f}</td>"
-                "<td><button class='btn-mini' onclick='showMatchDetails(this)'>Visualizar</button></td>"
+                f"<td><button class='btn-mini' data-detail-key='{escape(detail_key)}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
                 "</tr>"
             )
         except Exception:
             continue
+
+    for row in finished.head(20).itertuples(index=False):
+        detail_json = "{}"
+        model_result = "-"
+        model_probability = "-"
+        model_hit_label = "-"
+        try:
+            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            model_result, best_prob = _best_model_result(probs, str(row.home_team), str(row.away_team))
+            model_probability = f"{best_prob * 100:.1f}%"
+            actual_result = _actual_market_label(
+                getattr(row, "home_goals", None),
+                getattr(row, "away_goals", None),
+                str(row.home_team),
+                str(row.away_team),
+            )
+            if actual_result != "-":
+                finished_evaluated += 1
+                if actual_result == model_result:
+                    finished_hits += 1
+                    model_hit_label = "Acertou"
+                else:
+                    model_hit_label = "Errou"
+            detail_json = _get_detail_json(df, row, probs)
+        except Exception:
+            pass
+        detail_key = register_detail(detail_json)
+
+        score_text = f"{_fmt_score(row.home_goals)} x {_fmt_score(row.away_goals)}"
+        finished_rows.append(
+            "<tr "
+            f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
+            f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
+            f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
+            ">"
+            f"<td>{escape(str(row.date_text))}</td>"
+            f"<td>{escape(str(row.home_team))}</td>"
+            f"<td>{escape(score_text)}</td>"
+            f"<td>{escape(str(row.away_team))}</td>"
+            f"<td>{escape(model_result)}</td>"
+            f"<td>{escape(model_probability)}</td>"
+            f"<td>{escape(model_hit_label)}</td>"
+            f"<td>{escape(_fmt_odd(row.odds_home))}</td>"
+            f"<td>{escape(_fmt_odd(row.odds_draw))}</td>"
+            f"<td>{escape(_fmt_odd(row.odds_away))}</td>"
+            f"<td><button class='btn-mini' data-detail-key='{escape(detail_key)}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
+            "</tr>"
+        )
+        analysis_options.append(
+            f"<option data-detail-key=\"{escape(detail_key)}\">[Finalizado] {escape(str(row.date_text))} | {escape(str(row.home_team))} {escape(score_text)} {escape(str(row.away_team))}</option>"
+        )
 
     safe_rows = []
     safe_df = build_safe_bets_table(
@@ -414,9 +617,10 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 detail_json = _get_detail_json(df, match_orig, probs, tip)
             except Exception:
                 detail_json = "{}"
+            detail_key = register_detail(detail_json)
 
             safe_rows.append(
-                f"<tr data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\" data-details=\"{detail_json}\">"
+                f"<tr data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
                 f"<td>{escape(str(row.date_text))}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(str(row.market), str(row.home_team), str(row.away_team)))}</td>"
@@ -425,15 +629,17 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 f"<td>{row.expected_value * 100:.2f}%</td>"
                 f"<td>{row.bookmakers}</td>"
                 f"<td>R$ {row.stake:.2f}</td>"
-                "<td><button class='btn-mini' onclick='showMatchDetails(this)'>Visualizar</button></td>"
+                f"<td><button class='btn-mini' data-detail-key='{escape(detail_key)}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
                 "</tr>"
             )
 
-    comp_id = f"comp-{_slugify(name)}"
     stats = {
         "id": comp_id,
         "name": name,
         "finished": len(finished),
+        "finished_hits": finished_hits,
+        "finished_evaluated": finished_evaluated,
+        "finished_hit_rate": round((finished_hits / finished_evaluated) * 100) if finished_evaluated else 0,
         "fixtures": len(fixtures),
         "fixtures_valid": len(fixtures_valid),
         "safe": len(safe_rows),
@@ -452,9 +658,20 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     </div>
     <div class="stats-rail">
       <div class="stat-chip"><span>Finalizados</span><strong>{len(finished)}</strong></div>
+      <div class="stat-chip"><span>Acerto modelo</span><strong>{stats["finished_hit_rate"]}%</strong></div>
       <div class="stat-chip"><span>Futuros</span><strong>{len(fixtures)}</strong></div>
       <div class="stat-chip"><span>Com odds</span><strong>{len(fixtures_valid)}</strong></div>
       <div class="stat-chip"><span>Top seguros</span><strong>{len(safe_rows)}</strong></div>
+    </div>
+  </div>
+
+  <div class="analysis-selector">
+    <label for="selector-{comp_id}">Escolher jogo para analisar</label>
+    <div class="analysis-selector-row">
+      <select id="selector-{comp_id}">
+        {''.join(analysis_options) if analysis_options else '<option>Nenhum jogo disponivel para analise</option>'}
+      </select>
+      <button class="btn secondary" type="button" onclick="showSelectedMatch('selector-{comp_id}')" {'disabled' if not analysis_options else ''}>Abrir analise</button>
     </div>
   </div>
 
@@ -527,21 +744,81 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     </div>
   </div>
 
+  <div class="panel panel-results">
+    <div class="panel-head">
+      <div class="panel-title">
+        <span class="panel-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M6 12h12M12 6v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/>
+          </svg>
+        </span>
+        <div>
+        <div class="panel-kicker">Historico</div>
+        <h3>Resultados recentes</h3>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Mandante</th><th>Placar</th><th>Visitante</th><th>Leitura modelo</th><th>Prob. Modelo</th><th>Acerto</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Acao</th></tr></thead>
+        <tbody>{''.join(finished_rows) if finished_rows else '<tr><td colspan="11">Sem jogos finalizados.</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+
   <p class="empty-state" hidden>Nenhuma linha desta competicao atende aos filtros atuais.</p>
 </section>
 """
-    return section_html, stats
+    return section_html, stats, detail_store, risk_entries
+
+
+def _build_risk_block(title: str, stage: str, description: str, meta: list[str], entries: list[dict[str, object]], tone_class: str) -> str:
+    rows = []
+    ordered_entries = sorted(entries, key=lambda item: (-float(item["probability"]), -float(item["ev"]), str(item["competition"]), str(item["matchup"])))[:12]
+    for entry in ordered_entries:
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(entry['competition']))}</td>"
+            f"<td>{escape(str(entry['date_text']))}</td>"
+            f"<td>{escape(str(entry['matchup']))}</td>"
+            f"<td>{escape(str(entry['suggestion']))}</td>"
+            f"<td>{float(entry['odd']):.2f}</td>"
+            f"<td>{float(entry['probability']) * 100:.1f}%</td>"
+            f"<td>{float(entry['ev']) * 100:.2f}%</td>"
+            f"<td>{int(entry['bookmakers'])}</td>"
+            f"<td><button class='btn-mini' data-detail-key='{escape(str(entry['detail_key']))}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
+            "</tr>"
+        )
+
+    return f"""
+    <article class="risk-card {tone_class}">
+      <span class="risk-badge">{escape(title)}</span>
+      <strong>{escape(description)}</strong>
+      <div class="risk-meta">{''.join(f'<span>{escape(item)}</span>' for item in meta)}</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Competicao</th><th>Data</th><th>Jogo</th><th>Leitura</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Acao</th></tr></thead>
+          <tbody>{''.join(rows) if rows else '<tr><td colspan="9">Nenhum jogo se encaixa nesta faixa no momento.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </article>
+    """
 
 
 def build_index_html() -> str:
     sections: list[str] = []
     competition_stats: list[dict[str, int | str]] = []
+    detail_registry: dict[str, object] = {}
+    global_risk_entries: list[dict[str, object]] = []
 
     for comp in COMPETITIONS:
         df = load_competition_matches(comp)
-        section_html, stats = _build_competition_section(comp, df)
+        section_html, stats, section_details, section_risk_entries = _build_competition_section(comp, df)
         sections.append(section_html)
         competition_stats.append(stats)
+        detail_registry.update(section_details)
+        global_risk_entries.extend(section_risk_entries)
 
     total_finished = sum(int(item["finished"]) for item in competition_stats)
     total_fixtures = sum(int(item["fixtures"]) for item in competition_stats)
@@ -570,6 +847,37 @@ def build_index_html() -> str:
     )
     ai_prompt_html = escape(AI_PROMPT_TEMPLATE)
     ai_prompt_js = AI_PROMPT_TEMPLATE
+    low_risk_entries = [item for item in global_risk_entries if item["stage"] == "Baixo risco"]
+    medium_risk_entries = [item for item in global_risk_entries if item["stage"] == "Medio risco"]
+    high_risk_entries = [item for item in global_risk_entries if item["stage"] == "Alto risco"]
+    risk_blocks_html = "".join(
+        [
+            _build_risk_block(
+                "Baixo risco",
+                "Baixo risco",
+                "Jogos com leitura mais conservadora, maior estabilidade estatistica e cobertura de mercado mais confiavel.",
+                [f"{len(low_risk_entries)} jogos no radar", "Odds ate 1.95", "Prob. minima 62%", "Casas min. 10"],
+                low_risk_entries,
+                "low",
+            ),
+            _build_risk_block(
+                "Medio risco",
+                "Medio risco",
+                "Faixa equilibrada para buscar bom acerto sem abrir mao de algum retorno potencial nas linhas sugeridas.",
+                [f"{len(medium_risk_entries)} jogos no radar", "Odds ate 2.20", "Prob. minima 55%", "Casas min. 8"],
+                medium_risk_entries,
+                "medium",
+            ),
+            _build_risk_block(
+                "Alto risco",
+                "Alto risco",
+                "Jogos mais agressivos, com edge maior e oscilacao mais alta. Faz sentido quando a leitura aceita mais variancia.",
+                [f"{len(high_risk_entries)} jogos no radar", "Odds ate 2.90", "Prob. minima 48%", "Casas min. 5"],
+                high_risk_entries,
+                "high",
+            ),
+        ]
+    )
 
     html = f"""<!doctype html>
 <html lang="pt-BR">
@@ -680,7 +988,7 @@ def build_index_html() -> str:
     .hero-note {{ padding: 16px 18px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }}
     .hero-note span {{ display: block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #bfdbfe; }}
     .hero-note strong {{ display: block; margin-top: 8px; font-size: 1.7rem; line-height: 1.05; }}
-    .hero-note p {{ margin-top: 8px; font-size: .9rem; color: rgba(226,232,240,.82); }}
+    .hero-note p {{ display: none; }}
     .metrics {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }}
     .metric {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }}
     .metric span {{ display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #cfe4ff; }}
@@ -837,6 +1145,107 @@ def build_index_html() -> str:
     .btn:hover, .btn-link:hover {{ transform: translateY(-1px); }}
     .btn-mini {{ padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; cursor: pointer; }}
     .btn-mini:hover {{ background: var(--blue); color: #fff; border-color: var(--blue); }}
+    .launcher-card {{ display: grid; gap: 18px; }}
+    .launcher-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }}
+    .launcher-item {{
+      display: grid;
+      gap: 10px;
+      padding: 18px;
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(241,245,249,.82));
+      border: 1px solid var(--line);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
+    }}
+    .launcher-item strong {{
+      font-size: 1rem;
+      letter-spacing: -.02em;
+    }}
+    .launcher-item span {{
+      color: var(--muted);
+      font-size: .9rem;
+      line-height: 1.55;
+    }}
+    .risk-strip {{
+      display: grid;
+      gap: 16px;
+      margin-top: 14px;
+    }}
+    .risk-strip-head {{
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 12px;
+      flex-wrap: wrap;
+    }}
+    .risk-strip-head p {{
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: .92rem;
+      line-height: 1.58;
+    }}
+    .risk-grid {{
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }}
+    .risk-card {{
+      display: grid;
+      gap: 12px;
+      padding: 18px;
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(241,245,249,.82));
+      border: 1px solid var(--line);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
+    }}
+    .risk-card.low {{ border-color: rgba(34,197,94,.24); }}
+    .risk-card.medium {{ border-color: rgba(245,158,11,.26); }}
+    .risk-card.high {{ border-color: rgba(244,63,94,.24); }}
+    .risk-badge {{
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 7px 11px;
+      border-radius: 999px;
+      font-size: .76rem;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      border: 1px solid currentColor;
+    }}
+    .risk-card.low .risk-badge {{ color: #15803d; background: rgba(34,197,94,.10); }}
+    .risk-card.medium .risk-badge {{ color: #b45309; background: rgba(245,158,11,.12); }}
+    .risk-card.high .risk-badge {{ color: #be123c; background: rgba(244,63,94,.10); }}
+    .risk-card strong {{
+      font-size: 1.02rem;
+      letter-spacing: -.02em;
+    }}
+    .risk-card p {{
+      margin: 0;
+      color: var(--muted);
+      font-size: .9rem;
+      line-height: 1.6;
+    }}
+    .risk-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .risk-meta span {{
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #f8fafc;
+      border: 1px solid rgba(148,163,184,.22);
+      color: #334155;
+      font-size: .78rem;
+      font-weight: 600;
+    }}
+    .risk-card .table-wrap {{ margin-top: 2px; }}
     .ai-module {{ margin-top: 18px; padding: 20px; border-radius: 22px; background: linear-gradient(135deg, rgba(8,22,37,.98), rgba(20,48,79,.98)); color: #f8fafc; border: 1px solid rgba(148,163,184,.16); box-shadow: 0 22px 50px rgba(8,22,37,.18); }}
     .ai-module .eyebrow {{ color: #bfdbfe; }}
     .ai-module h2 {{ color: #ffffff; }}
@@ -845,7 +1254,7 @@ def build_index_html() -> str:
     .ai-module-side {{ display: grid; gap: 12px; }}
     .ai-mini-card {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }}
     .ai-mini-card strong {{ display: block; font-size: .96rem; }}
-    .ai-mini-card p {{ margin: 8px 0 0; color: rgba(226,232,240,.78); line-height: 1.55; }}
+    .ai-mini-card p {{ display: none; }}
     .ai-mini-card label {{ display: block; margin-bottom: 8px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #bfdbfe; }}
     .ai-mini-card input {{ width: 100%; height: 44px; border-radius: 12px; border: 1px solid rgba(191,219,254,.22); padding: 0 14px; font: inherit; color: #ffffff; background: rgba(255,255,255,.08); outline: none; }}
     .ai-mini-card input:focus {{ border-color: rgba(191,219,254,.48); box-shadow: 0 0 0 4px rgba(29,78,216,.12); }}
@@ -855,11 +1264,13 @@ def build_index_html() -> str:
     .ai-prompt-head span {{ color: #bfdbfe; font-size: .82rem; }}
     .ai-prompt-area {{ width: 100%; min-height: 620px; resize: vertical; border-radius: 16px; border: 1px solid rgba(191,219,254,.18); padding: 16px; font: 500 .92rem/1.6 "Plus Jakarta Sans", "Segoe UI", sans-serif; color: #e2e8f0; background: rgba(8,22,37,.72); outline: none; }}
     .ai-prompt-actions {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }}
+    .ai-prompt-preview {{ min-height: 180px; padding: 16px; border-radius: 16px; border: 1px solid rgba(191,219,254,.16); background: rgba(8,22,37,.62); color: #dbeafe; white-space: pre-wrap; line-height: 1.7; }}
     .ai-status {{ margin-top: 10px; color: #bbf7d0; font-size: .85rem; min-height: 1.2em; }}
     .ai-response {{ margin-top: 14px; padding: 16px; border-radius: 16px; background: rgba(8,22,37,.72); border: 1px solid rgba(191,219,254,.16); min-height: 140px; color: #e2e8f0; white-space: pre-wrap; line-height: 1.7; }}
     .legend {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }}
     .pill {{ display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.82); font-size: .84rem; }}
     .pill::before {{ content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: .78; }}
+    .metric p {{ display: none; }}
     .competition-card {{
       position: relative;
       padding: 22px;
@@ -888,10 +1299,12 @@ def build_index_html() -> str:
     .panel-safe {{ border-color: rgba(16,185,129,.22); }}
     .panel-value {{ border-color: rgba(37,99,235,.22); }}
     .panel-agenda {{ border-color: rgba(245,158,11,.24); }}
+    .panel-results {{ border-color: rgba(100,116,139,.24); }}
     .panel-kicker {{ font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--amber); }}
     .panel-safe .panel-kicker {{ color: #059669; }}
     .panel-value .panel-kicker {{ color: var(--blue); }}
     .panel-agenda .panel-kicker {{ color: var(--amber); }}
+    .panel-results .panel-kicker {{ color: #475569; }}
     .panel-title {{
       display: flex;
       align-items: center;
@@ -914,6 +1327,43 @@ def build_index_html() -> str:
     .panel-safe .panel-icon {{ color: #059669; background: rgba(16,185,129,.08); border-color: rgba(16,185,129,.18); }}
     .panel-value .panel-icon {{ color: var(--blue); background: rgba(29,78,216,.08); border-color: rgba(29,78,216,.18); }}
     .panel-agenda .panel-icon {{ color: var(--amber); background: rgba(245,158,11,.10); border-color: rgba(245,158,11,.2); }}
+    .panel-results .panel-icon {{ color: #475569; background: rgba(148,163,184,.10); border-color: rgba(148,163,184,.2); }}
+    .analysis-selector {{
+      margin: 16px 0 0;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.84));
+      border: 1px solid var(--line);
+      display: grid;
+      gap: 10px;
+    }}
+    .analysis-selector label {{
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #334155;
+    }}
+    .analysis-selector-row {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+    }}
+    .analysis-selector select {{
+      width: 100%;
+      height: 46px;
+      border-radius: 14px;
+      border: 1px solid var(--line-strong);
+      padding: 0 14px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+    }}
+    .analysis-selector select:focus {{
+      border-color: rgba(29,78,216,.48);
+      box-shadow: 0 0 0 4px rgba(29,78,216,.08);
+    }}
     .table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: #fff; }}
     table {{ width: 100%; min-width: 780px; border-collapse: collapse; background: #fff; }}
     th, td {{ border-bottom: 1px solid #e8edf4; padding: 11px 12px; text-align: left; font-size: 13px; line-height: 1.5; }}
@@ -979,6 +1429,24 @@ def build_index_html() -> str:
     .modal-body {{ padding: 32px; }}
     .modal-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }}
     .modal-section {{ margin-bottom: 32px; }}
+    .ai-modal-card {{
+      background: linear-gradient(135deg, rgba(8,22,37,.98), rgba(20,48,79,.98));
+      color: #f8fafc;
+      max-width: 1100px;
+    }}
+    .ai-modal-card .modal-head {{
+      background: rgba(8,22,37,.9);
+      border-bottom-color: rgba(191,219,254,.16);
+    }}
+    .ai-modal-card .modal-close {{
+      background: rgba(255,255,255,.1);
+      border-color: rgba(191,219,254,.16);
+      color: #fff;
+    }}
+    .ai-modal-card .modal-close:hover {{ background: rgba(255,255,255,.18); }}
+    .ai-modal-card .copy {{ color: rgba(226,232,240,.82); margin-top: 8px; }}
+    .filter-modal-card {{ max-width: 1180px; }}
+    .filter-modal-card .modal-body {{ display: grid; gap: 18px; }}
     .chart-container {{
       background: #f8fafc;
       border: 1px solid var(--line);
@@ -1029,14 +1497,15 @@ def build_index_html() -> str:
       .dashboard-shell {{ grid-template-columns: 1fr; }}
       .side-rail {{ position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
-    @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid, .ai-module-grid, .modal-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+    @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
     @media (max-width: 760px) {{
       .container {{ padding: 18px 14px 32px; }}
       .topbar {{ align-items: flex-start; }}
       .hero, .card, .competition-card {{ padding: 18px; }}
-      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid {{ grid-template-columns: 1fr; }}
+      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid {{ grid-template-columns: 1fr; }}
       .topbar, .brand-block, .topbar-meta {{ flex-direction: column; align-items: flex-start; }}
       .btn, .btn-link {{ width: 100%; }}
+      .analysis-selector-row {{ grid-template-columns: 1fr; }}
       table {{ min-width: 640px; }}
     }}
   </style>
@@ -1125,72 +1594,38 @@ def build_index_html() -> str:
       </aside>
 
       <main class="dashboard-main">
-        <section class="controls card">
+        <section class="card launcher-card">
           <div class="controls-head">
             <div>
-              <div class="eyebrow">Filtros inteligentes</div>
-              <h2>Refine o painel sem perder contexto</h2>
-              <p class="copy">Os filtros abaixo ajudam a reduzir ruido. O preset de risco preenche uma faixa inicial, mas voce pode personalizar os campos para buscar um perfil mais agressivo ou mais conservador.</p>
+              <div class="eyebrow">Acoes do portal</div>
+              <h2>Atalhos do portal e leitura principal</h2>
+              <p class="copy">Os filtros detalhados continuam disponiveis no modal, mas os blocos de risco abaixo agora mostram diretamente os jogos que ja se encaixam em cada faixa.</p>
             </div>
             <div id="resultsSummary" class="summary-box">Mostrando todas as competicoes e tabelas disponiveis.</div>
           </div>
-
-          <div class="filters">
-            <div class="field"><label for="fcomp">Competicao</label><select id="fcomp"><option value="">Todas</option>{competition_options}</select><div class="hint">Filtra o painel para um campeonato especifico.</div></div>
-            <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para odd, probabilidade, EV e casas.</div></div>
-            <div class="field"><label for="fteam">Time</label><input id="fteam" type="text" placeholder="Ex: Flamengo" /><div class="hint">Busca o nome do time em qualquer tabela visivel.</div></div>
-            <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers.</div></div>
-            <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd.</div></div>
-            <div class="field"><label for="foddmax">Odd maxima</label><input id="foddmax" type="number" step="0.01" min="1.01" placeholder="2.20" /><div class="hint">Limita selecoes acima de uma odd alvo.</div></div>
-            <div class="field"><label for="fprobmin">Probabilidade minima</label><input id="fprobmin" type="number" step="0.01" min="0" max="1" placeholder="0.55" /><div class="hint">Usada apenas nas tabelas com leitura do modelo.</div></div>
-            <div class="field"><label for="fevmin">EV minimo</label><input id="fevmin" type="number" step="0.005" min="0" max="1" placeholder="0.02" /><div class="hint">Mostra entradas com vantagem esperada minima.</div></div>
-          </div>
-
-          <div class="actions">
-            <button id="applyFilter" class="btn primary" type="button">Aplicar filtro</button>
-            <button id="clearFilter" class="btn secondary" type="button">Limpar filtros</button>
-            <a href="./atualizar_painel.bat" class="btn-link">Atualizar dados</a>
-            <button id="reloadPage" class="btn secondary" type="button">Recarregar pagina</button>
+          <div class="launcher-grid">
+            <article class="launcher-item">
+              <strong>Filtros inteligentes</strong>
+              <span>Ajuste competicao, risco, time, odds, EV e casas em uma unica janela de configuracao.</span>
+              <button id="openFilterModal" class="btn secondary" type="button">Configurar</button>
+            </article>
+            <article class="launcher-item">
+              <strong>Modulo de IA</strong>
+              <span>Abra o prompt institucional em modal para atualizar a data, copiar o briefing e executar a leitura quantitativa.</span>
+              <button id="openAiPromptModal" class="btn secondary" type="button">Abrir modulo</button>
+            </article>
           </div>
         </section>
 
-        <section class="ai-module">
-          <div>
-            <div class="eyebrow">Modulo de IA</div>
-            <h2>Prompt institucional para leitura quantitativa</h2>
-            <p class="copy">Use este modulo para montar um briefing completo e enviar para a IA de sua preferencia. A data selecionada entra no prompt automaticamente para facilitar a leitura do dia.</p>
-          </div>
-          <div class="ai-module-grid">
-            <div class="ai-module-side">
-              <div class="ai-mini-card">
-                <label for="aiSelectedDate">Data da analise</label>
-                <input id="aiSelectedDate" type="date" />
-                <p>Escolha a data que deseja analisar antes de copiar o prompt para a IA.</p>
-              </div>
-              <div class="ai-mini-card">
-                <strong>Como usar</strong>
-                <p>1. Selecione a data. 2. Copie o prompt completo. 3. Cole na IA para gerar a leitura institucional dos jogos daquele dia.</p>
-              </div>
-              <div class="ai-mini-card">
-                <strong>Objetivo do modulo</strong>
-                <p>Padronizar a leitura estatistica com foco em value bet, score de risco, confidence score e distribuicao de banca.</p>
-              </div>
-            </div>
-            <div class="ai-prompt-shell">
-              <div class="ai-prompt-head">
-                <strong>Prompt pronto para a IA</strong>
-                <span>Data atualizada automaticamente</span>
-              </div>
-              <textarea id="aiPromptArea" class="ai-prompt-area">{ai_prompt_html}</textarea>
-              <div class="ai-prompt-actions">
-                <button id="updateAiPrompt" class="btn primary" type="button">Atualizar prompt</button>
-                <button id="copyAiPrompt" class="btn secondary" type="button">Copiar prompt</button>
-                <button id="runAiPrompt" class="btn primary" type="button">Executar leitura com IA</button>
-              </div>
-              <div id="aiPromptStatus" class="ai-status"></div>
-              <div id="aiResponse" class="ai-response">A resposta da IA vai aparecer aqui depois da execucao.</div>
+        <section class="card risk-strip">
+          <div class="risk-strip-head">
+            <div>
+              <div class="eyebrow">Jogos por risco</div>
+              <h2>Blocos prontos com os jogos que ja se encaixam</h2>
+              <p>Cada bloco abaixo organiza automaticamente os confrontos pelas faixas de risco do portal. Assim voce le o contexto do risco e ja abre o jogo certo sem precisar configurar nada antes.</p>
             </div>
           </div>
+          <div class="risk-grid">{risk_blocks_html}</div>
         </section>
 
         <div class="legend">
@@ -1271,6 +1706,73 @@ def build_index_html() -> str:
     </div>
   </div>
 
+  <div id="filterModal" class="modal-overlay">
+    <div class="modal-card filter-modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Filtros inteligentes</div>
+          <h2>Configurar painel</h2>
+          <p class="copy">Ajuste a leitura do portal sem deixar esses controles ocupando a tela principal.</p>
+        </div>
+        <button class="modal-close" type="button" onclick="closeFilterModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="filters">
+          <div class="field"><label for="fcomp">Competicao</label><select id="fcomp"><option value="">Todas</option>{competition_options}</select><div class="hint">Filtra o painel para um campeonato especifico.</div></div>
+          <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para odd, probabilidade, EV e casas.</div></div>
+          <div class="field"><label for="fteam">Time</label><input id="fteam" type="text" placeholder="Ex: Flamengo" /><div class="hint">Busca o nome do time em qualquer tabela visivel.</div></div>
+          <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers.</div></div>
+          <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd.</div></div>
+          <div class="field"><label for="foddmax">Odd maxima</label><input id="foddmax" type="number" step="0.01" min="1.01" placeholder="2.20" /><div class="hint">Limita selecoes acima de uma odd alvo.</div></div>
+          <div class="field"><label for="fprobmin">Probabilidade minima</label><input id="fprobmin" type="number" step="0.01" min="0" max="1" placeholder="0.55" /><div class="hint">Usada apenas nas tabelas com leitura do modelo.</div></div>
+          <div class="field"><label for="fevmin">EV minimo</label><input id="fevmin" type="number" step="0.005" min="0" max="1" placeholder="0.02" /><div class="hint">Mostra entradas com vantagem esperada minima.</div></div>
+        </div>
+        <div class="actions">
+          <button id="applyFilter" class="btn primary" type="button">Aplicar filtro</button>
+          <button id="clearFilter" class="btn secondary" type="button">Limpar filtros</button>
+          <a href="./atualizar_painel.bat" class="btn-link">Atualizar dados</a>
+          <button id="reloadPage" class="btn secondary" type="button">Recarregar pagina</button>
+          <button class="btn secondary" type="button" onclick="closeFilterModal()">Fechar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="aiPromptModal" class="modal-overlay">
+    <div class="modal-card ai-modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Leitura quantitativa</div>
+          <h2>Prompt institucional</h2>
+          <p class="copy">Edite o briefing completo, atualize a data quando precisar e execute a leitura sem poluir a tela principal.</p>
+        </div>
+        <button class="modal-close" type="button" onclick="closeAiPromptModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="ai-module-side">
+          <div class="ai-mini-card">
+            <label for="aiSelectedDate">Data da analise</label>
+            <input id="aiSelectedDate" type="date" />
+          </div>
+        </div>
+        <div class="ai-prompt-head">
+          <strong>Prompt pronto para a IA</strong>
+          <span>Data atualizada automaticamente</span>
+        </div>
+        <div id="aiPromptPreview" class="ai-prompt-preview"></div>
+        <textarea id="aiPromptArea" class="ai-prompt-area">{ai_prompt_html}</textarea>
+        <div class="ai-prompt-actions">
+          <button id="modalUpdateAiPrompt" class="btn primary" type="button">Atualizar prompt</button>
+          <button id="modalCopyAiPrompt" class="btn secondary" type="button">Copiar prompt</button>
+          <button id="modalRunAiPrompt" class="btn primary" type="button">Executar leitura com IA</button>
+          <button class="btn secondary" type="button" onclick="closeAiPromptModal()">Fechar</button>
+        </div>
+        <div id="aiPromptStatus" class="ai-status"></div>
+        <div id="aiResponse" class="ai-response">A resposta da IA vai aparecer aqui depois da execucao.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="floating-actions">
     <button id="scrollToTop" class="btn-float" title="Voltar ao topo" style="display:none;">
       <svg viewBox="0 0 24 24"><path d="M12 4l-8 8h16l-8-8z"/></svg>
@@ -1300,21 +1802,40 @@ def build_index_html() -> str:
     }};
 
     let charts = {{}};
+    const matchDetailsStore = {json.dumps(detail_registry, ensure_ascii=False)};
 
     function showMatchDetails(btn) {{
-      const row = btn.closest('tr');
-      const rawData = row.getAttribute('data-details');
-      if (!rawData || rawData === '{{}}') return;
-      const data = JSON.parse(rawData);
+      const detailKey = btn.getAttribute('data-detail-key');
+      if (!detailKey) return;
+      const data = matchDetailsStore[detailKey];
+      if (!data || Object.keys(data).length === 0) return;
       
       document.getElementById('modalTitle').textContent = data.home + ' x ' + data.away;
-      document.getElementById('modalDate').textContent = data.date;
+      const modalMeta = [];
+      if (data.status) modalMeta.push(data.status);
+      if (data.date) modalMeta.push(data.date);
+      if (data.final_score) modalMeta.push('Placar ' + data.final_score);
+      document.getElementById('modalDate').textContent = modalMeta.join(' • ');
       
       const stratBox = document.getElementById('strategyBox');
       if (data.tip) {{
+        const riskLine = data.model_risk_stage ? `<br><strong>Estagio de risco:</strong> ${{data.model_risk_stage}}` : '';
+        const riskContext = data.model_risk_context ? `<br><strong>Contexto do risco:</strong> ${{data.model_risk_context}}` : '';
         stratBox.innerHTML = `<strong>Sugestao:</strong> ${{data.tip.market}}<br>
           <strong>Odd:</strong> ${{data.tip.odd.toFixed(2)}} | <strong>Prob:</strong> ${{data.tip.prob}}% | <strong>EV:</strong> ${{data.tip.ev}}%<br>
-          <strong>Stake Sugerida:</strong> R$ ${{data.tip.stake.toFixed(2)}}`;
+          <strong>Stake Sugerida:</strong> R$ ${{data.tip.stake.toFixed(2)}}${{riskLine}}${{riskContext}}`;
+      }} else if (data.status === 'Finalizado' && data.model_result) {{
+        const actualLine = data.actual_result && data.actual_result !== '-' ? `<br><strong>Resultado real:</strong> ${{data.actual_result}}` : '';
+        const hitLine = data.model_hit ? ` | <strong>Modelo:</strong> ${{data.model_hit}}` : '';
+        const riskLine = data.model_risk_stage ? `<br><strong>Estagio de risco:</strong> ${{data.model_risk_stage}}` : '';
+        const riskContext = data.model_risk_context ? `<br><strong>Contexto do risco:</strong> ${{data.model_risk_context}}` : '';
+        stratBox.innerHTML = `<strong>Leitura do modelo:</strong> ${{data.model_result}}<br>
+          <strong>Prob. Modelo:</strong> ${{data.model_probability}}%${{hitLine}}${{riskLine}}${{actualLine}}${{riskContext}}`;
+      }} else if (data.model_result) {{
+        const riskLine = data.model_risk_stage ? `<br><strong>Estagio de risco:</strong> ${{data.model_risk_stage}}` : '';
+        const riskContext = data.model_risk_context ? `<br><strong>Contexto do risco:</strong> ${{data.model_risk_context}}` : '';
+        stratBox.innerHTML = `<strong>Leitura do modelo:</strong> ${{data.model_result}}<br>
+          <strong>Prob. Modelo:</strong> ${{data.model_probability}}%${{riskLine}}${{riskContext}}`;
       }} else {{
         stratBox.innerHTML = 'Sem recomendacao de entrada para este jogo com base nos criterios do modelo.';
       }}
@@ -1329,20 +1850,73 @@ def build_index_html() -> str:
       document.getElementById('awayPoints').textContent = data.context.away.points;
       document.getElementById('awayForm').textContent = data.context.away.recent_text;
       
-      renderCharts(data);
-      document.getElementById('matchModal').style.display = 'grid';
+      const matchModal = document.getElementById('matchModal');
+      matchModal.style.display = 'grid';
+      requestAnimationFrame(() => renderCharts(data));
     }}
 
     function closeMatchDetails() {{
+      destroyCharts();
       document.getElementById('matchModal').style.display = 'none';
     }}
 
+    function openFilterModal() {{
+      document.getElementById('filterModal').style.display = 'grid';
+    }}
+
+    function closeFilterModal() {{
+      document.getElementById('filterModal').style.display = 'none';
+    }}
+
+    function showSelectedMatch(selectId) {{
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      const option = select.options[select.selectedIndex];
+      if (!option) return;
+      const detailKey = option.getAttribute('data-detail-key');
+      if (!detailKey) return;
+
+      const tempButton = document.createElement('button');
+      tempButton.setAttribute('data-detail-key', detailKey);
+      showMatchDetails(tempButton);
+    }}
+
+    function openAiPromptModal() {{
+      document.getElementById('aiPromptModal').style.display = 'grid';
+    }}
+
+    function closeAiPromptModal() {{
+      document.getElementById('aiPromptModal').style.display = 'none';
+    }}
+
+    function destroyCharts() {{
+      if (charts.chart1x2) {{
+        charts.chart1x2.destroy();
+        charts.chart1x2 = null;
+      }}
+      if (charts.chartAlt) {{
+        charts.chartAlt.destroy();
+        charts.chartAlt = null;
+      }}
+      if (charts.chartScores) {{
+        charts.chartScores.destroy();
+        charts.chartScores = null;
+      }}
+    }}
+
+    function resetChartCanvas(canvasId) {{
+      const currentCanvas = document.getElementById(canvasId);
+      if (!currentCanvas || !currentCanvas.parentNode) return currentCanvas;
+      const nextCanvas = document.createElement('canvas');
+      nextCanvas.id = canvasId;
+      currentCanvas.parentNode.replaceChild(nextCanvas, currentCanvas);
+      return nextCanvas;
+    }}
+
     function renderCharts(data) {{
-      if (charts.c1x2) charts.chart1x2.destroy();
-      if (charts.cAlt) charts.chartAlt.destroy();
-      if (charts.cScores) charts.chartScores.destroy();
+      destroyCharts();
       
-      const ctx1 = document.getElementById('chart1x2').getContext('2d');
+      const ctx1 = resetChartCanvas('chart1x2').getContext('2d');
       charts.chart1x2 = new Chart(ctx1, {{
         type: 'bar',
         data: {{
@@ -1366,7 +1940,7 @@ def build_index_html() -> str:
         options: {{ responsive: true, maintainAspectRatio: false }}
       }});
       
-      const ctx2 = document.getElementById('chartAlt').getContext('2d');
+      const ctx2 = resetChartCanvas('chartAlt').getContext('2d');
       charts.chartAlt = new Chart(ctx2, {{
         type: 'doughnut',
         data: {{
@@ -1379,7 +1953,7 @@ def build_index_html() -> str:
         options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
       }});
       
-      const ctx3 = document.getElementById('chartScores').getContext('2d');
+      const ctx3 = resetChartCanvas('chartScores').getContext('2d');
       charts.chartScores = new Chart(ctx3, {{
         type: 'bar',
         data: {{
@@ -1405,6 +1979,18 @@ def build_index_html() -> str:
       document.getElementById('fprobmin').value = preset.probMin.toFixed(2);
       document.getElementById('fevmin').value = preset.evMin.toFixed(3);
       document.getElementById('fbooks').value = String(preset.booksMin);
+    }}
+
+    function applyRiskProfile(risk) {{
+      const riskField = document.getElementById('frisk');
+      if (!riskField) return;
+      riskField.value = risk;
+      applyRiskPreset();
+      applyFilters();
+      const summary = document.getElementById('resultsSummary');
+      if (summary) {{
+        summary.textContent = 'Perfil ' + risk.toLowerCase() + ' aplicado com os filtros padrao do portal.';
+      }}
     }}
 
     function classifyRowsByRisk() {{
@@ -1454,7 +2040,16 @@ def build_index_html() -> str:
       const promptArea = document.getElementById('aiPromptArea');
       const prompt = aiPromptTemplate.replace('__DATA_SELECIONADA__', formatSelectedDate(dateValue));
       promptArea.value = prompt;
+      refreshAiPromptPreview();
       document.getElementById('aiPromptStatus').textContent = 'Prompt atualizado para a data selecionada.';
+    }}
+
+    function refreshAiPromptPreview() {{
+      const promptArea = document.getElementById('aiPromptArea');
+      const preview = document.getElementById('aiPromptPreview');
+      if (!promptArea || !preview) return;
+      const lines = promptArea.value.split(/\\r?\\n/).map(line => line.trim()).filter(Boolean);
+      preview.textContent = lines.length ? lines.slice(0, 8).join('\\n') : 'Nenhum prompt carregado.';
     }}
 
     async function copyAiPrompt() {{
@@ -1580,6 +2175,7 @@ def build_index_html() -> str:
       updateResultsSummary(shownCards, visibleRows);
     }}
 
+    document.getElementById('openFilterModal').addEventListener('click', openFilterModal);
     document.getElementById('applyFilter').addEventListener('click', applyFilters);
     document.getElementById('fcomp').addEventListener('change', applyFilters);
     document.getElementById('fteam').addEventListener('input', applyFilters);
@@ -1597,10 +2193,31 @@ def build_index_html() -> str:
       applyFilters();
     }});
     document.getElementById('reloadPage').addEventListener('click', () => {{ window.location.reload(); }});
-    document.getElementById('updateAiPrompt').addEventListener('click', updateAiPrompt);
-    document.getElementById('copyAiPrompt').addEventListener('click', copyAiPrompt);
-    document.getElementById('runAiPrompt').addEventListener('click', runAiPrompt);
+    document.getElementById('openAiPromptModal').addEventListener('click', openAiPromptModal);
+    document.getElementById('modalUpdateAiPrompt').addEventListener('click', updateAiPrompt);
+    document.getElementById('modalCopyAiPrompt').addEventListener('click', copyAiPrompt);
+    document.getElementById('modalRunAiPrompt').addEventListener('click', runAiPrompt);
     document.getElementById('aiSelectedDate').addEventListener('change', updateAiPrompt);
+
+    document.getElementById('filterModal').addEventListener('click', (event) => {{
+      if (event.target.id === 'filterModal') closeFilterModal();
+    }});
+
+    document.getElementById('aiPromptModal').addEventListener('click', (event) => {{
+      if (event.target.id === 'aiPromptModal') closeAiPromptModal();
+    }});
+
+    window.addEventListener('click', (event) => {{
+      if (event.target.id === 'matchModal') closeMatchDetails();
+    }});
+
+    window.addEventListener('keydown', (event) => {{
+      if (event.key === 'Escape') {{
+        closeMatchDetails();
+        closeFilterModal();
+        closeAiPromptModal();
+      }}
+    }});
 
     const today = new Date();
     document.getElementById('aiSelectedDate').value = today.toISOString().slice(0, 10);
