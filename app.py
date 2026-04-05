@@ -3,7 +3,7 @@
 import json
 import os
 import time
-from datetime import datetime
+from datetime import date, datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
@@ -12,20 +12,242 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+from gerar_html import AI_PROMPT_TEMPLATE
+from portal_ai_server import run_ai_analysis
 from analytics import (
+    build_backtest_table,
+    build_hedge_scenarios,
+    build_probability_buckets,
     build_safe_bets_table,
     calculate_match_probabilities,
     get_team_context,
+    pick_highest_probability_market,
     suggest_bet_strategy,
+    summarize_backtest,
 )
 from scraper import COMPETITIONS, load_competition_matches
 
 st.set_page_config(page_title="Sistema Apostas Futebol", layout="wide")
 
+# Injetar Chart.js e estilos modernos
+st.markdown("""
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+:root {
+  --bg: #eef3f8;
+  --card: rgba(255,255,255,0.9);
+  --line: rgba(148,163,184,0.28);
+  --text: #112031;
+  --blue: #1d4ed8;
+  --teal: #0f766e;
+  --amber: #d97706;
+}
+
+/* Modal e Gráficos */
+.chart-container {
+  background: rgba(255,255,255,0.6);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+/* Glassmorphism para Cards do Streamlit */
+div[data-testid="stVerticalBlock"] > div:has(div.element-container) {
+    /* Alguns seletores do streamlit para cards */
+}
+
+.modern-details-card {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
+
+
+def _build_match_detail_data(row_data: pd.Series, matches_df: pd.DataFrame) -> dict[str, object]:
+    probs = calculate_match_probabilities(matches_df, row_data["home_team"], row_data["away_team"])
+    home_ctx = get_team_context(matches_df, str(row_data["home_team"]))
+    away_ctx = get_team_context(matches_df, str(row_data["away_team"]))
+    
+    # Se vier da tabela de safe_df, as odds já estão no row_data
+    # Se vier da tabela de valid (futuros), também
+    odd_h = float(row_data.get("odds_home", row_data.get("Odd Casa", row_data.get("odd", 0))))
+    odd_d = float(row_data.get("odds_draw", row_data.get("Odd Empate", 0)))
+    odd_a = float(row_data.get("odds_away", row_data.get("Odd Fora", 0)))
+
+    tip = suggest_bet_strategy(
+        probs,
+        odd_home=odd_h,
+        odd_draw=odd_d,
+        odd_away=odd_a,
+        bankroll=1000.0,
+        kelly_fractional=0.25,
+    )
+
+    data = {
+        "home": str(row_data["home_team"]),
+        "away": str(row_data["away_team"]),
+        "date": str(row_data["date_text"]),
+        "probs": {
+            "home": round(probs.home_win * 100, 1),
+            "draw": round(probs.draw * 100, 1),
+            "away": round(probs.away_win * 100, 1),
+            "btts": round(probs.btts_yes * 100, 1),
+            "over25": round(probs.over_25 * 100, 1),
+            "under25": round(probs.under_25 * 100, 1),
+            "scorelines": [[s, round(p * 100, 1)] for s, p in probs.top_scorelines]
+        },
+        "odds": {
+            "home": odd_h,
+            "draw": odd_d,
+            "away": odd_a
+        },
+        "context": {
+            "home": home_ctx,
+            "away": away_ctx
+        },
+        "tip": {
+            "market": market_label(tip.best_market, str(row_data["home_team"]), str(row_data["away_team"])),
+            "odd": round(tip.best_odd, 2),
+            "prob": round(tip.model_probability * 100, 1),
+            "ev": round(tip.expected_value * 100, 2),
+            "stake": round(tip.suggested_stake, 2)
+        }
+    }
+    return data
+
+
+def render_match_details_modal(match_data: dict[str, object]) -> None:
+    if not match_data:
+        return
+
+    home = str(match_data["home"])
+    away = str(match_data["away"])
+    probs = match_data["probs"]
+    odds = match_data["odds"]
+    ctx = match_data["context"]
+    tip = match_data.get("tip")
+
+    st.markdown(f"""
+<div class="modern-details-card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div>
+            <div class="hero-tag">{match_data["date"]}</div>
+            <h2 style="margin: 5px 0 0; font-size: 1.8rem;">{home} x {away}</h2>
+        </div>
+        <button onclick="window.parent.document.querySelector('button[aria-label=\\'Close\\']').click()" 
+                style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--muted);">×</button>
+    </div>
+
+    <div class="spotlight-grid">
+        <div class="chart-container">
+            <h4 style="margin-top:0;">Probabilidades 1X2 (%)</h4>
+            <canvas id="stChart1x2" style="max-height: 250px;"></canvas>
+        </div>
+        <div class="chart-container">
+            <h4 style="margin-top:0;">Gols e Ambas Marcam (%)</h4>
+            <canvas id="stChartAlt" style="max-height: 250px;"></canvas>
+        </div>
+    </div>
+
+    <div class="spotlight-grid">
+        <div class="chart-container">
+            <h4 style="margin-top:0;">Placares mais prováveis</h4>
+            <canvas id="stChartScores" style="max-height: 250px;"></canvas>
+        </div>
+        <div>
+            <div class="ai-panel" style="margin-bottom: 15px;">
+                <strong>Estrategia do Modelo</strong>
+                <p style="margin: 8px 0 0; font-size: 0.95rem;">
+                    {f"Sugestão: <b>{tip['market']}</b><br>Odd: {tip['odd']:.2f} | EV: {tip['ev']}% | Stake: R$ {tip['stake']:.2f}" if tip else "Sem recomendação clara para este confronto."}
+                </p>
+            </div>
+            <div class="context-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="metric-card" style="background: rgba(29, 78, 216, 0.05); border-color: rgba(29, 78, 216, 0.1);">
+                    <span style="color: var(--blue);">{home}</span>
+                    <strong style="font-size: 1.2rem;">{ctx['home']['rank']}º</strong>
+                    <p style="font-size: 0.8rem;">{ctx['home']['points']} pts | {ctx['home']['recent_text']}</p>
+                </div>
+                <div class="metric-card" style="background: rgba(15, 118, 110, 0.05); border-color: rgba(15, 118, 110, 0.1);">
+                    <span style="color: var(--teal);">{away}</span>
+                    <strong style="font-size: 1.2rem;">{ctx['away']['rank']}º</strong>
+                    <p style="font-size: 0.8rem;">{ctx['away']['points']} pts | {ctx['away']['recent_text']}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Pequeno atraso para garantir que o DOM esteja pronto
+    setTimeout(() => {{
+        const data = {json.dumps(match_data)};
+        
+        // Chart 1x2
+        new Chart(document.getElementById('stChart1x2'), {{
+            type: 'bar',
+            data: {{
+                labels: ['Casa', 'Empate', 'Fora'],
+                datasets: [{{
+                    label: 'Modelo %',
+                    data: [data.probs.home, data.probs.draw, data.probs.away],
+                    backgroundColor: ['rgba(29, 78, 216, 0.7)', 'rgba(148, 163, 184, 0.7)', 'rgba(15, 118, 110, 0.7)'],
+                    borderRadius: 8
+                }}, {{
+                    label: 'Mercado %',
+                    data: [
+                        data.odds.home > 0 ? (100/data.odds.home).toFixed(1) : 0,
+                        data.odds.draw > 0 ? (100/data.odds.draw).toFixed(1) : 0,
+                        data.odds.away > 0 ? (100/data.odds.away).toFixed(1) : 0
+                    ],
+                    backgroundColor: 'rgba(0,0,0,0.1)',
+                    borderRadius: 8
+                }}]
+            }},
+            options: {{ responsive: true, maintainAspectRatio: false }}
+        }});
+
+        // Chart Alt
+        new Chart(document.getElementById('stChartAlt'), {{
+            type: 'doughnut',
+            data: {{
+                labels: ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
+                datasets: [{{
+                    data: [data.probs.btts, data.probs.over25, data.probs.under25],
+                    backgroundColor: ['#fbbf24', '#ef4444', '#10b981']
+                }}]
+            }},
+            options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
+        }});
+
+        // Chart Scores
+        new Chart(document.getElementById('stChartScores'), {{
+            type: 'bar',
+            data: {{
+                labels: data.probs.scorelines.map(s => s[0]),
+                datasets: [{{
+                    label: 'Probabilidade %',
+                    data: data.probs.scorelines.map(s => s[1]),
+                    backgroundColor: 'rgba(29, 78, 216, 0.6)',
+                    borderRadius: 6
+                }}]
+            }},
+            options: {{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }}
+        }});
+    }}, 100);
+</script>
+""", unsafe_allow_html=True)
 
 
 def current_app_timestamp() -> str:
@@ -55,7 +277,7 @@ style.textContent = `
 #fd-floating-dock {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  top: 86px;
   z-index: 999999;
   display: grid;
   gap: 12px;
@@ -157,7 +379,7 @@ style.textContent = `
   #fd-floating-dock {
     right: 12px;
     left: 12px;
-    bottom: 12px;
+    top: 76px;
     justify-items: stretch;
   }
   #fd-floating-dock .fd-meta {
@@ -199,9 +421,9 @@ dock.innerHTML = `
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 17l5-5 4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path><path d="M15 7h5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
       <span class="fd-label">Simular</span>
     </button>
-    <button type="button" class="fd-btn" data-action="agenda" aria-label="Ir para agenda" title="Ir para agenda">
+    <button type="button" class="fd-btn" data-action="agenda" aria-label="Ir para dashboard do modelo" title="Ir para dashboard do modelo">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.8"></rect><path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
-      <span class="fd-label">Agenda</span>
+      <span class="fd-label">Modelo</span>
     </button>
     <button type="button" class="fd-btn" data-action="results" aria-label="Ir para resultados" title="Ir para resultados">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M12 5v14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"></circle></svg>
@@ -222,22 +444,6 @@ const scrollToId = (id) => {
   }
 };
 
-const clickTab = (label) => {
-  const tabs = Array.from(doc.querySelectorAll('[data-baseweb="tab"]'));
-  const target = tabs.find((tab) => (tab.innerText || "").trim().toLowerCase() === label.toLowerCase());
-  if (target) {
-    target.click();
-    return true;
-  }
-  return false;
-};
-
-const openTabAndScroll = (label, anchorId) => {
-  clickTab(label);
-  parentWindow.setTimeout(() => scrollToId(anchorId), 120);
-  parentWindow.setTimeout(() => scrollToId(anchorId), 360);
-};
-
 const updateScrolledState = () => {
   const top = parentWindow.scrollY || doc.documentElement.scrollTop || doc.body.scrollTop || 0;
   dock.classList.toggle("is-scrolled", top > 260);
@@ -247,10 +453,10 @@ dock.querySelectorAll("[data-action]").forEach((button) => {
   button.addEventListener("click", () => {
     const action = button.getAttribute("data-action");
     if (action === "top") scrollToId("panel-top-anchor");
-    if (action === "safe") openTabAndScroll("Jogos Seguros", "anchor-safe");
-    if (action === "simulator") openTabAndScroll("Analise de Jogo", "anchor-simulator");
-    if (action === "agenda") openTabAndScroll("Todos os Futuros", "anchor-agenda");
-    if (action === "results") openTabAndScroll("Resultados", "anchor-results");
+    if (action === "safe") scrollToId("anchor-safe");
+    if (action === "simulator") scrollToId("anchor-simulator");
+    if (action === "agenda") scrollToId("anchor-dashboard");
+    if (action === "results") scrollToId("anchor-results");
     if (action === "refresh") parentWindow.location.reload();
   });
 });
@@ -307,6 +513,180 @@ def filter_matches_by_team(frame: pd.DataFrame, team_query: str) -> pd.DataFrame
     away = frame["away_team"].fillna("").astype(str).str.casefold()
     mask = home.str.contains(query, regex=False) | away.str.contains(query, regex=False)
     return frame.loc[mask].copy()
+
+
+def sort_matches_for_display(frame: pd.DataFrame, *, ascending: bool) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+
+    out = frame.copy()
+    if "event_timestamp" in out.columns:
+        out["_event_dt"] = pd.to_datetime(out["event_timestamp"], errors="coerce", utc=True)
+        if out["_event_dt"].notna().any():
+            out = out.sort_values(by=["_event_dt", "home_team", "away_team"], ascending=ascending)
+            return out.drop(columns="_event_dt")
+    return out.reset_index(drop=True)
+
+
+def market_badge_label(market: str, home_team: str, away_team: str) -> str:
+    if market == "Casa":
+        return f"Casa | {home_team}"
+    if market == "Fora":
+        return f"Fora | {away_team}"
+    return "Empate"
+
+
+def render_card_grid(cards: list[dict[str, str]]) -> None:
+    if not cards:
+        return
+
+    html = ['<div class="card-grid">']
+    for card in cards:
+        html.append(
+            f"""
+<article class="modern-card">
+  <span>{escape(str(card.get('eyebrow', 'Indicador')))}</span>
+  <strong>{escape(str(card.get('value', '-')))}</strong>
+  <p>{escape(str(card.get('copy', '')))}</p>
+</article>
+"""
+        )
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def render_split_highlight(title: str, copy: str, items: list[str], tone: str = "neutral") -> None:
+    item_html = "".join(f"<li>{escape(item)}</li>" for item in items if str(item).strip())
+    st.markdown(
+        f"""
+<section class="split-highlight split-{escape(tone)}">
+  <div>
+    <div class="section-title">{escape(title)}</div>
+    <div class="section-copy">{escape(copy)}</div>
+  </div>
+  <ul>{item_html}</ul>
+</section>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def render_module_hero(title: str, copy: str, badge: str, aside_title: str, aside_copy: str) -> None:
+    st.markdown(
+        f"""
+<section class="module-hero">
+  <div class="section-header">
+    <div>
+      <div class="hero-tag">{escape(badge)}</div>
+      <h2>{escape(title)}</h2>
+      <p>{escape(copy)}</p>
+    </div>
+    <div class="portal-callout">
+      <strong>{escape(aside_title)}</strong>
+      <p>{escape(aside_copy)}</p>
+    </div>
+  </div>
+</section>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def render_callout_grid(items: list[dict[str, str]]) -> None:
+    if not items:
+        return
+
+    html = ['<div class="callout-grid">']
+    for item in items:
+        html.append(
+            f"""
+<article class="portal-callout">
+  <span class="section-badge">{escape(str(item.get('eyebrow', 'Leitura')))}</span>
+  <strong>{escape(str(item.get('title', 'Resumo')))}</strong>
+  <p>{escape(str(item.get('copy', '')))}</p>
+</article>
+"""
+        )
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def render_embedded_index_portal() -> None:
+    components.html(
+        """
+<script>
+const parentWindow = window.parent;
+const doc = parentWindow.document;
+const host = parentWindow.location.hostname || window.location.hostname || "127.0.0.1";
+
+if (typeof parentWindow.__fdIndexCleanup === "function") {
+  parentWindow.__fdIndexCleanup();
+}
+
+const previousMount = doc.getElementById("fd-index-fullscreen");
+if (previousMount) previousMount.remove();
+const previousStyle = doc.getElementById("fd-index-fullscreen-style");
+if (previousStyle) previousStyle.remove();
+
+const style = doc.createElement("style");
+style.id = "fd-index-fullscreen-style";
+style.textContent = `
+  html, body {
+    background: #e9f1f8 !important;
+  }
+  #fd-index-fullscreen {
+    position: fixed;
+    inset: 0;
+    z-index: 999998;
+    background: #e9f1f8;
+  }
+  #fd-index-fullscreen iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #e9f1f8;
+  }
+`;
+doc.head.appendChild(style);
+
+const mount = doc.createElement("div");
+mount.id = "fd-index-fullscreen";
+mount.innerHTML = `
+  <iframe
+    src="http://${host}:8000/index.html"
+    title="Portal HTML tela cheia"
+    loading="eager"
+    referrerpolicy="no-referrer"
+  ></iframe>
+`;
+doc.body.appendChild(mount);
+
+parentWindow.__fdIndexCleanup = () => {
+  const mounted = doc.getElementById("fd-index-fullscreen");
+  if (mounted) mounted.remove();
+  const mountedStyle = doc.getElementById("fd-index-fullscreen-style");
+  if (mountedStyle) mountedStyle.remove();
+};
+</script>
+""",
+        height=0,
+        width=0,
+    )
+
+
+def clear_embedded_index_portal() -> None:
+    components.html(
+        """
+<script>
+const parentWindow = window.parent;
+if (typeof parentWindow.__fdIndexCleanup === "function") {
+  parentWindow.__fdIndexCleanup();
+}
+</script>
+""",
+        height=0,
+        width=0,
+    )
 
 
 def format_ai_analysis(text: str) -> str:
@@ -816,39 +1196,81 @@ def generate_nvidia_match_chat_reply(match_context: str, conversation: list[dict
 st.markdown(
     """
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
 :root {{
-  --bg: #eef3f8;
-  --card: rgba(255,255,255,0.9);
-  --line: rgba(148,163,184,0.28);
+  --bg: #eef4f7;
+  --card: rgba(255,255,255,0.92);
+  --line: rgba(148,163,184,0.24);
   --line-strong: rgba(148,163,184,0.42);
-  --text: #112031;
-  --muted: #5b6b7d;
+  --text: #0f2235;
+  --muted: #5a6d81;
   --blue: #1d4ed8;
   --teal: #0f766e;
   --amber: #d97706;
-  --shadow: 0 22px 50px rgba(15,23,42,0.09);
+  --ink: #081625;
+  --mint: #dff7ef;
+  --sky: #dbeafe;
+  --shadow: 0 24px 60px rgba(15,23,42,0.10);
 }}
 .stApp {{
+  font-family: "Manrope", "Segoe UI", sans-serif;
   background:
-    radial-gradient(900px 420px at 0% 0%, rgba(59,130,246,0.16), transparent 55%),
-    radial-gradient(860px 420px at 100% 0%, rgba(16,185,129,0.14), transparent 50%),
+    radial-gradient(900px 420px at -10% -10%, rgba(59,130,246,0.20), transparent 55%),
+    radial-gradient(780px 400px at 100% 0%, rgba(16,185,129,0.16), transparent 50%),
+    radial-gradient(520px 280px at 50% 100%, rgba(245,158,11,0.10), transparent 50%),
     var(--bg);
 }}
 .block-container {{
-  padding-top: 1.1rem;
-  max-width: 1320px;
+  padding-top: 1rem;
+  max-width: 1380px;
 }}
 [data-testid="stSidebar"] {{
-  background: linear-gradient(180deg, rgba(8,22,37,0.98), rgba(20,48,79,0.98));
+  background:
+    radial-gradient(circle at top, rgba(96,165,250,0.12), transparent 24%),
+    linear-gradient(180deg, rgba(8,22,37,0.99), rgba(17,40,66,0.98) 48%, rgba(12,62,74,0.98));
   border-right: 1px solid rgba(148,163,184,0.16);
 }}
 [data-testid="stSidebar"] * {{
   color: #e5eef8;
 }}
+[data-testid="stSidebar"] [data-testid="stRadio"] > div {{
+  gap: 10px;
+}}
+[data-testid="stSidebar"] [data-testid="stRadio"] label {{
+  border: 1px solid rgba(191,219,254,0.14);
+  background: rgba(255,255,255,0.06);
+  border-radius: 18px;
+  padding: 12px 14px;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {{
+  transform: translateX(2px);
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(191,219,254,0.22);
+}}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {{
+  background: linear-gradient(135deg, rgba(219,234,254,0.18), rgba(16,185,129,0.12));
+  border-color: rgba(147,197,253,0.34);
+  box-shadow: 0 14px 28px rgba(8,22,37,0.18);
+}}
+[data-testid="stSidebar"] [data-testid="stRadio"] label p {{
+  font-weight: 700;
+  letter-spacing: -.01em;
+}}
 [data-testid="stSidebar"] .stSelectbox label,
 [data-testid="stSidebar"] .stSlider label,
-[data-testid="stSidebar"] .stMarkdown h3 {{
+[data-testid="stSidebar"] .stMarkdown h3,
+[data-testid="stSidebar"] .stMarkdown h4 {{
   color: #ffffff !important;
+}}
+[data-testid="stSidebar"] .stSelectbox > div,
+[data-testid="stSidebar"] .stTextInput input,
+[data-testid="stSidebar"] .stNumberInput input,
+[data-testid="stSidebar"] textarea {{
+  background: rgba(255,255,255,0.10) !important;
+  border-color: rgba(191,219,254,0.18) !important;
+  color: #ffffff !important;
+  border-radius: 16px !important;
 }}
 [data-testid="stSidebar"] .stCaption {{
   color: #bfd6ee !important;
@@ -888,6 +1310,7 @@ st.markdown(
   display: block;
   font-size: .96rem;
   letter-spacing: -.02em;
+  font-family: "Space Grotesk", "Manrope", sans-serif;
 }}
 .brand-copy span {{
   display: block;
@@ -965,6 +1388,7 @@ st.markdown(
   font-size: clamp(2.2rem, 4vw, 3.6rem);
   line-height: .96;
   letter-spacing: -.04em;
+  font-family: "Space Grotesk", "Manrope", sans-serif;
 }}
 .dashboard-hero p {{
   margin: 14px 0 0;
@@ -1277,18 +1701,238 @@ div[data-testid="stDataFrame"] * {{
   font-size: .86rem;
   margin-top: .2rem;
 }}
+.page-shell {{
+  display: grid;
+  gap: 18px;
+}}
+.card-grid {{
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 16px 0 20px;
+}}
+.modern-card {{
+  padding: 18px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(219,234,254,.75), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.99), rgba(244,248,252,.90));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}}
+.modern-card span {{
+  display: block;
+  font-size: .76rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}}
+.modern-card strong {{
+  display: block;
+  margin-top: 10px;
+  font-size: 1.85rem;
+  letter-spacing: -.05em;
+  color: var(--text);
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+}}
+.modern-card p {{
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: .9rem;
+  line-height: 1.5;
+}}
+.spotlight-grid {{
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+  gap: 16px;
+  margin-bottom: 18px;
+}}
+.spotlight-card {{
+  padding: 22px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(219,234,254,.56), transparent 22%),
+    var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}}
+.spotlight-card h3 {{
+  margin: 0;
+  font-size: 1.24rem;
+  letter-spacing: -.03em;
+}}
+.spotlight-card p {{
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}}
+.spotlight-list {{
+  margin: 14px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+}}
+.spotlight-list li {{
+  margin-bottom: 8px;
+}}
+.section-shell {{
+  padding: 18px;
+  border-radius: 26px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.99), rgba(246,249,252,.90));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}}
+.section-shell + .section-shell {{
+  margin-top: 18px;
+}}
+.section-header {{
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}}
+.section-header p {{
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}}
+.section-badge {{
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #eff6ff, #ecfeff);
+  border: 1px solid rgba(148,163,184,.22);
+  color: #334155;
+  font-size: .82rem;
+  font-weight: 700;
+}}
+.module-hero {{
+  position: relative;
+  overflow: hidden;
+  padding: 24px;
+  border-radius: 28px;
+  color: #f8fafc;
+  background: linear-gradient(135deg, #0f2235 0%, #163b54 60%, #0f766e 100%);
+  box-shadow: 0 26px 60px rgba(8,22,37,.18);
+}}
+.module-hero::before {{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top right, rgba(96,165,250,.18), transparent 30%),
+    linear-gradient(120deg, transparent 0%, rgba(255,255,255,.05) 100%);
+}}
+.module-hero > * {{
+  position: relative;
+  z-index: 1;
+}}
+.module-hero h2 {{
+  margin: 10px 0 0;
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  letter-spacing: -.04em;
+  font-family: "Space Grotesk", "Manrope", sans-serif;
+}}
+.module-hero p {{
+  margin: 12px 0 0;
+  max-width: 72ch;
+  color: rgba(226,232,240,.88);
+  line-height: 1.7;
+}}
+.module-hero .hero-tag {{
+  margin: 0;
+}}
+.portal-callout {{
+  padding: 20px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(219,234,254,.85), rgba(223,247,239,.84));
+  border: 1px solid rgba(148,163,184,.18);
+  box-shadow: var(--shadow);
+}}
+.portal-callout strong {{
+  display: block;
+  font-size: 1.04rem;
+  color: var(--text);
+}}
+.portal-callout p {{
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}}
+.callout-grid {{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 18px 0 22px;
+}}
+.callout-grid .portal-callout {{
+  height: 100%;
+}}
+.module-hero .section-header {{
+  align-items: stretch;
+}}
+.module-hero .portal-callout {{
+  min-width: min(100%, 320px);
+  background: linear-gradient(135deg, rgba(255,255,255,.92), rgba(240,249,255,.94));
+}}
+.stTextArea textarea {{
+  border-radius: 18px !important;
+  border: 1px solid rgba(148,163,184,.28) !important;
+  background: rgba(255,255,255,.96) !important;
+}}
+.split-highlight {{
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, .9fr);
+  gap: 16px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  margin: 16px 0;
+}}
+.split-highlight ul {{
+  margin: 0;
+  padding-left: 18px;
+}}
+.split-highlight li {{
+  margin-bottom: 8px;
+}}
+.split-neutral {{
+  background: linear-gradient(135deg, rgba(239,246,255,.85), rgba(240,253,250,.92));
+}}
+.split-warm {{
+  background: linear-gradient(135deg, rgba(255,247,237,.92), rgba(255,251,235,.94));
+}}
+.split-danger {{
+  background: linear-gradient(135deg, rgba(254,242,242,.94), rgba(255,247,237,.92));
+}}
+.table-chip {{
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: .78rem;
+  font-weight: 700;
+}}
+.hero-nav .nav-pill {{
+  text-decoration: none;
+}}
 hr {{
   border: none;
   border-top: 1px solid var(--line);
   margin: 1rem 0;
 }}
 @media (max-width: 1100px) {{
-  .hero-grid, .hero-metrics, .info-strip {{
+  .hero-grid, .hero-metrics, .info-strip, .card-grid, .spotlight-grid, .split-highlight, .callout-grid {{
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }}
 }}
 @media (max-width: 760px) {{
-  .topbar, .hero-grid, .hero-metrics, .info-strip {{
+  .topbar, .hero-grid, .hero-metrics, .info-strip, .card-grid, .spotlight-grid, .split-highlight, .section-header, .callout-grid {{
     display: grid;
     grid-template-columns: 1fr;
   }}
@@ -1299,6 +1943,25 @@ hr {{
 )
 
 with st.sidebar:
+    if "page_menu_v4" not in st.session_state:
+        st.session_state["page_menu_v4"] = "Inicio"
+
+    st.markdown("### Football Data Desk")
+    page = st.radio(
+        "Menus",
+        options=[
+            "Inicio",
+            "IA Institucional",
+            "Jogos Seguros",
+            "Painel do Modelo",
+            "Analise de Jogo",
+            "Todos os Futuros",
+            "Resultados",
+        ],
+        key="page_menu_v4",
+    )
+    st.caption("Use este menu lateral para navegar entre os modulos taticos, analiticos e de IA do portal.")
+    st.markdown("---")
     st.markdown("### Configuracoes")
     competition = st.selectbox("Competicao", options=list(COMPETITIONS.keys()))
     team_filter = st.text_input("Filtrar por time", placeholder="Ex: Flamengo")
@@ -1354,6 +2017,9 @@ with st.sidebar:
     )
     if ai_enabled:
         st.caption(f"Modelo configurado: `{NVIDIA_MODEL}`")
+    st.caption("A home inicial resume a competicao. As demais areas aprofundam os detalhes por tema.")
+
+page = {"Início": "Inicio"}.get(page, page)
 
 try:
     df = get_data(competition)
@@ -1365,10 +2031,6 @@ finished = df[df["status"] == "Finalizado"].copy()
 fixtures = df[df["status"] == "Agendado"].copy()
 valid = fixtures.dropna(subset=["odds_home", "odds_draw", "odds_away"]).copy()
 ai_enabled = bool((os.getenv("NVIDIA_API_KEY") or "").strip())
-
-if fixtures.empty:
-    st.warning("Nao encontrei jogos futuros para esta competicao no momento.")
-    st.stop()
 
 safe_df = build_safe_bets_table(
     matches_df=df,
@@ -1385,6 +2047,22 @@ if team_filter.strip():
     fixtures = filter_matches_by_team(fixtures, team_filter)
     valid = filter_matches_by_team(valid, team_filter)
     safe_df = filter_matches_by_team(safe_df, team_filter)
+
+finished = sort_matches_for_display(finished, ascending=False)
+fixtures = sort_matches_for_display(fixtures, ascending=True)
+valid = sort_matches_for_display(valid, ascending=True)
+
+backtest_df = build_backtest_table(
+    matches_df=df,
+    bankroll=1000.0,
+    kelly_fractional=0.25,
+    min_history_matches=30,
+    max_evaluated_matches=120,
+)
+if team_filter.strip():
+    backtest_df = filter_matches_by_team(backtest_df, team_filter)
+backtest_summary = summarize_backtest(backtest_df)
+probability_buckets = build_probability_buckets(backtest_df)
 
 relaxed_note = ""
 if safe_df.empty and risk_profile != "Personalizado":
@@ -1417,13 +2095,28 @@ finished_count = len(finished)
 fixtures_count = len(fixtures)
 odds_count = len(valid)
 safe_count = len(safe_df)
-recommendation_count = len(valid)
 odds_coverage = _safe_percent(odds_count, fixtures_count)
 safe_rate = _safe_percent(safe_count, odds_count)
-recommendation_rate = _safe_percent(recommendation_count, odds_count)
+model_accuracy = backtest_summary.get("model_accuracy", 0.0)
+house_accuracy = backtest_summary.get("house_accuracy", 0.0)
+value_accuracy = backtest_summary.get("value_accuracy", 0.0)
+value_roi = backtest_summary.get("value_roi", 0.0)
+model_roi = backtest_summary.get("model_roi", 0.0)
+avg_model_edge = backtest_summary.get("avg_model_edge", 0.0)
+tuning_actions = backtest_summary.get("tuning_actions", [])
+page_descriptions = {
+    "Inicio": "Visao executiva com resumo da competicao, IA institucional e resultados recentes do modelo.",
+    "IA Institucional": "Central de leitura do dia com prompt profissional, execucao e resposta completa dentro do portal.",
+    "Jogos Seguros": "Ranking das selecoes mais conservadoras dentro do filtro atual.",
+    "Painel do Modelo": "Comparativo detalhado entre modelo, casas de aposta e entradas por valor.",
+    "Analise de Jogo": "Simulador por confronto com probabilidades, valor e protecao de risco.",
+    "Todos os Futuros": "Agenda completa dos jogos futuros com odds e numero de casas.",
+    "Resultados": "Jogos ja encerrados com comparativo de acerto do modelo.",
+}
 
-st.markdown(
-    f"""
+if page != "Inicio":
+    st.markdown(
+        f"""
 <div id="panel-top-anchor"></div>
 <section class="topbar">
   <div class="brand-block">
@@ -1440,103 +2133,230 @@ st.markdown(
     {"<div class='meta-pill'><strong>Filtro</strong> " + team_filter_display + "</div>" if team_filter.strip() else ""}
   </div>
 </section>
-
-<section class="dashboard-hero">
-  <div class="hero-grid">
-    <div>
-      <div class="hero-tag">Painel analitico no Streamlit</div>
-      <h1>Mercados mais claros para decidir melhor</h1>
-    </div>
-  </div>
-</section>
 """,
-    unsafe_allow_html=True,
-)
+        unsafe_allow_html=True,
+    )
+
+if page == "Inicio":
+    pass
+else:
+    clear_embedded_index_portal()
+    render_module_hero(
+        title=page,
+        copy=page_descriptions.get(page, "Modulo selecionado no menu lateral."),
+        badge="Modulo ativo",
+        aside_title=f"{competition_name} em foco",
+        aside_copy=(
+            f"{fixtures_count} jogos futuros, {finished_count} finalizados e "
+            f"{backtest_summary.get('total_matches', 0)} partidas no comparativo historico."
+        ),
+    )
 
 selected_chat_context = ""
 selected_chat_label = ""
 selected_chat_match_key = ""
+show_safe = pd.DataFrame()
+recent_backtest = sort_matches_for_display(backtest_df, ascending=False)
 
-tab1, tab2, tab3, tab4 = st.tabs(["Jogos Seguros", "Analise de Jogo", "Todos os Futuros", "Resultados"])
+if not safe_df.empty:
+    safe_df = safe_df.copy()
+    safe_df["market_label"] = safe_df.apply(
+        lambda r: market_label(str(r["market"]), str(r["home_team"]), str(r["away_team"])),
+        axis=1,
+    )
+    show_safe = safe_df[
+        [
+            "date_text",
+            "home_team",
+            "away_team",
+            "market_label",
+            "odd",
+            "model_probability",
+            "expected_value",
+            "bookmakers",
+            "safety_score",
+            "match_url",
+        ]
+    ].copy()
+    show_safe.columns = [
+        "Data",
+        "Mandante",
+        "Visitante",
+        "Resultado sugerido",
+        "Odd",
+        "Prob. Modelo",
+        "EV",
+        "Casas",
+        "Score",
+        "Link",
+    ]
+    show_safe["Prob. Modelo"] = (show_safe["Prob. Modelo"] * 100).round(2).astype(str) + "%"
+    show_safe["EV"] = (show_safe["EV"] * 100).round(2).astype(str) + "%"
+    show_safe["Score"] = (show_safe["Score"] * 100).round(1)
 
-with tab1:
+if "institutional_ai_prompt" not in st.session_state:
+    st.session_state["institutional_ai_prompt"] = AI_PROMPT_TEMPLATE.replace("__DATA_SELECIONADA__", date.today().strftime("%d/%m/%Y"))
+if "institutional_ai_result" not in st.session_state:
+    st.session_state["institutional_ai_result"] = ""
+if "institutional_ai_last_date" not in st.session_state:
+    st.session_state["institutional_ai_last_date"] = ""
+
+st.markdown('<div class="page-shell">', unsafe_allow_html=True)
+
+if page == "Inicio":
+    st.markdown(
+        """
+<style>
+header[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+[data-testid="stSidebarCollapsedControl"] {
+  display: none !important;
+}
+section[data-testid="stSidebar"] {
+  display: none !important;
+}
+.stApp .block-container {
+  max-width: none !important;
+  padding: 0 !important;
+}
+[data-testid="stAppViewContainer"] {
+  background: #e9f1f8 !important;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+    render_embedded_index_portal()
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.stop()
+
+elif page == "IA Institucional":
+    render_callout_grid(
+        [
+            {
+                "eyebrow": "Prompt",
+                "title": "Leitura profissional do dia",
+                "copy": "Use o prompt completo para filtrar so os jogos com evidencia estatistica forte e sem forcar previsoes.",
+            },
+            {
+                "eyebrow": "Mercado",
+                "title": "Modelo x odds x value",
+                "copy": "A resposta cruza probabilidades reais, value bets, contexto competitivo, risco e timing de entrada.",
+            },
+            {
+                "eyebrow": "Banca",
+                "title": "Cobertura e protecao",
+                "copy": "A IA tambem sugere aposta principal, cobertura, outsider e leitura de fechamento com foco em perda controlada.",
+            },
+        ]
+    )
+    institutional_date = st.date_input(
+        "Data da analise da IA",
+        value=date.today(),
+        key="institutional_ai_date",
+    )
+    st.session_state["institutional_ai_prompt"] = st.text_area(
+        "Prompt institucional da IA",
+        value=st.session_state.get("institutional_ai_prompt", ""),
+        height=360,
+        key="institutional_ai_prompt_area",
+    )
+
+    ai_day_col1, ai_day_col2 = st.columns([1, 1.2])
+    with ai_day_col1:
+        if st.button("Atualizar prompt com a data", use_container_width=True, key="institutional_ai_update"):
+            st.session_state["institutional_ai_prompt"] = AI_PROMPT_TEMPLATE.replace(
+                "__DATA_SELECIONADA__", institutional_date.strftime("%d/%m/%Y")
+            )
+            st.session_state["institutional_ai_prompt_area"] = st.session_state["institutional_ai_prompt"]
+            st.rerun()
+    with ai_day_col2:
+        run_institutional_ai = st.button(
+            "Executar leitura institucional com IA",
+            use_container_width=True,
+            key="institutional_ai_run",
+            disabled=not ai_enabled,
+        )
+
+    if not ai_enabled:
+        st.info("A IA institucional fica disponivel quando a variavel NVIDIA_API_KEY estiver configurada.")
+    elif run_institutional_ai:
+        try:
+            with st.spinner("Montando o contexto dos jogos e consultando a IA..."):
+                st.session_state["institutional_ai_result"] = run_ai_analysis(
+                    prompt=st.session_state.get("institutional_ai_prompt_area", st.session_state["institutional_ai_prompt"]),
+                    selected_date=institutional_date,
+                )
+                st.session_state["institutional_ai_last_date"] = institutional_date.strftime("%d/%m/%Y")
+        except Exception as exc:
+            st.session_state["institutional_ai_result"] = ""
+            st.error(f"Nao foi possivel gerar a leitura institucional: {exc}")
+
+    if st.session_state.get("institutional_ai_result"):
+        st.markdown(
+            """
+<div class="ai-panel">
+  <div class="section-title">Resposta da IA institucional</div>
+  <div class="section-copy">Analise completa do dia baseada no prompt profissional e na base local do portal.</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        st.markdown(st.session_state["institutional_ai_result"])
+
+elif page == "Jogos Seguros":
     st.markdown('<div id="anchor-safe"></div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="panel-card"><div class="section-title">Ranking de Jogos Mais Seguros</div><div class="section-copy">Comece por aqui para ver as selecoes mais conservadoras da competicao ativa, com equilibrio entre probabilidade do modelo, EV, odd e numero de casas.</div></div>',
+        """
+<section class="section-shell">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Ranking de Jogos Mais Seguros</div>
+      <p>Visao conservadora, combinando probabilidade, EV, odd e numero de casas para priorizar entradas mais limpas.</p>
+    </div>
+    <div class="section-badge">Filtro ativo</div>
+  </div>
+</section>
+""",
         unsafe_allow_html=True,
     )
     if relaxed_note:
         st.info(relaxed_note)
-    if safe_df.empty:
-        st.warning(
-            "Nenhum jogo passou no filtro atual."
-            + (f" O filtro por time `{team_filter}` tambem esta sendo aplicado." if team_filter.strip() else " Reduza os filtros no menu lateral.")
-        )
-        fallback_df = build_safe_bets_table(
-            matches_df=df,
-            bankroll=1000.0,
-            kelly_fractional=0.25,
-            min_model_prob=0.35,
-            min_expected_value=-0.05,
-            max_odd=4.00,
-            min_bookmakers=1,
-        )
-        if team_filter.strip():
-            fallback_df = filter_matches_by_team(fallback_df, team_filter)
-        if not fallback_df.empty:
-            fallback_df = fallback_df.copy()
-            fallback_df["market_label"] = fallback_df.apply(
-                lambda r: market_label(str(r["market"]), str(r["home_team"]), str(r["away_team"])),
-                axis=1,
-            )
-            alt = fallback_df[
-                ["date_text", "home_team", "away_team", "market_label", "odd", "model_probability", "expected_value", "bookmakers"]
-            ].copy()
-            alt.columns = ["Data", "Mandante", "Visitante", "Resultado sugerido", "Odd", "Prob. Modelo", "EV", "Casas"]
-            alt["Prob. Modelo"] = (alt["Prob. Modelo"] * 100).round(2).astype(str) + "%"
-            alt["EV"] = (alt["EV"] * 100).round(2).astype(str) + "%"
-            st.markdown("#### Sugestoes alternativas (filtro amplo)")
-            st.dataframe(alt.head(12), use_container_width=True, hide_index=True)
+    
+    if show_safe.empty:
+        st.warning("Nenhum jogo passou no filtro atual.")
     else:
-        safe_df = safe_df.copy()
-        safe_df["market_label"] = safe_df.apply(
-            lambda r: market_label(str(r["market"]), str(r["home_team"]), str(r["away_team"])),
-            axis=1,
+        render_card_grid([
+            {"eyebrow": "Jogos elegiveis", "value": safe_count, "copy": "Partidas que passaram no filtro atual."},
+            {"eyebrow": "Taxa segura", "value": f"{safe_rate}%", "copy": "Percentual dos jogos com odds que viram selecao segura."},
+            {"eyebrow": "Perfil", "value": risk_profile, "copy": "Preset ativo no menu lateral."},
+        ])
+
+        # Adicionar coluna de ação (Visualizar)
+        display_df = show_safe.copy()
+        display_df.insert(0, "Acao", False)
+        
+        selected_safe = st.data_editor(
+            display_df.drop(columns=["Link"]),
+            column_config={
+                "Acao": st.column_config.CheckboxColumn("Detalhes", help="Clique para ver os gráficos deste jogo", default=False),
+                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%.1f"),
+            },
+            disabled=display_df.columns.drop("Acao"),
+            hide_index=True,
+            use_container_width=True,
+            key="safe_data_editor_new"
         )
-        show_safe = safe_df[
-            [
-                "date_text",
-                "home_team",
-                "away_team",
-                "market_label",
-                "odd",
-                "model_probability",
-                "expected_value",
-                "bookmakers",
-                "safety_score",
-                "match_url",
-            ]
-        ].copy()
-        show_safe.columns = [
-            "Data",
-            "Mandante",
-            "Visitante",
-            "Resultado sugerido",
-            "Odd",
-            "Prob. Modelo",
-            "EV",
-            "Casas",
-            "Score",
-            "Link",
-        ]
-        show_safe["Prob. Modelo"] = (show_safe["Prob. Modelo"] * 100).round(2).astype(str) + "%"
-        show_safe["EV"] = (show_safe["EV"] * 100).round(2).astype(str) + "%"
-        show_safe["Score"] = (show_safe["Score"] * 100).round(1)
-        st.markdown("#### Resumo rapido: jogos para apostar agora")
-        resume = show_safe[["Data", "Mandante", "Visitante", "Resultado sugerido", "Odd", "EV"]].head(8).copy()
-        resume["Jogo"] = resume["Mandante"] + " x " + resume["Visitante"]
-        resume = resume[["Data", "Jogo", "Resultado sugerido", "Odd", "EV"]]
-        st.dataframe(resume, use_container_width=True, hide_index=True)
+
+        # Verificar se alguma linha foi marcada
+        checked_rows = selected_safe[selected_safe["Acao"] == True]
+        if not checked_rows.empty:
+            idx = checked_rows.index[0]
+            row_data = safe_df.iloc[idx]
+            match_detail = _build_match_detail_data(row_data, df)
+            render_match_details_modal(match_detail)
 
         best_safe_row = safe_df.iloc[0]
         best_safe_key = f"ai_best_safe_cache_{competition}"
@@ -1597,10 +2417,98 @@ with tab1:
         st.dataframe(show_safe.head(20), use_container_width=True, hide_index=True)
         st.markdown("<div class='small-note'>Score combina probabilidade, EV, odd e numero de casas.</div>", unsafe_allow_html=True)
 
-with tab2:
+elif page == "Painel do Modelo":
+    st.markdown('<div id="anchor-dashboard"></div>', unsafe_allow_html=True)
+    render_card_grid(
+        [
+            {"eyebrow": "Acerto modelo", "value": f"{model_accuracy:.1f}%", "copy": "Percentual de acertos do favorito do modelo."},
+            {"eyebrow": "Acerto casas", "value": f"{house_accuracy:.1f}%", "copy": "Percentual de acertos do favorito do mercado."},
+            {"eyebrow": "Acerto valor", "value": f"{value_accuracy:.1f}%", "copy": "Hit rate das apostas por valor."},
+            {"eyebrow": "ROI valor", "value": f"{value_roi:.1f}%", "copy": "Retorno medio usando stake fixa."},
+        ]
+    )
+    if recent_backtest.empty:
+        st.info("Ainda nao ha jogos suficientes para montar o dashboard detalhado do modelo.")
+    else:
+        render_split_highlight(
+            "Modelo x casas de apostas",
+            "O painel abaixo usa jogos ja finalizados para comparar previsao mais provavel do modelo, favorito das odds e aposta de valor.",
+            tuning_actions if tuning_actions else [
+                f"Modelo: {model_accuracy:.1f}% de acerto.",
+                f"Casas: {house_accuracy:.1f}% de acerto.",
+                f"Divergencia modelo x mercado em {backtest_summary.get('market_disagreement_rate', 0.0):.1f}% dos jogos.",
+            ],
+            tone="warm" if tuning_actions else "neutral",
+        )
+        if not probability_buckets.empty:
+            buckets_view = probability_buckets.copy()
+            buckets_view.columns = ["Faixa do modelo", "Jogos", "Acerto modelo", "Acerto casas", "ROI modelo", "ROI valor", "EV medio"]
+            for col in ["Acerto modelo", "Acerto casas", "ROI modelo", "ROI valor", "EV medio"]:
+                buckets_view[col] = (buckets_view[col] * 100).round(2).astype(str) + "%"
+            st.markdown("#### Calibracao por faixa de probabilidade")
+            st.dataframe(buckets_view, use_container_width=True, hide_index=True)
+
+        model_compare = recent_backtest[
+            [
+                "date_text",
+                "home_team",
+                "away_team",
+                "actual_market",
+                "model_market",
+                "model_probability",
+                "house_market",
+                "house_probability",
+                "value_market",
+                "value_ev",
+                "model_hit",
+                "house_hit",
+                "value_hit",
+            ]
+        ].copy()
+        model_compare["Jogo"] = model_compare["home_team"] + " x " + model_compare["away_team"]
+        model_compare["Modelo"] = model_compare.apply(
+            lambda row: market_badge_label(str(row["model_market"]), str(row["home_team"]), str(row["away_team"])),
+            axis=1,
+        )
+        model_compare["Casas"] = model_compare.apply(
+            lambda row: market_badge_label(str(row["house_market"]), str(row["home_team"]), str(row["away_team"])),
+            axis=1,
+        )
+        model_compare["Valor"] = model_compare.apply(
+            lambda row: market_badge_label(str(row["value_market"]), str(row["home_team"]), str(row["away_team"])),
+            axis=1,
+        )
+        model_compare["Resultado"] = model_compare.apply(
+            lambda row: market_badge_label(str(row["actual_market"]), str(row["home_team"]), str(row["away_team"])),
+            axis=1,
+        )
+        model_compare["Prob. Modelo"] = (model_compare["model_probability"] * 100).round(2).astype(str) + "%"
+        model_compare["Prob. Casas"] = (model_compare["house_probability"] * 100).round(2).astype(str) + "%"
+        model_compare["EV Valor"] = (model_compare["value_ev"] * 100).round(2).astype(str) + "%"
+        model_compare["Hit Modelo"] = model_compare["model_hit"].map({True: "Sim", False: "Nao"})
+        model_compare["Hit Casas"] = model_compare["house_hit"].map({True: "Sim", False: "Nao"})
+        model_compare["Hit Valor"] = model_compare["value_hit"].map({True: "Sim", False: "Nao"})
+        model_compare = model_compare[
+            ["date_text", "Jogo", "Resultado", "Modelo", "Prob. Modelo", "Casas", "Prob. Casas", "Valor", "EV Valor", "Hit Modelo", "Hit Casas", "Hit Valor"]
+        ]
+        model_compare.columns = ["Data", "Jogo", "Resultado final", "Leitura do modelo", "Prob. modelo", "Leitura das casas", "Prob. casas", "Entrada por valor", "EV valor", "Modelo acertou", "Casas acertaram", "Valor acertou"]
+        st.markdown("#### Comparativo detalhado por jogo finalizado")
+        st.dataframe(model_compare.head(30), use_container_width=True, hide_index=True)
+
+elif page == "Analise de Jogo":
     st.markdown('<div id="anchor-simulator"></div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="panel-card"><div class="section-title">Simulador de Estrategia por Jogo</div><div class="section-copy">Escolha um confronto para comparar probabilidades, odds, mercado de valor e a nova analise detalhada com IA no mesmo fluxo.</div></div>',
+        """
+<section class="section-shell">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Simulador de Estrategia por Jogo</div>
+      <p>Compare probabilidades do modelo, consenso das odds e cenarios de protecao para reduzir perda quando a entrada principal nao bater.</p>
+    </div>
+    <div class="section-badge">Simulador</div>
+  </div>
+</section>
+""",
         unsafe_allow_html=True,
     )
     if valid.empty:
@@ -1614,7 +2522,6 @@ with tab2:
         )
         match_options = valid["match_option_id"].tolist()
         labels_by_option = dict(zip(valid["match_option_id"], valid["match_label"]))
-
         selected_option = st.selectbox(
             "Escolha o jogo",
             options=match_options,
@@ -1623,9 +2530,6 @@ with tab2:
         )
         selected = valid.loc[valid["match_option_id"] == selected_option].iloc[0]
         selected_match_label = str(selected["match_label"])
-
-        st.caption(f"Jogo selecionado: {selected_match_label}")
-        st.caption(f"Dados usados na analise: {selected['home_team']} x {selected['away_team']}")
 
         probs = calculate_match_probabilities(df, selected["home_team"], selected["away_team"])
         tip = suggest_bet_strategy(
@@ -1636,45 +2540,75 @@ with tab2:
             bankroll=1000.0,
             kelly_fractional=0.25,
         )
+        model_market, probable_probability = pick_highest_probability_market(probs)
+        probable_market = market_label(str(model_market), str(selected["home_team"]), str(selected["away_team"]))
         readable_market = market_label(str(tip.best_market), str(selected["home_team"]), str(selected["away_team"]))
-        probable_market, probable_probability = max(
+        market_probs = {
+            "Casa": 1 / float(selected["odds_home"]) if float(selected["odds_home"]) > 1 else 0.0,
+            "Empate": 1 / float(selected["odds_draw"]) if float(selected["odds_draw"]) > 1 else 0.0,
+            "Fora": 1 / float(selected["odds_away"]) if float(selected["odds_away"]) > 1 else 0.0,
+        }
+        market_total = sum(market_probs.values()) or 1.0
+        market_probs = {key: value / market_total for key, value in market_probs.items()}
+        house_market = max(market_probs.items(), key=lambda item: item[1])[0]
+
+        render_card_grid(
             [
-                (f"Vitoria {selected['home_team']}", probs.home_win),
-                ("Empate", probs.draw),
-                (f"Vitoria {selected['away_team']}", probs.away_win),
-            ],
-            key=lambda item: item[1],
+                {"eyebrow": f"Modelo | {selected['home_team']}", "value": f"{probs.home_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_home']:.2f}."},
+                {"eyebrow": "Modelo | Empate", "value": f"{probs.draw * 100:.1f}%", "copy": f"Odd atual {selected['odds_draw']:.2f}."},
+                {"eyebrow": f"Modelo | {selected['away_team']}", "value": f"{probs.away_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_away']:.2f}."},
+                {"eyebrow": "Entrada por valor", "value": f"{tip.expected_value * 100:.2f}%", "copy": readable_market},
+            ]
         )
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric(f"Vitoria {selected['home_team']}", f"{probs.home_win * 100:.1f}%")
-        c2.metric("Empate", f"{probs.draw * 100:.1f}%")
-        c3.metric(f"Vitoria {selected['away_team']}", f"{probs.away_win * 100:.1f}%")
-
-        o1, o2, o3 = st.columns(3)
-        o1.metric("Odd Casa", f"{selected['odds_home']:.2f}")
-        o2.metric("Odd Empate", f"{selected['odds_draw']:.2f}")
-        o3.metric("Odd Fora", f"{selected['odds_away']:.2f}")
-
-        st.info(
-            f"Resultado mais provavel: {probable_market} "
-            f"({probable_probability * 100:.2f}% de chance pelo modelo)."
+        render_split_highlight(
+            "Probabilidade x modelo x casas",
+            "Este bloco mostra se o modelo esta convergindo com o mercado ou se esta comprando uma leitura mais agressiva.",
+            [
+                f"Favorito do modelo: {market_badge_label(str(model_market), str(selected['home_team']), str(selected['away_team']))} ({probable_probability * 100:.2f}%).",
+                f"Favorito das casas: {market_badge_label(str(house_market), str(selected['home_team']), str(selected['away_team']))} ({market_probs[house_market] * 100:.2f}%).",
+                f"Entrada por valor: {readable_market} com edge de {(tip.model_probability - tip.implied_probability) * 100:.2f} pontos.",
+            ],
+            tone="warm" if model_market != house_market else "neutral",
         )
 
         if tip.expected_value > 0:
-            st.success(
-                f"Melhor aposta por valor: {readable_market} | EV: {tip.expected_value * 100:.2f}%"
-            )
+            st.success(f"Melhor aposta por valor: {readable_market} | EV: {tip.expected_value * 100:.2f}%")
         else:
-            st.warning(
-                f"Sem EV positivo no 1X2. Melhor aposta por valor no momento: "
-                f"{readable_market} (EV {tip.expected_value * 100:.2f}%)."
-            )
+            st.warning(f"Sem EV positivo no 1X2. Melhor aposta por valor no momento: {readable_market} (EV {tip.expected_value * 100:.2f}%).")
 
-        st.write(
-            f"Prob. modelo da aposta por valor ({readable_market}): **{tip.model_probability * 100:.2f}%** | "
-            f"Prob. implicita da odd: **{tip.implied_probability * 100:.2f}%**"
+        hedge_df = build_hedge_scenarios(
+            best_market=str(tip.best_market),
+            odd_home=float(selected["odds_home"]),
+            odd_draw=float(selected["odds_draw"]),
+            odd_away=float(selected["odds_away"]),
+            base_stake=float(max(tip.suggested_stake, 10.0)),
         )
+        if not hedge_df.empty:
+            render_split_highlight(
+                "Opcoes de fechamento e protecao",
+                "As simulacoes abaixo usam as odds atuais do painel para montar hedge pre-jogo ou saida parcial planejada. Nao equivalem a cashout ao vivo.",
+                [
+                    "Leve: reduz pouco o risco e preserva mais upside.",
+                    "Balanceado: aproxima os cenarios e corta a perda maxima.",
+                    "Defensivo: protege mais, mas sacrifica parte do lucro se a leitura principal bater.",
+                ],
+                tone="neutral",
+            )
+            hedge_view = hedge_df.copy()
+            hedge_view.columns = [
+                "Perfil",
+                "Mercado principal",
+                "Stake principal",
+                "Budget hedge",
+                "Hedge 1",
+                "Hedge 2",
+                "Lucro se principal bater",
+                "Resultado hedge 1",
+                "Resultado hedge 2",
+                "Pior cenario",
+            ]
+            st.dataframe(hedge_view, use_container_width=True, hide_index=True)
 
         ai_state_key = f"ai_analysis_cache_{competition}_{selected_option}"
         st.markdown(
@@ -1686,7 +2620,6 @@ with tab2:
 """,
             unsafe_allow_html=True,
         )
-
         ai_col1, ai_col2 = st.columns([1.2, 1])
         with ai_col1:
             run_ai = st.button(
@@ -1743,99 +2676,91 @@ with tab2:
         selected_chat_label = selected_match_label
         selected_chat_match_key = f"{competition}_{selected_option}"
 
-        value_bet_line = (
-            f"Vitoria {selected['home_team']}"
-            if tip.best_market == "Casa"
-            else f"Vitoria {selected['away_team']}"
-            if tip.best_market == "Fora"
-            else "Empate"
-        )
-
         reasons = []
         if isinstance(home_ctx.get("rank"), int) and isinstance(away_ctx.get("rank"), int):
             if home_ctx["rank"] < away_ctx["rank"]:
-                reasons.append(
-                    f"Classificacao: {selected['home_team']} esta melhor posicionado "
-                    f"({home_ctx['rank']}º vs {away_ctx['rank']}º)."
-                )
+                reasons.append(f"Classificacao: {selected['home_team']} esta melhor posicionado ({home_ctx['rank']}º vs {away_ctx['rank']}º).")
             elif away_ctx["rank"] < home_ctx["rank"]:
-                reasons.append(
-                    f"Classificacao: {selected['away_team']} esta melhor posicionado "
-                    f"({away_ctx['rank']}º vs {home_ctx['rank']}º)."
-                )
-
+                reasons.append(f"Classificacao: {selected['away_team']} esta melhor posicionado ({away_ctx['rank']}º vs {home_ctx['rank']}º).")
         if home_ctx.get("recent_points", 0) > away_ctx.get("recent_points", 0):
-            reasons.append(
-                f"Momento recente: {selected['home_team']} somou {home_ctx['recent_points']} pontos "
-                f"nos ultimos jogos ({home_ctx['recent_text']})."
-            )
+            reasons.append(f"Momento recente: {selected['home_team']} somou {home_ctx['recent_points']} pontos nos ultimos jogos ({home_ctx['recent_text']}).")
         elif away_ctx.get("recent_points", 0) > home_ctx.get("recent_points", 0):
-            reasons.append(
-                f"Momento recente: {selected['away_team']} somou {away_ctx['recent_points']} pontos "
-                f"nos ultimos jogos ({away_ctx['recent_text']})."
-            )
+            reasons.append(f"Momento recente: {selected['away_team']} somou {away_ctx['recent_points']} pontos nos ultimos jogos ({away_ctx['recent_text']}).")
 
-        btts_line = (
-            "Ambos marcam (SIM) aparece interessante."
-            if probs.btts_yes >= 0.55
-            else "Ambos marcam (NAO) aparece mais conservador."
-        )
-        goal_line = (
-            "Tendencia de Menos de 2.5 gols."
-            if probs.under_25 >= probs.over_25
-            else "Tendencia de Mais de 2.5 gols."
-        )
-
+        btts_line = "Ambos marcam (SIM) aparece interessante." if probs.btts_yes >= 0.55 else "Ambos marcam (NAO) aparece mais conservador."
+        goal_line = "Tendencia de Menos de 2.5 gols." if probs.under_25 >= probs.over_25 else "Tendencia de Mais de 2.5 gols."
         st.markdown(
             f"""
 **Jogo:** {selected['home_team']} x {selected['away_team']} ({selected['date_text']})  
 **Odds atuais (1X2):** Casa `{selected['odds_home']:.2f}` | Empate `{selected['odds_draw']:.2f}` | Fora `{selected['odds_away']:.2f}`  
 **Probabilidades do modelo:** Casa `{probs.home_win*100:.1f}%` | Empate `{probs.draw*100:.1f}%` | Fora `{probs.away_win*100:.1f}%`  
 **Resultado mais provavel:** **{probable_market}** (`{probable_probability*100:.1f}%`)  
-**Melhor aposta por valor:** **{value_bet_line}** (EV `{tip.expected_value*100:.2f}%`)  
+**Melhor aposta por valor:** **{readable_market}** (EV `{tip.expected_value*100:.2f}%`)  
 **Mercados extras:** {btts_line} Prob. BTTS `{probs.btts_yes*100:.1f}%`. {goal_line} Under 2.5 `{probs.under_25*100:.1f}%` / Over 2.5 `{probs.over_25*100:.1f}%`.
 """
         )
-
         if reasons:
             st.markdown("**Principais motivos:**")
             for r in reasons[:3]:
                 st.markdown(f"- {r}")
 
-with tab3:
+elif page == "Todos os Futuros":
     st.markdown('<div id="anchor-agenda"></div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="panel-card"><div class="section-title">Agenda Completa de Jogos Futuros</div><div class="section-copy">Use esta grade para explorar todo o mercado futuro da competicao selecionada e comparar rapidamente mandante, visitante, casas e faixa de odds.</div></div>',
+        """
+<section class="section-shell">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Agenda Completa de Jogos Futuros</div>
+      <p>Use esta grade para explorar todo o mercado futuro da competicao selecionada e comparar rapidamente mandante, visitante, casas e faixa de odds.</p>
+    </div>
+    <div class="section-badge">Agenda</div>
+  </div>
+</section>
+""",
         unsafe_allow_html=True,
     )
-    view_fixtures = fixtures[
-        [
-            "date_text",
-            "home_team",
-            "away_team",
-            "bookmakers",
-            "odds_home",
-            "odds_draw",
-            "odds_away",
-            "match_url",
+    if fixtures.empty:
+        st.info("Nao encontrei jogos futuros para esta competicao no momento.")
+    else:
+        view_fixtures = fixtures[
+            [
+                "date_text",
+                "home_team",
+                "away_team",
+                "bookmakers",
+                "odds_home",
+                "odds_draw",
+                "odds_away",
+                "match_url",
+            ]
+        ].copy()
+        view_fixtures.columns = [
+            "Data",
+            "Mandante",
+            "Visitante",
+            "Casas",
+            "Odd Casa",
+            "Odd Empate",
+            "Odd Fora",
+            "Link",
         ]
-    ].copy()
-    view_fixtures.columns = [
-        "Data",
-        "Mandante",
-        "Visitante",
-        "Casas",
-        "Odd Casa",
-        "Odd Empate",
-        "Odd Fora",
-        "Link",
-    ]
-    st.dataframe(view_fixtures.reset_index(drop=True), use_container_width=True, hide_index=True)
+        st.dataframe(view_fixtures.reset_index(drop=True), use_container_width=True, hide_index=True)
 
-with tab4:
+elif page == "Resultados":
     st.markdown('<div id="anchor-results"></div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="panel-card"><div class="section-title">Resultados Recentes</div><div class="section-copy">Aqui ficam os jogos ja finalizados da competicao ativa, com placar fechado e horario/data ajustados para a leitura no fuso de Sao Paulo.</div></div>',
+        """
+<section class="section-shell">
+  <div class="section-header">
+    <div>
+      <div class="section-title">Resultados Recentes</div>
+      <p>Jogos ja finalizados da competicao ativa, com comparativo do modelo para medir acerto, ajuste e leitura contra as casas de apostas.</p>
+    </div>
+    <div class="section-badge">Historico</div>
+  </div>
+</section>
+""",
         unsafe_allow_html=True,
     )
     if finished.empty:
@@ -1872,6 +2797,48 @@ with tab4:
             "Link",
         ]
         st.dataframe(view_finished.reset_index(drop=True), use_container_width=True, hide_index=True)
+
+    if recent_backtest.empty:
+        st.info("Ainda nao ha comparativo de modelo suficiente para o historico.")
+    else:
+        render_card_grid(
+            [
+                {"eyebrow": "Acuracia modelo", "value": f"{model_accuracy:.1f}%", "copy": "Favorito do modelo."},
+                {"eyebrow": "Acuracia casas", "value": f"{house_accuracy:.1f}%", "copy": "Favorito das odds."},
+                {"eyebrow": "Acuracia valor", "value": f"{value_accuracy:.1f}%", "copy": "Entrada por valor."},
+                {"eyebrow": "ROI modelo", "value": f"{model_roi:.1f}%", "copy": "Resultado flat stake."},
+            ]
+        )
+        results_compare = recent_backtest[
+            ["date_text", "home_team", "away_team", "actual_score", "actual_market", "model_market", "house_market", "value_market", "model_hit", "house_hit", "value_hit"]
+        ].copy()
+        results_compare["Jogo"] = results_compare["home_team"] + " x " + results_compare["away_team"]
+        results_compare["Resultado"] = results_compare.apply(
+            lambda row: f"{row['actual_score']} | {market_badge_label(str(row['actual_market']), str(row['home_team']), str(row['away_team']))}",
+            axis=1,
+        )
+        results_compare["Modelo"] = results_compare.apply(
+            lambda row: market_badge_label(str(row["model_market"]), str(row["home_team"]), str(row["away_team"])),
+            axis=1,
+        )
+        results_compare["Casas"] = results_compare.apply(
+            lambda row: market_badge_label(str(row["house_market"]), str(row["home_team"]), str(row["away_team"])),
+            axis=1,
+        )
+        results_compare["Valor"] = results_compare.apply(
+            lambda row: market_badge_label(str(row["value_market"]), str(row["home_team"]), str(row["away_team"])),
+            axis=1,
+        )
+        results_compare["Modelo acertou"] = results_compare["model_hit"].map({True: "Sim", False: "Nao"})
+        results_compare["Casas acertaram"] = results_compare["house_hit"].map({True: "Sim", False: "Nao"})
+        results_compare["Valor acertou"] = results_compare["value_hit"].map({True: "Sim", False: "Nao"})
+        results_compare = results_compare[
+            ["date_text", "Jogo", "Resultado", "Modelo", "Casas", "Valor", "Modelo acertou", "Casas acertaram", "Valor acertou"]
+        ]
+        results_compare.columns = ["Data", "Jogo", "Resultado final", "Modelo", "Casas", "Valor", "Modelo acertou", "Casas acertaram", "Valor acertou"]
+        st.dataframe(results_compare.head(30), use_container_width=True, hide_index=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 if selected_chat_context:
     with st.sidebar:
@@ -1970,7 +2937,6 @@ if selected_chat_context:
                 st.markdown(str(message.get("content", "")))
 
 st.markdown("---")
-render_floating_dock(competition_name=competition_name, risk_profile=risk_profile)
 with st.expander("Glossario de siglas e estatisticas"):
     st.markdown('<div class="glossary-box">', unsafe_allow_html=True)
     st.markdown(

@@ -315,3 +315,291 @@ def build_safe_bets_table(
         ascending=False,
     ).reset_index(drop=True)
     return filtered
+
+
+def result_to_market(home_goals: float, away_goals: float) -> str:
+    if float(home_goals) > float(away_goals):
+        return "Casa"
+    if float(home_goals) < float(away_goals):
+        return "Fora"
+    return "Empate"
+
+
+def probability_map(probs: MatchProbabilities) -> dict[str, float]:
+    return {
+        "Casa": float(probs.home_win),
+        "Empate": float(probs.draw),
+        "Fora": float(probs.away_win),
+    }
+
+
+def normalized_implied_probabilities(odd_home: float, odd_draw: float, odd_away: float) -> dict[str, float]:
+    raw = {
+        "Casa": 1.0 / float(odd_home) if odd_home and float(odd_home) > 1.0 else 0.0,
+        "Empate": 1.0 / float(odd_draw) if odd_draw and float(odd_draw) > 1.0 else 0.0,
+        "Fora": 1.0 / float(odd_away) if odd_away and float(odd_away) > 1.0 else 0.0,
+    }
+    total = sum(raw.values())
+    if total <= 0:
+        return raw
+    return {market: value / total for market, value in raw.items()}
+
+
+def pick_highest_probability_market(probs: MatchProbabilities) -> tuple[str, float]:
+    return max(probability_map(probs).items(), key=lambda item: item[1])
+
+
+def get_market_odd(row: pd.Series | dict, market: str) -> float | None:
+    mapping = {
+        "Casa": row.get("odds_home"),
+        "Empate": row.get("odds_draw"),
+        "Fora": row.get("odds_away"),
+    }
+    value = mapping.get(market)
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _sort_finished_matches_for_backtest(matches_df: pd.DataFrame) -> pd.DataFrame:
+    finished = matches_df[matches_df["status"] == "Finalizado"].copy()
+    if finished.empty:
+        return finished
+
+    if "event_timestamp" in finished.columns:
+        finished["_event_dt"] = pd.to_datetime(finished["event_timestamp"], errors="coerce", utc=True)
+        if finished["_event_dt"].notna().any():
+            finished = finished.sort_values(by=["_event_dt", "home_team", "away_team"], ascending=True)
+            return finished.drop(columns="_event_dt").reset_index(drop=True)
+
+    return finished.iloc[::-1].reset_index(drop=True)
+
+
+def build_backtest_table(
+    matches_df: pd.DataFrame,
+    *,
+    bankroll: float = 1000.0,
+    kelly_fractional: float = 0.25,
+    min_history_matches: int = 30,
+    max_evaluated_matches: int = 120,
+) -> pd.DataFrame:
+    finished = _sort_finished_matches_for_backtest(matches_df)
+    finished = finished.dropna(subset=["home_goals", "away_goals", "odds_home", "odds_draw", "odds_away"])
+    if finished.empty or len(finished) <= min_history_matches:
+        return pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    start_idx = max(min_history_matches, len(finished) - max_evaluated_matches)
+
+    for idx in range(start_idx, len(finished)):
+        row = finished.iloc[idx]
+        history = finished.iloc[:idx].copy()
+        if len(history) < min_history_matches:
+            continue
+
+        try:
+            probs = calculate_match_probabilities(history, str(row["home_team"]), str(row["away_team"]))
+            tip = suggest_bet_strategy(
+                probs=probs,
+                odd_home=float(row["odds_home"]),
+                odd_draw=float(row["odds_draw"]),
+                odd_away=float(row["odds_away"]),
+                bankroll=float(bankroll),
+                kelly_fractional=float(kelly_fractional),
+            )
+        except Exception:
+            continue
+
+        model_probs = probability_map(probs)
+        model_market, model_probability = max(model_probs.items(), key=lambda item: item[1])
+        house_probs = normalized_implied_probabilities(
+            float(row["odds_home"]),
+            float(row["odds_draw"]),
+            float(row["odds_away"]),
+        )
+        house_market, house_probability = max(house_probs.items(), key=lambda item: item[1])
+        actual_market = result_to_market(float(row["home_goals"]), float(row["away_goals"]))
+
+        model_odd = get_market_odd(row, model_market)
+        house_odd = get_market_odd(row, house_market)
+        value_odd = get_market_odd(row, str(tip.best_market))
+
+        rows.append(
+            {
+                "date_text": row["date_text"],
+                "event_timestamp": row.get("event_timestamp"),
+                "home_team": row["home_team"],
+                "away_team": row["away_team"],
+                "actual_market": actual_market,
+                "actual_score": f"{int(row['home_goals'])} x {int(row['away_goals'])}",
+                "model_market": model_market,
+                "model_probability": model_probability,
+                "model_odd": model_odd,
+                "model_hit": model_market == actual_market,
+                "model_edge": model_probability - house_probs.get(model_market, 0.0),
+                "house_market": house_market,
+                "house_probability": house_probability,
+                "house_odd": house_odd,
+                "house_hit": house_market == actual_market,
+                "value_market": str(tip.best_market),
+                "value_probability": float(tip.model_probability),
+                "value_odd": value_odd,
+                "value_hit": str(tip.best_market) == actual_market,
+                "value_ev": float(tip.expected_value),
+                "value_edge": float(tip.model_probability) - float(tip.implied_probability),
+                "bookmakers": int(row["bookmakers"]) if "bookmakers" in row and not pd.isna(row["bookmakers"]) else 0,
+                "history_size": int(len(history)),
+                "market_disagreement": model_market != house_market,
+                "model_profit": (float(model_odd) - 1.0) if model_odd and model_market == actual_market else -1.0,
+                "house_profit": (float(house_odd) - 1.0) if house_odd and house_market == actual_market else -1.0,
+                "value_profit": (float(value_odd) - 1.0) if value_odd and str(tip.best_market) == actual_market else -1.0,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def summarize_backtest(backtest_df: pd.DataFrame) -> dict[str, object]:
+    if backtest_df.empty:
+        return {
+            "total_matches": 0,
+            "model_accuracy": 0.0,
+            "house_accuracy": 0.0,
+            "value_accuracy": 0.0,
+            "model_roi": 0.0,
+            "house_roi": 0.0,
+            "value_roi": 0.0,
+            "market_disagreement_rate": 0.0,
+            "avg_model_edge": 0.0,
+            "avg_value_ev": 0.0,
+            "tuning_actions": [],
+        }
+
+    def _pct(series: pd.Series) -> float:
+        return round(float(series.mean()) * 100, 2)
+
+    def _roi(series: pd.Series) -> float:
+        return round(float(series.mean()) * 100, 2)
+
+    model_accuracy = _pct(backtest_df["model_hit"])
+    house_accuracy = _pct(backtest_df["house_hit"])
+    value_accuracy = _pct(backtest_df["value_hit"])
+    model_roi = _roi(backtest_df["model_profit"])
+    house_roi = _roi(backtest_df["house_profit"])
+    value_roi = _roi(backtest_df["value_profit"])
+    disagreement_rate = _pct(backtest_df["market_disagreement"])
+    avg_model_edge = round(float(backtest_df["model_edge"].mean()) * 100, 2)
+    avg_value_ev = round(float(backtest_df["value_ev"].mean()) * 100, 2)
+
+    tuning_actions: list[str] = []
+    if model_accuracy < house_accuracy:
+        tuning_actions.append("Suba a probabilidade minima exigida e priorize jogos em que modelo e mercado convergem.")
+    if value_roi < 0:
+        tuning_actions.append("Reduza a fracao de Kelly e corte odds mais altas ate o ROI do valor voltar para terreno positivo.")
+    if disagreement_rate > 40 and model_accuracy < 55:
+        tuning_actions.append("Quando houver muita divergencia com as casas, trate a entrada como agressiva e diminua exposicao.")
+    if model_accuracy < 50:
+        tuning_actions.append("Se o acerto ficar abaixo de 50%, use filtro extra por numero de casas e descarte jogos muito equilibrados.")
+
+    return {
+        "total_matches": int(len(backtest_df)),
+        "model_accuracy": model_accuracy,
+        "house_accuracy": house_accuracy,
+        "value_accuracy": value_accuracy,
+        "model_roi": model_roi,
+        "house_roi": house_roi,
+        "value_roi": value_roi,
+        "market_disagreement_rate": disagreement_rate,
+        "avg_model_edge": avg_model_edge,
+        "avg_value_ev": avg_value_ev,
+        "tuning_actions": tuning_actions,
+    }
+
+
+def build_probability_buckets(backtest_df: pd.DataFrame) -> pd.DataFrame:
+    if backtest_df.empty:
+        return pd.DataFrame()
+
+    out = backtest_df.copy()
+    out["faixa_modelo"] = pd.cut(
+        out["model_probability"],
+        bins=[0.0, 0.45, 0.55, 0.65, 1.01],
+        labels=["Ate 45%", "45% a 55%", "55% a 65%", "Acima de 65%"],
+        include_lowest=True,
+    )
+
+    grouped = (
+        out.groupby("faixa_modelo", observed=False)
+        .agg(
+            jogos=("model_hit", "size"),
+            acerto_modelo=("model_hit", "mean"),
+            acerto_casas=("house_hit", "mean"),
+            roi_modelo=("model_profit", "mean"),
+            roi_valor=("value_profit", "mean"),
+            ev_medio=("value_ev", "mean"),
+        )
+        .reset_index()
+    )
+    return grouped
+
+
+def build_hedge_scenarios(
+    *,
+    best_market: str,
+    odd_home: float,
+    odd_draw: float,
+    odd_away: float,
+    base_stake: float,
+) -> pd.DataFrame:
+    market_odds = {
+        "Casa": float(odd_home),
+        "Empate": float(odd_draw),
+        "Fora": float(odd_away),
+    }
+    if best_market not in market_odds or base_stake <= 0:
+        return pd.DataFrame()
+
+    hedge_markets = [market for market in market_odds if market != best_market and market_odds[market] > 1.0]
+    if len(hedge_markets) != 2:
+        return pd.DataFrame()
+
+    profiles = [
+        ("Leve", 0.20),
+        ("Balanceado", 0.35),
+        ("Defensivo", 0.50),
+    ]
+    rows: list[dict[str, object]] = []
+
+    for profile_name, hedge_ratio in profiles:
+        hedge_budget = float(base_stake) * hedge_ratio
+        weight = sum(1.0 / market_odds[market] for market in hedge_markets)
+        stakes = {
+            market: hedge_budget / (market_odds[market] * weight)
+            for market in hedge_markets
+        }
+
+        outcome_net: dict[str, float] = {}
+        for outcome, odd in market_odds.items():
+            net = (float(base_stake) * (odd - 1.0)) if outcome == best_market else -float(base_stake)
+            for hedge_market in hedge_markets:
+                hedge_stake = stakes[hedge_market]
+                hedge_odd = market_odds[hedge_market]
+                net += hedge_stake * (hedge_odd - 1.0) if outcome == hedge_market else -hedge_stake
+            outcome_net[outcome] = net
+
+        rows.append(
+            {
+                "perfil": profile_name,
+                "mercado_principal": best_market,
+                "stake_principal": round(float(base_stake), 2),
+                "orcamento_hedge": round(hedge_budget, 2),
+                f"hedge_{hedge_markets[0].lower()}": round(stakes[hedge_markets[0]], 2),
+                f"hedge_{hedge_markets[1].lower()}": round(stakes[hedge_markets[1]], 2),
+                "lucro_se_principal_bater": round(outcome_net[best_market], 2),
+                f"resultado_{hedge_markets[0].lower()}": round(outcome_net[hedge_markets[0]], 2),
+                f"resultado_{hedge_markets[1].lower()}": round(outcome_net[hedge_markets[1]], 2),
+                "pior_cenario": round(min(outcome_net.values()), 2),
+            }
+        )
+
+    return pd.DataFrame(rows)

@@ -33,6 +33,7 @@ class MatchRow:
     competition: str
     status: str
     date_text: str
+    event_timestamp: str | None
     home_team: str
     away_team: str
     home_goals: float | None
@@ -139,7 +140,7 @@ def _format_target_datetime(target_dt: datetime, include_time: bool) -> str:
     return target_dt.strftime("%d.%m.")
 
 
-def _convert_source_datetime_to_target(text: str) -> str:
+def _convert_source_datetime_to_target_parts(text: str) -> tuple[str, str | None]:
     clean = re.sub(r"\s+", " ", text).strip()
     ascii_clean = _strip_accents(clean).casefold()
 
@@ -152,7 +153,8 @@ def _convert_source_datetime_to_target(text: str) -> str:
         offset_days = {"ontem": -1, "hoje": 0, "amanha": 1}[label]
         source_date = source_now.date().fromordinal(source_now.date().toordinal() + offset_days)
         source_dt = datetime.combine(source_date, dt_time(hour=hour, minute=minute), tzinfo=SOURCE_TIMEZONE)
-        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=True)
+        target_dt = source_dt.astimezone(TARGET_TIMEZONE)
+        return _format_target_datetime(target_dt, include_time=True), target_dt.isoformat()
 
     relative_no_time = re.fullmatch(r"(hoje|ontem|amanha)", ascii_clean)
     if relative_no_time:
@@ -161,7 +163,8 @@ def _convert_source_datetime_to_target(text: str) -> str:
         offset_days = {"ontem": -1, "hoje": 0, "amanha": 1}[label]
         source_date = source_now.date().fromordinal(source_now.date().toordinal() + offset_days)
         source_dt = datetime.combine(source_date, dt_time(hour=12, minute=0), tzinfo=SOURCE_TIMEZONE)
-        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=False)
+        target_dt = source_dt.astimezone(TARGET_TIMEZONE)
+        return _format_target_datetime(target_dt, include_time=False), target_dt.isoformat()
 
     full_match = re.fullmatch(r"(\d{2})\.(\d{2})\.\s+(\d{2}):(\d{2})", clean)
     if full_match:
@@ -173,7 +176,8 @@ def _convert_source_datetime_to_target(text: str) -> str:
         now_target = datetime.now(TARGET_TIMEZONE)
         year = _infer_year(month, now_target)
         source_dt = datetime(year, month, day, hour, minute, tzinfo=SOURCE_TIMEZONE)
-        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=True)
+        target_dt = source_dt.astimezone(TARGET_TIMEZONE)
+        return _format_target_datetime(target_dt, include_time=True), target_dt.isoformat()
 
     date_only_match = re.fullmatch(r"(\d{2})\.(\d{2})\.", clean)
     if date_only_match:
@@ -182,9 +186,15 @@ def _convert_source_datetime_to_target(text: str) -> str:
         now_target = datetime.now(TARGET_TIMEZONE)
         year = _infer_year(month, now_target)
         source_dt = datetime(year, month, day, 12, 0, tzinfo=SOURCE_TIMEZONE)
-        return _format_target_datetime(source_dt.astimezone(TARGET_TIMEZONE), include_time=False)
+        target_dt = source_dt.astimezone(TARGET_TIMEZONE)
+        return _format_target_datetime(target_dt, include_time=False), target_dt.isoformat()
 
-    return clean
+    return clean, None
+
+
+def _convert_source_datetime_to_target(text: str) -> str:
+    display_text, _ = _convert_source_datetime_to_target_parts(text)
+    return display_text
 
 
 def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
@@ -219,7 +229,7 @@ def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
         odd_d = _extract_odd(odds_cells[1]) if len(odds_cells) > 1 else None
         odd_a = _extract_odd(odds_cells[2]) if len(odds_cells) > 2 else None
 
-        date_text = _convert_source_datetime_to_target(cells[-1].get_text(" ", strip=True))
+        date_text, event_timestamp = _convert_source_datetime_to_target_parts(cells[-1].get_text(" ", strip=True))
         href = match_anchor.get("href")
 
         rows.append(
@@ -227,6 +237,7 @@ def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
                 competition=competition,
                 status="Finalizado",
                 date_text=date_text,
+                event_timestamp=event_timestamp,
                 home_team=teams[0],
                 away_team=teams[1],
                 home_goals=score[0],
@@ -266,7 +277,7 @@ def _parse_fixtures(competition: str, base_url: str) -> list[MatchRow]:
             last_datetime_text = datetime_text
         else:
             datetime_text = last_datetime_text
-        datetime_text = _convert_source_datetime_to_target(datetime_text)
+        datetime_text, event_timestamp = _convert_source_datetime_to_target_parts(datetime_text)
 
         teams = _parse_match_text(match_anchor.get_text(" ", strip=True))
         if teams is None:
@@ -287,6 +298,7 @@ def _parse_fixtures(competition: str, base_url: str) -> list[MatchRow]:
                 competition=competition,
                 status="Agendado",
                 date_text=datetime_text,
+                event_timestamp=event_timestamp,
                 home_team=teams[0],
                 away_team=teams[1],
                 home_goals=None,

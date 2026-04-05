@@ -1,17 +1,266 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 from html import escape
+import json
 import re
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from analytics import build_safe_bets_table, calculate_match_probabilities, suggest_bet_strategy
+from analytics import (
+    build_safe_bets_table,
+    calculate_match_probabilities,
+    suggest_bet_strategy,
+    get_team_context,
+)
 from scraper import COMPETITIONS, load_competition_matches
 
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+
+AI_PROMPT_TEMPLATE = """Atue como um analista quantitativo profissional de futebol especializado em modelagem estatistica, leitura de mercado e identificacao de value bets (+EV), com abordagem semelhante a analistas de apostas institucionais.
+
+Seu objetivo e analisar os jogos da data selecionada (__DATA_SELECIONADA__) e identificar as melhores oportunidades de aposta com base em dados historicos recentes, metricas avancadas e movimentacao das odds.
+
+A analise deve priorizar confiabilidade estatistica, consistencia dos padroes e risco controlado.
+
+--------------------------------------------------
+
+ETAPA 1 - FILTRO DOS JOGOS
+
+Selecione apenas os 5 jogos com maior confiabilidade estatistica na data analisada.
+
+Se nao houver 5 jogos com evidencia estatistica suficiente, selecione menos jogos.
+
+Nunca force previsoes.
+
+--------------------------------------------------
+
+ETAPA 2 - MODELAGEM ESTATISTICA
+
+Para cada jogo, calcule probabilidades reais estimadas:
+
+Vitoria mandante
+Empate
+Vitoria visitante
+Over 2.5 gols
+Under 2.5 gols
+BTTS (ambos marcam)
+Possivel placar provavel
+
+Compare com odds implicitas do mercado quando disponiveis.
+
+Identifique possiveis value bets (+EV).
+
+Se nao houver value bet, informe claramente.
+
+--------------------------------------------------
+
+ETAPA 3 - FORMA RECENTE (ultimos 5 a 10 jogos)
+
+Analise:
+
+sequencia de vitorias/derrotas
+media de gols marcados
+media de gols sofridos
+frequencia de Over 2.5
+frequencia de BTTS
+consistencia defensiva
+variabilidade de desempenho
+
+--------------------------------------------------
+
+ETAPA 4 - CONFRONTOS DIRETOS (H2H)
+
+Identifique:
+
+tendencia de gols
+dominio recorrente
+frequencia historica de BTTS
+frequencia Over/Under
+padroes repetitivos relevantes
+
+Priorize confrontos recentes.
+
+--------------------------------------------------
+
+ETAPA 5 - PERFORMANCE CASA vs FORA
+
+Compare:
+
+taxa de vitoria
+media de gols
+xG ofensivo
+xGA defensivo
+estabilidade tatica
+diferenca de desempenho mandante vs visitante
+
+--------------------------------------------------
+
+ETAPA 6 - METRICAS AVANCADAS
+
+Utilize:
+
+xG
+xGA
+finalizacoes por jogo
+conversao ofensiva
+escanteios medios
+cartoes medios
+gols no segundo tempo
+times que marcam primeiro
+times que sofrem viradas
+
+Identifique padroes ocultos relevantes.
+
+--------------------------------------------------
+
+ETAPA 7 - ESCALACOES E ELENCO
+
+Considere:
+
+lesoes
+suspensoes
+rotacao
+retorno de titulares
+dependencia de artilheiros
+impacto tatico das ausencias
+
+--------------------------------------------------
+
+ETAPA 8 - MOVIMENTACAO DAS ODDS
+
+Compare:
+
+odd de abertura
+odd atual
+direcao do mercado
+possivel entrada de dinheiro sharp
+possivel influencia do publico
+
+Identifique distorcoes relevantes.
+
+--------------------------------------------------
+
+ETAPA 9 - CONTEXTO COMPETITIVO
+
+Avalie:
+
+motivacao na tabela
+briga por titulo
+zona de rebaixamento
+mata-mata vs rodada regular
+necessidade de resultado
+gestao de elenco
+
+--------------------------------------------------
+
+ETAPA 10 - FATORES EXTERNOS
+
+Considere:
+
+clima
+condicoes do campo
+viagem recente
+fadiga
+sequencia de jogos
+arbitro (cartoes e penaltis)
+
+--------------------------------------------------
+
+ETAPA 11 - SCORE DE RISCO
+
+Calcule score de risco de 0 a 100:
+
+Forma recente -> 25%
+Casa/Fora -> 15%
+H2H -> 10%
+xG e metricas avancadas -> 20%
+Movimento das odds -> 20%
+Volatilidade recente -> 10%
+
+Classificacao:
+
+0-39 = RISCO BAIXO
+40-69 = RISCO MEDIO
+70-100 = RISCO ALTO
+
+--------------------------------------------------
+
+ETAPA 12 - CONFIDENCE SCORE
+
+Calcule indice de confianca de 0 a 10 baseado em:
+
+consistencia estatistica
+estabilidade das odds
+convergencia dos indicadores
+historico recente confiavel
+
+--------------------------------------------------
+
+ETAPA 13 - SAIDA POR JOGO
+
+Para cada jogo apresentar:
+
+JOGO: Time A vs Time B
+
+Probabilidade vitoria mandante:
+Probabilidade empate:
+Probabilidade vitoria visitante:
+
+Probabilidade Over 2.5:
+Probabilidade BTTS:
+
+Escanteios esperados:
+Cartoes esperados:
+
+Score de risco:
+Classificacao final:
+
+Confidence Score (0-10):
+
+Value bet identificada:
+(sim ou nao)
+
+Se sim, explicar qual.
+
+Fornecer justificativa objetiva baseada nos dados.
+
+Apresentar:
+
+1 aposta conservadora
+1 aposta equilibrada
+1 aposta agressiva
+
+--------------------------------------------------
+
+ETAPA 14 - GERENCIAMENTO DE BANCA
+
+Sugira divisao:
+
+Aposta principal
+Aposta de cobertura
+Aposta outsider
+
+Utilize logica semelhante ao metodo Kelly simplificado.
+
+Simule expectativa de retorno (%ROI estimado).
+
+--------------------------------------------------
+
+ETAPA 15 - CONCLUSAO FINAL
+
+Ao final da analise:
+
+Liste as 3 melhores apostas do dia com maior valor esperado (+EV)
+
+Informe:
+
+se e melhor apostar agora (early line)
+ou esperar closing line
+
+Se nao houver apostas com valor estatistico claro, informe explicitamente."""
 
 
 def _current_app_timestamp() -> str:
@@ -36,6 +285,41 @@ def _slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
+def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
+    home_ctx = get_team_context(df, str(row.home_team))
+    away_ctx = get_team_context(df, str(row.away_team))
+
+    data = {
+        "home": str(row.home_team),
+        "away": str(row.away_team),
+        "date": str(row.date_text),
+        "probs": {
+            "home": round(probs.home_win * 100, 1),
+            "draw": round(probs.draw * 100, 1),
+            "away": round(probs.away_win * 100, 1),
+            "btts": round(probs.btts_yes * 100, 1),
+            "over25": round(probs.over_25 * 100, 1),
+            "under25": round(probs.under_25 * 100, 1),
+            "scorelines": [[s, round(p * 100, 1)] for s, p in probs.top_scorelines],
+        },
+        "odds": {
+            "home": float(row.odds_home) if hasattr(row, "odds_home") else float(row.odd),
+            "draw": float(row.odds_draw) if hasattr(row, "odds_draw") else 0.0,
+            "away": float(row.odds_away) if hasattr(row, "odds_away") else 0.0,
+        },
+        "context": {"home": home_ctx, "away": away_ctx},
+    }
+    if tip:
+        data["tip"] = {
+            "market": _market_label(tip.best_market, str(row.home_team), str(row.away_team)),
+            "odd": round(tip.best_odd, 2),
+            "prob": round(tip.model_probability * 100, 1),
+            "ev": round(tip.expected_value * 100, 2),
+            "stake": round(tip.suggested_stake, 2),
+        }
+    return escape(json.dumps(data))
+
+
 def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[str, int | str]]:
     finished = df[df["status"] == "Finalizado"].copy()
     fixtures = df[df["status"] == "Agendado"].copy()
@@ -45,11 +329,19 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     rec_rows = []
 
     for row in fixtures.head(40).itertuples(index=False):
+        detail_json = "{}"
+        try:
+            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            detail_json = _get_detail_json(df, row, probs)
+        except Exception:
+            pass
+
         rows_html.append(
             "<tr "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
-            f"data-odd-away=\"{_fmt_odd(row.odds_away)}\""
+            f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
+            f"data-details=\"{detail_json}\""
             ">"
             f"<td>{escape(str(row.date_text))}</td>"
             f"<td>{escape(str(row.home_team))}</td>"
@@ -58,6 +350,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             f"<td>{escape(_fmt_odd(row.odds_draw))}</td>"
             f"<td>{escape(_fmt_odd(row.odds_away))}</td>"
             f"<td>{escape(str(row.bookmakers) if row.bookmakers is not None else '-')}</td>"
+            "<td><button class='btn-mini' onclick='showMatchDetails(this)'>Visualizar</button></td>"
             "</tr>"
         )
 
@@ -72,8 +365,9 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 bankroll=1000.0,
                 kelly_fractional=0.25,
             )
+            detail_json = _get_detail_json(df, row, probs, tip)
             rec_rows.append(
-                f"<tr data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{int(row.bookmakers) if row.bookmakers is not None else 0}\">"
+                f"<tr data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{int(row.bookmakers) if row.bookmakers is not None else 0}\" data-details=\"{detail_json}\">"
                 f"<td>{escape(str(row.date_text))}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
@@ -81,6 +375,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 f"<td>{tip.model_probability * 100:.1f}%</td>"
                 f"<td>{tip.expected_value * 100:.2f}%</td>"
                 f"<td>R$ {tip.suggested_stake:.2f}</td>"
+                "<td><button class='btn-mini' onclick='showMatchDetails(this)'>Visualizar</button></td>"
                 "</tr>"
             )
         except Exception:
@@ -98,8 +393,24 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     )
     if not safe_df.empty:
         for row in safe_df.head(10).itertuples(index=False):
+            try:
+                probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+                # Find original odds for detail view
+                match_orig = fixtures_valid[(fixtures_valid["home_team"] == row.home_team) & (fixtures_valid["away_team"] == row.away_team)].iloc[0]
+                tip = suggest_bet_strategy(
+                    probs,
+                    odd_home=float(match_orig.odds_home),
+                    odd_draw=float(match_orig.odds_draw),
+                    odd_away=float(match_orig.odds_away),
+                    bankroll=1000.0,
+                    kelly_fractional=0.25,
+                )
+                detail_json = _get_detail_json(df, match_orig, probs, tip)
+            except Exception:
+                detail_json = "{}"
+
             safe_rows.append(
-                f"<tr data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
+                f"<tr data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\" data-details=\"{detail_json}\">"
                 f"<td>{escape(str(row.date_text))}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(str(row.market), str(row.home_team), str(row.away_team)))}</td>"
@@ -108,6 +419,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 f"<td>{row.expected_value * 100:.2f}%</td>"
                 f"<td>{row.bookmakers}</td>"
                 f"<td>R$ {row.stake:.2f}</td>"
+                "<td><button class='btn-mini' onclick='showMatchDetails(this)'>Visualizar</button></td>"
                 "</tr>"
             )
 
@@ -157,8 +469,8 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th></tr></thead>
-        <tbody>{''.join(safe_rows) if safe_rows else '<tr><td colspan="8">Nenhum jogo passou no filtro conservador.</td></tr>'}</tbody>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Casas</th><th>Stake</th><th>Acao</th></tr></thead>
+        <tbody>{''.join(safe_rows) if safe_rows else '<tr><td colspan="9">Nenhum jogo passou no filtro conservador.</td></tr>'}</tbody>
       </table>
     </div>
   </div>
@@ -180,8 +492,8 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th></tr></thead>
-        <tbody>{''.join(rec_rows) if rec_rows else '<tr><td colspan="7">Sem recomendacoes disponiveis.</td></tr>'}</tbody>
+        <thead><tr><th>Data</th><th>Jogo</th><th>Resultado sugerido</th><th>Odd</th><th>Prob. Modelo</th><th>EV</th><th>Stake</th><th>Acao</th></tr></thead>
+        <tbody>{''.join(rec_rows) if rec_rows else '<tr><td colspan="8">Sem recomendacoes disponiveis.</td></tr>'}</tbody>
       </table>
     </div>
   </div>
@@ -203,8 +515,8 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th></tr></thead>
-        <tbody>{''.join(rows_html) if rows_html else '<tr><td colspan="7">Sem jogos futuros.</td></tr>'}</tbody>
+        <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th><th>Acao</th></tr></thead>
+        <tbody>{''.join(rows_html) if rows_html else '<tr><td colspan="8">Sem jogos futuros.</td></tr>'}</tbody>
       </table>
     </div>
   </div>
@@ -250,13 +562,16 @@ def main() -> None:
         )
         for item in competition_stats
     )
+    ai_prompt_html = escape(AI_PROMPT_TEMPLATE)
+    ai_prompt_js = AI_PROMPT_TEMPLATE
 
     html = f"""<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Painel de Apostas Inteligente</title>
+  <title>Football Data Desk | Index Inicial</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
     :root {{
@@ -514,6 +829,28 @@ def main() -> None:
     .btn.primary {{ background: linear-gradient(135deg, var(--blue), #2563eb); color: #fff; box-shadow: 0 16px 28px rgba(37,99,235,.22); }}
     .btn.secondary, .btn-link {{ background: #f8fafc; border-color: var(--line-strong); color: var(--text); }}
     .btn:hover, .btn-link:hover {{ transform: translateY(-1px); }}
+    .btn-mini {{ padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; cursor: pointer; }}
+    .btn-mini:hover {{ background: var(--blue); color: #fff; border-color: var(--blue); }}
+    .ai-module {{ margin-top: 18px; padding: 20px; border-radius: 22px; background: linear-gradient(135deg, rgba(8,22,37,.98), rgba(20,48,79,.98)); color: #f8fafc; border: 1px solid rgba(148,163,184,.16); box-shadow: 0 22px 50px rgba(8,22,37,.18); }}
+    .ai-module .eyebrow {{ color: #bfdbfe; }}
+    .ai-module h2 {{ color: #ffffff; }}
+    .ai-module .copy {{ color: rgba(226,232,240,.84); }}
+    .ai-module-grid {{ display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 16px; margin-top: 18px; }}
+    .ai-module-side {{ display: grid; gap: 12px; }}
+    .ai-mini-card {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }}
+    .ai-mini-card strong {{ display: block; font-size: .96rem; }}
+    .ai-mini-card p {{ margin: 8px 0 0; color: rgba(226,232,240,.78); line-height: 1.55; }}
+    .ai-mini-card label {{ display: block; margin-bottom: 8px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #bfdbfe; }}
+    .ai-mini-card input {{ width: 100%; height: 44px; border-radius: 12px; border: 1px solid rgba(191,219,254,.22); padding: 0 14px; font: inherit; color: #ffffff; background: rgba(255,255,255,.08); outline: none; }}
+    .ai-mini-card input:focus {{ border-color: rgba(191,219,254,.48); box-shadow: 0 0 0 4px rgba(29,78,216,.12); }}
+    .ai-prompt-shell {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }}
+    .ai-prompt-head {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }}
+    .ai-prompt-head strong {{ font-size: 1rem; }}
+    .ai-prompt-head span {{ color: #bfdbfe; font-size: .82rem; }}
+    .ai-prompt-area {{ width: 100%; min-height: 620px; resize: vertical; border-radius: 16px; border: 1px solid rgba(191,219,254,.18); padding: 16px; font: 500 .92rem/1.6 "Plus Jakarta Sans", "Segoe UI", sans-serif; color: #e2e8f0; background: rgba(8,22,37,.72); outline: none; }}
+    .ai-prompt-actions {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }}
+    .ai-status {{ margin-top: 10px; color: #bbf7d0; font-size: .85rem; min-height: 1.2em; }}
+    .ai-response {{ margin-top: 14px; padding: 16px; border-radius: 16px; background: rgba(8,22,37,.72); border: 1px solid rgba(191,219,254,.16); min-height: 140px; color: #e2e8f0; white-space: pre-wrap; line-height: 1.7; }}
     .legend {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }}
     .pill {{ display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.82); font-size: .84rem; }}
     .pill::before {{ content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: .78; }}
@@ -581,6 +918,75 @@ def main() -> None:
     tr.risk-high td {{ background: #fff1f2; }}
     tr.risk-none td {{ background: #f8fafc; }}
     .empty-state {{ margin: 16px 0 2px; padding: 14px 16px; border-radius: 14px; background: #fff7ed; border: 1px solid rgba(245,158,11,.22); color: #9a3412; font-size: .92rem; }}
+    
+    /* MODAL STYLES */
+    .modal-overlay {{
+      position: fixed;
+      inset: 0;
+      background: rgba(8, 22, 37, 0.6);
+      backdrop-filter: blur(8px);
+      z-index: 2000;
+      display: none;
+      place-items: center;
+      padding: 20px;
+    }}
+    .modal-card {{
+      background: #fff;
+      width: 100%;
+      max-width: 960px;
+      max-height: 90vh;
+      border-radius: 28px;
+      overflow-y: auto;
+      box-shadow: 0 40px 100px rgba(0,0,0,0.3);
+      position: relative;
+      animation: modalShow 0.3s ease-out;
+    }}
+    @keyframes modalShow {{
+      from {{ opacity: 0; transform: translateY(20px) scale(0.98); }}
+      to {{ opacity: 1; transform: translateY(0) scale(1); }}
+    }}
+    .modal-head {{
+      padding: 24px 32px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      background: rgba(255,255,255,0.9);
+      backdrop-filter: blur(10px);
+      z-index: 10;
+    }}
+    .modal-close {{
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      font-size: 20px;
+      transition: all 0.2s;
+    }}
+    .modal-close:hover {{ background: #f1f5f9; transform: rotate(90deg); }}
+    .modal-body {{ padding: 32px; }}
+    .modal-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }}
+    .modal-section {{ margin-bottom: 32px; }}
+    .chart-container {{
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 20px;
+      position: relative;
+      height: 300px;
+    }}
+    .context-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }}
+    .context-card {{ padding: 16px; border-radius: 16px; background: #f1f5f9; border: 1px solid var(--line); }}
+    .context-card h4 {{ margin: 0 0 10px; font-size: 0.9rem; color: var(--blue); }}
+    .context-stat {{ display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.85rem; }}
+    .context-stat strong {{ color: var(--text); }}
+    
     .glossary {{ display: grid; gap: 14px; }}
     .glossary-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
     .glossary-item {{ padding: 16px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.76)); border: 1px solid var(--line); }}
@@ -617,12 +1023,12 @@ def main() -> None:
       .dashboard-shell {{ grid-template-columns: 1fr; }}
       .side-rail {{ position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
-    @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+    @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid, .ai-module-grid, .modal-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
     @media (max-width: 760px) {{
       .container {{ padding: 18px 14px 32px; }}
       .topbar {{ align-items: flex-start; }}
       .hero, .card, .competition-card {{ padding: 18px; }}
-      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail {{ grid-template-columns: 1fr; }}
+      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid {{ grid-template-columns: 1fr; }}
       .topbar, .brand-block, .topbar-meta {{ flex-direction: column; align-items: flex-start; }}
       .btn, .btn-link {{ width: 100%; }}
       table {{ min-width: 640px; }}
@@ -649,20 +1055,20 @@ def main() -> None:
     <section class="hero">
       <div class="hero-grid">
         <div>
-          <div class="hero-tag">Painel analitico sem API</div>
-          <h1>Mercados mais claros para decidir melhor</h1>
-          <p>Gerado em {_current_app_timestamp()} no horario de Sao Paulo a partir de scraping de paginas publicas do BetExplorer. A nova organizacao prioriza o que costuma responder mais rapido: selecoes conservadoras, entradas com valor e agenda de confrontos.</p>
+          <div class="hero-tag">Central quantitativa institucional</div>
+          <h1>Radar premium de probabilidades, valor e protecao operacional</h1>
+          <p>Gerado em {_current_app_timestamp()} no horario de Sao Paulo a partir de scraping de paginas publicas do BetExplorer. Esta capa foi redesenhada para funcionar como portal executivo de entrada, concentrando jogos seguros, comparativo modelo x mercado, agenda e historico de calibracao.</p>
         </div>
         <div class="hero-stack">
           <div class="hero-note">
-            <span>Leitura sugerida</span>
-            <strong>1. Seguros  2. EV  3. Agenda</strong>
-            <p>Comece pelos blocos de menor risco, use as recomendacoes para comparar valor esperado e finalize a leitura na agenda com todas as odds principais.</p>
+            <span>Fluxo sugerido</span>
+            <strong>Radar  Modelo  Hedge</strong>
+            <p>Comece pelos blocos conservadores, valide o desempenho recente do modelo contra o mercado e depois avance para cenarios de fechamento e protecao.</p>
           </div>
           <div class="hero-note">
-            <span>Cobertura atual</span>
+            <span>Painel inicial</span>
             <strong>{len(competition_stats)} competicoes</strong>
-            <p>{total_fixtures} jogos futuros observados, {total_odds} linhas com odds completas, {total_safe} selecoes conservadoras e {total_finished} jogos finalizados para base historica.</p>
+            <p>{total_fixtures} jogos futuros observados, {total_odds} linhas com odds completas, {total_safe} selecoes conservadoras e {total_finished} jogos finalizados para comparar a performance do modelo.</p>
           </div>
         </div>
       </div>
@@ -742,6 +1148,45 @@ def main() -> None:
           </div>
         </section>
 
+        <section class="ai-module">
+          <div>
+            <div class="eyebrow">Modulo de IA</div>
+            <h2>Prompt institucional para leitura quantitativa</h2>
+            <p class="copy">Use este modulo para montar um briefing completo e enviar para a IA de sua preferencia. A data selecionada entra no prompt automaticamente para facilitar a leitura do dia.</p>
+          </div>
+          <div class="ai-module-grid">
+            <div class="ai-module-side">
+              <div class="ai-mini-card">
+                <label for="aiSelectedDate">Data da analise</label>
+                <input id="aiSelectedDate" type="date" />
+                <p>Escolha a data que deseja analisar antes de copiar o prompt para a IA.</p>
+              </div>
+              <div class="ai-mini-card">
+                <strong>Como usar</strong>
+                <p>1. Selecione a data. 2. Copie o prompt completo. 3. Cole na IA para gerar a leitura institucional dos jogos daquele dia.</p>
+              </div>
+              <div class="ai-mini-card">
+                <strong>Objetivo do modulo</strong>
+                <p>Padronizar a leitura estatistica com foco em value bet, score de risco, confidence score e distribuicao de banca.</p>
+              </div>
+            </div>
+            <div class="ai-prompt-shell">
+              <div class="ai-prompt-head">
+                <strong>Prompt pronto para a IA</strong>
+                <span>Data atualizada automaticamente</span>
+              </div>
+              <textarea id="aiPromptArea" class="ai-prompt-area">{ai_prompt_html}</textarea>
+              <div class="ai-prompt-actions">
+                <button id="updateAiPrompt" class="btn primary" type="button">Atualizar prompt</button>
+                <button id="copyAiPrompt" class="btn secondary" type="button">Copiar prompt</button>
+                <button id="runAiPrompt" class="btn primary" type="button">Executar leitura com IA</button>
+              </div>
+              <div id="aiPromptStatus" class="ai-status"></div>
+              <div id="aiResponse" class="ai-response">A resposta da IA vai aparecer aqui depois da execucao.</div>
+            </div>
+          </div>
+        </section>
+
         <div class="legend">
           <span class="pill" style="color:#15803d;">Baixo risco</span>
           <span class="pill" style="color:#b45309;">Medio risco</span>
@@ -768,6 +1213,55 @@ def main() -> None:
 
         <div class="foot">Aposta envolve risco. O painel ajuda na leitura e comparacao, mas nao elimina perdas nem substitui gestao de banca.</div>
       </main>
+    </div>
+  </div>
+
+  <div id="matchModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div id="modalDate" class="eyebrow">00/00/0000</div>
+          <h2 id="modalTitle">Time A vs Time B</h2>
+        </div>
+        <button class="modal-close" onclick="closeMatchDetails()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-grid">
+          <div class="modal-section">
+            <h3>Probabilidades 1X2</h3>
+            <div class="chart-container"><canvas id="chart1x2"></canvas></div>
+          </div>
+          <div class="modal-section">
+            <h3>Mercados Alternativos</h3>
+            <div class="chart-container"><canvas id="chartAlt"></canvas></div>
+          </div>
+        </div>
+        
+        <div class="modal-grid">
+          <div class="modal-section">
+            <h3>Top 5 Placares Provaveis</h3>
+            <div class="chart-container"><canvas id="chartScores"></canvas></div>
+          </div>
+          <div class="modal-section">
+            <h3>Estrategia e Contexto</h3>
+            <div id="strategyBox" class="summary-box" style="margin-bottom:16px;"></div>
+            <div class="context-grid">
+              <div class="context-card">
+                <h4 id="homeTeamName">Mandante</h4>
+                <div class="context-stat">Posicao: <strong id="homeRank">-</strong></div>
+                <div class="context-stat">Pontos: <strong id="homePoints">-</strong></div>
+                <div class="context-stat">Forma: <strong id="homeForm">-</strong></div>
+              </div>
+              <div class="context-card">
+                <h4 id="awayTeamName">Visitante</h4>
+                <div class="context-stat">Posicao: <strong id="awayRank">-</strong></div>
+                <div class="context-stat">Pontos: <strong id="awayPoints">-</strong></div>
+                <div class="context-stat">Forma: <strong id="awayForm">-</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -798,6 +1292,102 @@ def main() -> None:
       "Medio risco": {{ oddMin: 1.20, oddMax: 2.20, probMin: 0.55, evMin: 0.02, booksMin: 8 }},
       "Alto risco": {{ oddMin: 1.20, oddMax: 2.90, probMin: 0.48, evMin: 0.01, booksMin: 5 }},
     }};
+
+    let charts = {{}};
+
+    function showMatchDetails(btn) {{
+      const row = btn.closest('tr');
+      const rawData = row.getAttribute('data-details');
+      if (!rawData || rawData === '{{}}') return;
+      const data = JSON.parse(rawData);
+      
+      document.getElementById('modalTitle').textContent = data.home + ' x ' + data.away;
+      document.getElementById('modalDate').textContent = data.date;
+      
+      const stratBox = document.getElementById('strategyBox');
+      if (data.tip) {{
+        stratBox.innerHTML = `<strong>Sugestao:</strong> ${{data.tip.market}}<br>
+          <strong>Odd:</strong> ${{data.tip.odd.toFixed(2)}} | <strong>Prob:</strong> ${{data.tip.prob}}% | <strong>EV:</strong> ${{data.tip.ev}}%<br>
+          <strong>Stake Sugerida:</strong> R$ ${{data.tip.stake.toFixed(2)}}`;
+      }} else {{
+        stratBox.innerHTML = 'Sem recomendacao de entrada para este jogo com base nos criterios do modelo.';
+      }}
+      
+      document.getElementById('homeTeamName').textContent = data.home;
+      document.getElementById('homeRank').textContent = data.context.home.rank || '-';
+      document.getElementById('homePoints').textContent = data.context.home.points;
+      document.getElementById('homeForm').textContent = data.context.home.recent_text;
+      
+      document.getElementById('awayTeamName').textContent = data.away;
+      document.getElementById('awayRank').textContent = data.context.away.rank || '-';
+      document.getElementById('awayPoints').textContent = data.context.away.points;
+      document.getElementById('awayForm').textContent = data.context.away.recent_text;
+      
+      renderCharts(data);
+      document.getElementById('matchModal').style.display = 'grid';
+    }}
+
+    function closeMatchDetails() {{
+      document.getElementById('matchModal').style.display = 'none';
+    }}
+
+    function renderCharts(data) {{
+      if (charts.c1x2) charts.chart1x2.destroy();
+      if (charts.cAlt) charts.chartAlt.destroy();
+      if (charts.cScores) charts.chartScores.destroy();
+      
+      const ctx1 = document.getElementById('chart1x2').getContext('2d');
+      charts.chart1x2 = new Chart(ctx1, {{
+        type: 'bar',
+        data: {{
+          labels: ['Mandante', 'Empate', 'Visitante'],
+          datasets: [{{
+            label: 'Modelo %',
+            data: [data.probs.home, data.probs.draw, data.probs.away],
+            backgroundColor: ['rgba(29, 78, 216, 0.7)', 'rgba(148, 163, 184, 0.7)', 'rgba(15, 118, 110, 0.7)'],
+            borderRadius: 8
+          }}, {{
+            label: 'Mercado %',
+            data: [
+              data.odds.home > 0 ? (100/data.odds.home).toFixed(1) : 0,
+              data.odds.draw > 0 ? (100/data.odds.draw).toFixed(1) : 0,
+              data.odds.away > 0 ? (100/data.odds.away).toFixed(1) : 0
+            ],
+            backgroundColor: 'rgba(0,0,0,0.1)',
+            borderRadius: 8
+          }}]
+        }},
+        options: {{ responsive: true, maintainAspectRatio: false }}
+      }});
+      
+      const ctx2 = document.getElementById('chartAlt').getContext('2d');
+      charts.chartAlt = new Chart(ctx2, {{
+        type: 'doughnut',
+        data: {{
+          labels: ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
+          datasets: [{{
+            data: [data.probs.btts, data.probs.over25, data.probs.under25],
+            backgroundColor: ['#fbbf24', '#ef4444', '#10b981']
+          }}]
+        }},
+        options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
+      }});
+      
+      const ctx3 = document.getElementById('chartScores').getContext('2d');
+      charts.chartScores = new Chart(ctx3, {{
+        type: 'bar',
+        data: {{
+          labels: data.probs.scorelines.map(s => s[0]),
+          datasets: [{{
+            label: 'Probabilidade %',
+            data: data.probs.scorelines.map(s => s[1]),
+            backgroundColor: 'rgba(29, 78, 216, 0.6)',
+            borderRadius: 6
+          }}]
+        }},
+        options: {{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }}
+      }});
+    }}
 
     function applyRiskPreset() {{
       const risk = document.getElementById('frisk').value;
@@ -842,6 +1432,71 @@ def main() -> None:
       ];
       if (team) parts.push('busca por "' + team + '"');
       summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' • ') + '.';
+    }}
+
+    const aiPromptTemplate = {ai_prompt_js!r};
+
+    function formatSelectedDate(value) {{
+      if (!value) return 'data nao definida';
+      const parts = value.split('-');
+      if (parts.length !== 3) return value;
+      return parts[2] + '/' + parts[1] + '/' + parts[0];
+    }}
+
+    function updateAiPrompt() {{
+      const dateValue = document.getElementById('aiSelectedDate').value;
+      const promptArea = document.getElementById('aiPromptArea');
+      const prompt = aiPromptTemplate.replace('__DATA_SELECIONADA__', formatSelectedDate(dateValue));
+      promptArea.value = prompt;
+      document.getElementById('aiPromptStatus').textContent = 'Prompt atualizado para a data selecionada.';
+    }}
+
+    async function copyAiPrompt() {{
+      const promptArea = document.getElementById('aiPromptArea');
+      const status = document.getElementById('aiPromptStatus');
+      promptArea.select();
+      promptArea.setSelectionRange(0, promptArea.value.length);
+      try {{
+        await navigator.clipboard.writeText(promptArea.value);
+        status.textContent = 'Prompt copiado com sucesso.';
+      }} catch (error) {{
+        document.execCommand('copy');
+        status.textContent = 'Prompt copiado.';
+      }}
+    }}
+
+    async function runAiPrompt() {{
+      const selectedDate = document.getElementById('aiSelectedDate').value;
+      const promptArea = document.getElementById('aiPromptArea');
+      const status = document.getElementById('aiPromptStatus');
+      const responseBox = document.getElementById('aiResponse');
+      const apiHost = window.location.hostname ? window.location.hostname : '127.0.0.1';
+      if (!selectedDate) {{
+        status.textContent = 'Selecione uma data antes de executar a leitura.';
+        return;
+      }}
+
+      status.textContent = 'Consultando a IA local...';
+      responseBox.textContent = 'Processando leitura quantitativa, aguarde...';
+      try {{
+        const response = await fetch('http://' + apiHost + ':8765/api/ai-analysis', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            selected_date: selectedDate,
+            prompt: promptArea.value
+          }})
+        }});
+        const data = await response.json();
+        if (!response.ok || !data.ok) {{
+          throw new Error(data.error || 'Falha ao consultar a IA.');
+        }}
+        responseBox.textContent = data.analysis || 'A IA nao retornou texto.';
+        status.textContent = 'Leitura concluida com sucesso.';
+      }} catch (error) {{
+        responseBox.textContent = 'Nao foi possivel gerar a leitura agora.';
+        status.textContent = 'Erro: ' + (error && error.message ? error.message : 'falha desconhecida.');
+      }}
     }}
 
     function applyFilters() {{
@@ -930,10 +1585,17 @@ def main() -> None:
       applyFilters();
     }});
     document.getElementById('reloadPage').addEventListener('click', () => {{ window.location.reload(); }});
+    document.getElementById('updateAiPrompt').addEventListener('click', updateAiPrompt);
+    document.getElementById('copyAiPrompt').addEventListener('click', copyAiPrompt);
+    document.getElementById('runAiPrompt').addEventListener('click', runAiPrompt);
+    document.getElementById('aiSelectedDate').addEventListener('change', updateAiPrompt);
 
+    const today = new Date();
+    document.getElementById('aiSelectedDate').value = today.toISOString().slice(0, 10);
     applyRiskPreset();
     applyFilters();
     classifyRowsByRisk();
+    updateAiPrompt();
   </script>
 </body>
 </html>
