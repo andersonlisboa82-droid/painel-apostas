@@ -690,7 +690,7 @@ def render_callout_grid(items: list[dict[str, str]]) -> None:
 
 
 def render_embedded_index_portal() -> None:
-    components.html(build_index_html(), height=2600, scrolling=True)
+    components.html(build_index_html(), height=7800, scrolling=True)
 
 
 def clear_embedded_index_portal() -> None:
