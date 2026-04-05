@@ -286,6 +286,17 @@ def _fmt_score(value: float | None) -> str:
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
 
 
+def _format_match_datetime(date_text: object, event_timestamp: object = None, status: str = "") -> str:
+    parsed_ts = pd.to_datetime(event_timestamp, errors="coerce", utc=True)
+    if not pd.isna(parsed_ts):
+        local_dt = parsed_ts.tz_convert(APP_TIMEZONE)
+        if str(status).strip() == "Finalizado":
+            return local_dt.strftime("%d/%m/%Y")
+        return local_dt.strftime("%d/%m/%Y %H:%M")
+    raw = str(date_text or "").strip()
+    return raw if raw else "-"
+
+
 def _market_label(market: str, home_team: str, away_team: str) -> str:
     if market == "Casa":
         return f"Vitoria {home_team}"
@@ -371,6 +382,11 @@ def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
     home_ctx = get_team_context(df, str(row.home_team))
     away_ctx = get_team_context(df, str(row.away_team))
     status = str(getattr(row, "status", ""))
+    display_date = _format_match_datetime(
+        getattr(row, "date_text", ""),
+        getattr(row, "event_timestamp", None),
+        status,
+    )
     final_score = ""
     actual_result = ""
     model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
@@ -390,7 +406,7 @@ def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
     data = {
         "home": str(row.home_team),
         "away": str(row.away_team),
-        "date": str(row.date_text),
+        "date": display_date,
         "status": status,
         "final_score": final_score,
         "actual_result": actual_result,
@@ -458,6 +474,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
         return detail_key
 
     for row in fixtures.head(40).itertuples(index=False):
+        display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         detail_json = "{}"
         try:
             probs = calculate_match_probabilities(df, row.home_team, row.away_team)
@@ -472,7 +489,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
             f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
             ">"
-            f"<td>{escape(str(row.date_text))}</td>"
+            f"<td>{escape(display_date)}</td>"
             f"<td>{escape(str(row.home_team))}</td>"
             f"<td>{escape(str(row.away_team))}</td>"
             f"<td>{escape(_fmt_odd(row.odds_home))}</td>"
@@ -484,6 +501,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
         )
 
     for row in fixtures_valid.head(20).itertuples(index=False):
+        display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         try:
             probs = calculate_match_probabilities(df, row.home_team, row.away_team)
             detail_json = _get_detail_json(df, row, probs)
@@ -491,10 +509,11 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             detail_json = "{}"
         detail_key = register_detail(detail_json)
         analysis_options.append(
-            f"<option data-detail-key=\"{escape(detail_key)}\">[Agendado] {escape(str(row.date_text))} | {escape(str(row.home_team))} x {escape(str(row.away_team))}</option>"
+            f"<option data-detail-key=\"{escape(detail_key)}\">[Agendado] {escape(display_date)} | {escape(str(row.home_team))} x {escape(str(row.away_team))}</option>"
         )
 
     for row in fixtures_valid.head(20).itertuples(index=False):
+        display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         try:
             probs = calculate_match_probabilities(df, row.home_team, row.away_team)
             tip = suggest_bet_strategy(
@@ -514,7 +533,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                     {
                         "stage": risk_stage,
                         "competition": name,
-                        "date_text": str(row.date_text),
+                        "date_text": display_date,
                         "matchup": f"{row.home_team} x {row.away_team}",
                         "suggestion": _market_label(tip.best_market, str(row.home_team), str(row.away_team)),
                         "odd": float(tip.best_odd),
@@ -526,7 +545,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                 )
             rec_rows.append(
                 f"<tr data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
-                f"<td>{escape(str(row.date_text))}</td>"
+                f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
                 f"<td>{tip.best_odd:.2f}</td>"
@@ -540,6 +559,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             continue
 
     for row in finished.head(20).itertuples(index=False):
+        display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         detail_json = "{}"
         model_result = "-"
         model_probability = "-"
@@ -573,7 +593,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
             f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
             ">"
-            f"<td>{escape(str(row.date_text))}</td>"
+            f"<td>{escape(display_date)}</td>"
             f"<td>{escape(str(row.home_team))}</td>"
             f"<td>{escape(score_text)}</td>"
             f"<td>{escape(str(row.away_team))}</td>"
@@ -587,7 +607,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             "</tr>"
         )
         analysis_options.append(
-            f"<option data-detail-key=\"{escape(detail_key)}\">[Finalizado] {escape(str(row.date_text))} | {escape(str(row.home_team))} {escape(score_text)} {escape(str(row.away_team))}</option>"
+            f"<option data-detail-key=\"{escape(detail_key)}\">[Finalizado] {escape(display_date)} | {escape(str(row.home_team))} {escape(score_text)} {escape(str(row.away_team))}</option>"
         )
 
     safe_rows = []
@@ -602,6 +622,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     )
     if not safe_df.empty:
         for row in safe_df.head(10).itertuples(index=False):
+            display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), "Agendado")
             try:
                 probs = calculate_match_probabilities(df, row.home_team, row.away_team)
                 # Find original odds for detail view
@@ -621,7 +642,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
 
             safe_rows.append(
                 f"<tr data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
-                f"<td>{escape(str(row.date_text))}</td>"
+                f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(str(row.market), str(row.home_team), str(row.away_team)))}</td>"
                 f"<td>{row.odd:.2f}</td>"

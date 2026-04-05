@@ -85,6 +85,11 @@ def _build_match_detail_data(row_data: pd.Series, matches_df: pd.DataFrame) -> d
     probs = calculate_match_probabilities(matches_df, row_data["home_team"], row_data["away_team"])
     home_ctx = get_team_context(matches_df, str(row_data["home_team"]))
     away_ctx = get_team_context(matches_df, str(row_data["away_team"]))
+    display_date = format_match_datetime(
+        row_data.get("date_text"),
+        row_data.get("event_timestamp"),
+        str(row_data.get("status", "")),
+    )
     
     # Se vier da tabela de safe_df, as odds já estão no row_data
     # Se vier da tabela de valid (futuros), também
@@ -104,7 +109,7 @@ def _build_match_detail_data(row_data: pd.Series, matches_df: pd.DataFrame) -> d
     data = {
         "home": str(row_data["home_team"]),
         "away": str(row_data["away_team"]),
-        "date": str(row_data["date_text"]),
+        "date": display_date,
         "probs": {
             "home": round(probs.home_win * 100, 1),
             "draw": round(probs.draw * 100, 1),
@@ -565,6 +570,39 @@ def format_score_value(value: object) -> str:
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
 
 
+def format_match_datetime(date_text: object, event_timestamp: object = None, status: str = "") -> str:
+    parsed_ts = pd.to_datetime(event_timestamp, errors="coerce", utc=True)
+    if not pd.isna(parsed_ts):
+        local_dt = parsed_ts.tz_convert(APP_TIMEZONE)
+        if str(status).strip() == "Finalizado":
+            return local_dt.strftime("%d/%m/%Y")
+        return local_dt.strftime("%d/%m/%Y %H:%M")
+    raw = str(date_text or "").strip()
+    return raw if raw else "-"
+
+
+def format_date_column_for_display(frame: pd.DataFrame, *, status: str | None = None) -> pd.DataFrame:
+    if frame.empty or "date_text" not in frame.columns:
+        return frame.copy()
+
+    out = frame.copy()
+    if "event_timestamp" in out.columns:
+        event_series = out["event_timestamp"]
+    else:
+        event_series = pd.Series([None] * len(out), index=out.index)
+
+    if status is None and "status" in out.columns:
+        status_series = out["status"]
+    else:
+        status_series = pd.Series([status or ""] * len(out), index=out.index)
+
+    out["date_text"] = [
+        format_match_datetime(date_text, event_timestamp, row_status)
+        for date_text, event_timestamp, row_status in zip(out["date_text"], event_series, status_series)
+    ]
+    return out
+
+
 def resolve_match_market(home_goals: object, away_goals: object) -> str:
     if home_goals is None or away_goals is None or pd.isna(home_goals) or pd.isna(away_goals):
         return "-"
@@ -577,7 +615,12 @@ def resolve_match_market(home_goals: object, away_goals: object) -> str:
 
 def build_analysis_match_label(match_row: pd.Series) -> str:
     status = str(match_row.get("status", "")).strip() or "Desconhecido"
-    base = f"{match_row['date_text']} | {match_row['home_team']} x {match_row['away_team']}"
+    display_date = format_match_datetime(
+        match_row.get("date_text"),
+        match_row.get("event_timestamp"),
+        status,
+    )
+    base = f"{display_date} | {match_row['home_team']} x {match_row['away_team']}"
     if status == "Finalizado":
         score = f"{format_score_value(match_row.get('home_goals'))} x {format_score_value(match_row.get('away_goals'))}"
         return f"[Finalizado] {base} | Placar {score}"
@@ -949,6 +992,11 @@ def find_fixture_row(
 
 
 def build_ai_analysis_for_fixture(matches_df: pd.DataFrame, fixture_row: pd.Series) -> dict[str, object]:
+    display_date = format_match_datetime(
+        fixture_row.get("date_text"),
+        fixture_row.get("event_timestamp"),
+        str(fixture_row.get("status", "Agendado")),
+    )
     probs = calculate_match_probabilities(matches_df, fixture_row["home_team"], fixture_row["away_team"])
     tip = suggest_bet_strategy(
         probs,
@@ -970,7 +1018,7 @@ def build_ai_analysis_for_fixture(matches_df: pd.DataFrame, fixture_row: pd.Seri
     ai_analysis = generate_nvidia_match_analysis(
         home_team=str(fixture_row["home_team"]),
         away_team=str(fixture_row["away_team"]),
-        date_text=str(fixture_row["date_text"]),
+        date_text=display_date,
         odds_home=float(fixture_row["odds_home"]),
         odds_draw=float(fixture_row["odds_draw"]),
         odds_away=float(fixture_row["odds_away"]),
@@ -1168,6 +1216,11 @@ def build_match_chat_context(
     away_ctx: dict[str, object],
 ) -> str:
     readable_market = market_label(str(tip.best_market), str(fixture_row["home_team"]), str(fixture_row["away_team"]))
+    display_date = format_match_datetime(
+        fixture_row.get("date_text"),
+        fixture_row.get("event_timestamp"),
+        str(fixture_row.get("status", "")),
+    )
     top_scorelines = ", ".join(
         f"{score} ({prob * 100:.1f}%)" for score, prob in probs.top_scorelines[:4]
     )
@@ -1186,7 +1239,7 @@ def build_match_chat_context(
     return f"""
 Contexto do jogo atual:
 - Jogo: {fixture_row['home_team']} x {fixture_row['away_team']}
-- Data/Horario exibido no painel: {fixture_row['date_text']}
+- Data/Horario exibido no painel: {display_date}
 {result_context}
 - Odds 1X2: Casa {float(fixture_row['odds_home']):.2f} | Empate {float(fixture_row['odds_draw']):.2f} | Fora {float(fixture_row['odds_away']):.2f}
 - Probabilidades do modelo: Casa {probs.home_win * 100:.1f}% | Empate {probs.draw * 100:.1f}% | Fora {probs.away_win * 100:.1f}%
@@ -2392,7 +2445,7 @@ elif page == "Jogos Seguros":
         ])
 
         # Adicionar coluna de ação (Visualizar)
-        display_df = show_safe.copy()
+        display_df = format_date_column_for_display(show_safe)
         display_df.insert(0, "Acao", False)
         
         selected_safe = st.data_editor(
@@ -2416,6 +2469,11 @@ elif page == "Jogos Seguros":
             render_match_details_modal(match_detail)
 
         best_safe_row = safe_df.iloc[0]
+        best_safe_display_date = format_match_datetime(
+            best_safe_row.get("date_text"),
+            best_safe_row.get("event_timestamp"),
+            "Agendado",
+        )
         best_safe_key = f"ai_best_safe_cache_{competition}"
         st.markdown(
             f"""
@@ -2455,7 +2513,7 @@ elif page == "Jogos Seguros":
                 )
                 with st.spinner("Consultando IA da NVIDIA para o melhor jogo seguro..."):
                     st.session_state[best_safe_key] = {
-                        "match_label": f"{best_safe_row['date_text']} | {best_safe_row['home_team']} x {best_safe_row['away_team']}",
+                        "match_label": f"{best_safe_display_date} | {best_safe_row['home_team']} x {best_safe_row['away_team']}",
                         "analysis": build_ai_analysis_for_fixture(df, fixture_row),
                     }
             except Exception as exc:
@@ -2471,7 +2529,7 @@ elif page == "Jogos Seguros":
             st.markdown(render_detailed_ai_analysis(cached_best_safe_ai["analysis"]))
 
         st.markdown("#### Ranking detalhado")
-        st.dataframe(show_safe.head(20), use_container_width=True, hide_index=True)
+        st.dataframe(format_date_column_for_display(show_safe.head(20)), use_container_width=True, hide_index=True)
         st.markdown("<div class='small-note'>Score combina probabilidade, EV, odd e numero de casas.</div>", unsafe_allow_html=True)
 
 elif page == "Painel do Modelo":
@@ -2508,6 +2566,7 @@ elif page == "Painel do Modelo":
         model_compare = recent_backtest[
             [
                 "date_text",
+                "event_timestamp",
                 "home_team",
                 "away_team",
                 "actual_market",
@@ -2545,6 +2604,7 @@ elif page == "Painel do Modelo":
         model_compare["Hit Modelo"] = model_compare["model_hit"].map({True: "Sim", False: "Nao"})
         model_compare["Hit Casas"] = model_compare["house_hit"].map({True: "Sim", False: "Nao"})
         model_compare["Hit Valor"] = model_compare["value_hit"].map({True: "Sim", False: "Nao"})
+        model_compare = format_date_column_for_display(model_compare, status="Finalizado")
         model_compare = model_compare[
             ["date_text", "Jogo", "Resultado", "Modelo", "Prob. Modelo", "Casas", "Prob. Casas", "Valor", "EV Valor", "Hit Modelo", "Hit Casas", "Hit Valor"]
         ]
@@ -2601,6 +2661,11 @@ elif page == "Analise de Jogo":
             selected = selectable_matches.loc[selectable_matches["match_option_id"] == selected_option].iloc[0]
             selected_match_label = str(selected["match_label"])
             selected_status = str(selected.get("status", "")).strip() or "Desconhecido"
+            selected_display_date = format_match_datetime(
+                selected.get("date_text"),
+                selected.get("event_timestamp"),
+                selected_status,
+            )
 
             probs = calculate_match_probabilities(df, selected["home_team"], selected["away_team"])
             tip = suggest_bet_strategy(
@@ -2774,7 +2839,7 @@ elif page == "Analise de Jogo":
             goal_line = "Tendencia de Menos de 2.5 gols." if probs.under_25 >= probs.over_25 else "Tendencia de Mais de 2.5 gols."
             st.markdown(
                 f"""
-**Jogo:** {selected['home_team']} x {selected['away_team']} ({selected['date_text']})  
+**Jogo:** {selected['home_team']} x {selected['away_team']} ({selected_display_date})  
 **Odds atuais (1X2):** Casa `{selected['odds_home']:.2f}` | Empate `{selected['odds_draw']:.2f}` | Fora `{selected['odds_away']:.2f}`  
 **Probabilidades do modelo:** Casa `{probs.home_win*100:.1f}%` | Empate `{probs.draw*100:.1f}%` | Fora `{probs.away_win*100:.1f}%`  
 **Resultado mais provavel:** **{probable_market}** (`{probable_probability*100:.1f}%`)  
@@ -2809,6 +2874,8 @@ elif page == "Todos os Futuros":
         view_fixtures = fixtures[
             [
                 "date_text",
+                "event_timestamp",
+                "status",
                 "home_team",
                 "away_team",
                 "bookmakers",
@@ -2818,8 +2885,11 @@ elif page == "Todos os Futuros":
                 "match_url",
             ]
         ].copy()
+        view_fixtures = format_date_column_for_display(view_fixtures)
         view_fixtures.columns = [
             "Data",
+            "event_timestamp",
+            "status",
             "Mandante",
             "Visitante",
             "Casas",
@@ -2828,6 +2898,7 @@ elif page == "Todos os Futuros":
             "Odd Fora",
             "Link",
         ]
+        view_fixtures = view_fixtures[["Data", "Mandante", "Visitante", "Casas", "Odd Casa", "Odd Empate", "Odd Fora", "Link"]]
         st.dataframe(view_fixtures.reset_index(drop=True), use_container_width=True, hide_index=True)
 
 elif page == "Resultados":
@@ -2852,6 +2923,8 @@ elif page == "Resultados":
         view_finished = finished[
             [
                 "date_text",
+                "event_timestamp",
+                "status",
                 "home_team",
                 "away_team",
                 "home_goals",
@@ -2866,6 +2939,7 @@ elif page == "Resultados":
             lambda row: f"{format_score_value(row['home_goals'])} x {format_score_value(row['away_goals'])}",
             axis=1,
         )
+        view_finished = format_date_column_for_display(view_finished, status="Finalizado")
         view_finished = view_finished[
             ["date_text", "home_team", "Placar", "away_team", "odds_home", "odds_draw", "odds_away", "match_url"]
         ]
@@ -2893,7 +2967,7 @@ elif page == "Resultados":
             ]
         )
         results_compare = recent_backtest[
-            ["date_text", "home_team", "away_team", "actual_score", "actual_market", "model_market", "house_market", "value_market", "model_hit", "house_hit", "value_hit"]
+            ["date_text", "event_timestamp", "home_team", "away_team", "actual_score", "actual_market", "model_market", "house_market", "value_market", "model_hit", "house_hit", "value_hit"]
         ].copy()
         results_compare["Jogo"] = results_compare["home_team"] + " x " + results_compare["away_team"]
         results_compare["Resultado"] = results_compare.apply(
@@ -2915,6 +2989,7 @@ elif page == "Resultados":
         results_compare["Modelo acertou"] = results_compare["model_hit"].map({True: "Sim", False: "Nao"})
         results_compare["Casas acertaram"] = results_compare["house_hit"].map({True: "Sim", False: "Nao"})
         results_compare["Valor acertou"] = results_compare["value_hit"].map({True: "Sim", False: "Nao"})
+        results_compare = format_date_column_for_display(results_compare, status="Finalizado")
         results_compare = results_compare[
             ["date_text", "Jogo", "Resultado", "Modelo", "Casas", "Valor", "Modelo acertou", "Casas acertaram", "Valor acertou"]
         ]
