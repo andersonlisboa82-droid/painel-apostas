@@ -533,7 +533,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     return section_html, stats
 
 
-def main() -> None:
+def build_index_html() -> str:
     sections: list[str] = []
     competition_stats: list[dict[str, int | str]] = []
 
@@ -1477,8 +1477,14 @@ def main() -> None:
       const status = document.getElementById('aiPromptStatus');
       const responseBox = document.getElementById('aiResponse');
       const apiHost = window.location.hostname ? window.location.hostname : '127.0.0.1';
+      const isStreamlitCloud = apiHost.includes('streamlit.app');
       if (!selectedDate) {{
         status.textContent = 'Selecione uma data antes de executar a leitura.';
+        return;
+      }}
+      if (isStreamlitCloud) {{
+        responseBox.textContent = 'No deploy web, use o modulo IA Institucional do proprio portal Streamlit.';
+        status.textContent = 'A API local da IA nao fica exposta na Streamlit Cloud.';
         return;
       }}
 
@@ -1607,6 +1613,11 @@ def main() -> None:
 </html>
 """
 
+    return html
+
+
+def main() -> None:
+    html = build_index_html()
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html)
 

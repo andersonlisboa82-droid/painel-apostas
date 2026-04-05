@@ -18,7 +18,7 @@ APP_DIR = Path(__file__).resolve().parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from gerar_html import AI_PROMPT_TEMPLATE
+from gerar_html import AI_PROMPT_TEMPLATE, build_index_html
 from portal_ai_server import run_ai_analysis
 from analytics import (
     build_backtest_table,
@@ -618,66 +618,7 @@ def render_callout_grid(items: list[dict[str, str]]) -> None:
 
 
 def render_embedded_index_portal() -> None:
-    components.html(
-        """
-<script>
-const parentWindow = window.parent;
-const doc = parentWindow.document;
-const host = parentWindow.location.hostname || window.location.hostname || "127.0.0.1";
-
-if (typeof parentWindow.__fdIndexCleanup === "function") {
-  parentWindow.__fdIndexCleanup();
-}
-
-const previousMount = doc.getElementById("fd-index-fullscreen");
-if (previousMount) previousMount.remove();
-const previousStyle = doc.getElementById("fd-index-fullscreen-style");
-if (previousStyle) previousStyle.remove();
-
-const style = doc.createElement("style");
-style.id = "fd-index-fullscreen-style";
-style.textContent = `
-  html, body {
-    background: #e9f1f8 !important;
-  }
-  #fd-index-fullscreen {
-    position: fixed;
-    inset: 0;
-    z-index: 999998;
-    background: #e9f1f8;
-  }
-  #fd-index-fullscreen iframe {
-    width: 100%;
-    height: 100%;
-    border: 0;
-    background: #e9f1f8;
-  }
-`;
-doc.head.appendChild(style);
-
-const mount = doc.createElement("div");
-mount.id = "fd-index-fullscreen";
-mount.innerHTML = `
-  <iframe
-    src="http://${host}:8000/index.html"
-    title="Portal HTML tela cheia"
-    loading="eager"
-    referrerpolicy="no-referrer"
-  ></iframe>
-`;
-doc.body.appendChild(mount);
-
-parentWindow.__fdIndexCleanup = () => {
-  const mounted = doc.getElementById("fd-index-fullscreen");
-  if (mounted) mounted.remove();
-  const mountedStyle = doc.getElementById("fd-index-fullscreen-style");
-  if (mountedStyle) mountedStyle.remove();
-};
-</script>
-""",
-        height=0,
-        width=0,
-    )
+    components.html(build_index_html(), height=2600, scrolling=True)
 
 
 def clear_embedded_index_portal() -> None:
