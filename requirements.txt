@@ -1,7 +1,8 @@
 streamlit==1.55.0
-pandas
-requests
-beautifulsoup4
-lxml
-html5lib
-numpy
+pandas>=2.2,<3
+numpy>=1.26,<3
+requests>=2.32,<3
+beautifulsoup4>=4.12,<5
+lxml>=5.3,<6
+html5lib>=1.1,<2
+tzdata>=2025.2

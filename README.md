@@ -17,12 +17,14 @@ Sem uso de API com chave. Os dados sao raspados de paginas publicas do BetExplor
 - Sugere stake por Kelly fracionado.
 
 ## Requisitos
-- Python 3.10+
+- Python 3.11 recomendado para deploy
 
 ## Instalacao
 ```bash
 pip install -r requirements.txt
 ```
+
+Para Streamlit Cloud, o projeto fixa o runtime em `python-3.11`.
 
 ## Execucao
 ```bash
