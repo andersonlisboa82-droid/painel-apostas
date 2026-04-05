@@ -4,9 +4,15 @@ from datetime import datetime
 from html import escape
 import json
 import re
+import sys
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
 from analytics import (
     build_safe_bets_table,

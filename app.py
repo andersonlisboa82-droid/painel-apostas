@@ -2,15 +2,21 @@
 
 import json
 import os
+import sys
 import time
 from datetime import date, datetime
 from html import escape
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
 from gerar_html import AI_PROMPT_TEMPLATE
 from portal_ai_server import run_ai_analysis

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -10,6 +11,10 @@ from pathlib import Path
 
 import pandas as pd
 
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 from analytics import calculate_match_probabilities, get_team_context, suggest_bet_strategy
 from nvidia_client import request_nvidia_completion
 from scraper import load_all_matches
@@ -18,7 +23,6 @@ from scraper import load_all_matches
 HOST = "0.0.0.0"
 PORT = 8765
 CACHE_TTL_SECONDS = 900
-BASE_DIR = Path(__file__).resolve().parent
 
 
 @dataclass
