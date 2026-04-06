@@ -24,6 +24,7 @@ from scraper import COMPETITIONS, load_competition_matches
 
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+PORTAL_RELEASE_LABEL = "05/04/2026 21:35 | graficos-canvas"
 
 AI_PROMPT_TEMPLATE = """Atue como um analista quantitativo profissional de futebol especializado em modelagem estatistica, leitura de mercado e identificacao de value bets (+EV), com abordagem semelhante a analistas de apostas institucionais.
 
@@ -1549,6 +1550,7 @@ def build_index_html() -> str:
       </div>
       <div class="topbar-meta">
         <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> {_current_app_timestamp()}</div>
+        <div class="meta-pill"><strong>Release</strong> {PORTAL_RELEASE_LABEL}</div>
         <div class="meta-pill"><strong>{competition_count}</strong> competicoes no radar</div>
         <div class="meta-pill"><strong>{odds_coverage}%</strong> cobertura de odds</div>
       </div>
@@ -1948,8 +1950,10 @@ def build_index_html() -> str:
     function prepareCanvas(canvas) {{
       const ratio = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
-      const width = Math.max(320, Math.floor(rect.width || canvas.parentElement?.clientWidth || 320));
-      const height = Math.max(220, Math.floor(rect.height || canvas.parentElement?.clientHeight || 300));
+      const parentWidth = canvas.parentElement && canvas.parentElement.clientWidth ? canvas.parentElement.clientWidth : 320;
+      const parentHeight = canvas.parentElement && canvas.parentElement.clientHeight ? canvas.parentElement.clientHeight : 300;
+      const width = Math.max(320, Math.floor(rect.width || parentWidth || 320));
+      const height = Math.max(220, Math.floor(rect.height || parentHeight || 300));
       canvas.width = Math.floor(width * ratio);
       canvas.height = Math.floor(height * ratio);
       canvas.style.width = width + 'px';
@@ -1967,7 +1971,15 @@ def build_index_html() -> str:
       const width = prepared.width;
       const height = prepared.height;
       const horizontal = Boolean(options.horizontal);
-      const maxValue = Math.max(1, ...datasets.flatMap(dataset => dataset.data.map((value) => Number(value) || 0)));
+      let maxValue = 1;
+      datasets.forEach((dataset) => {{
+        dataset.data.forEach((value) => {{
+          const numericValue = Number(value) || 0;
+          if (numericValue > maxValue) {{
+            maxValue = numericValue;
+          }}
+        }});
+      }});
       const padding = {{ top: 26, right: 22, bottom: horizontal ? 20 : 54, left: horizontal ? 92 : 36 }};
       const chartWidth = width - padding.left - padding.right;
       const chartHeight = height - padding.top - padding.bottom;
@@ -2101,57 +2113,6 @@ def build_index_html() -> str:
         data.odds.draw > 0 ? (100 / data.odds.draw) : 0,
         data.odds.away > 0 ? (100 / data.odds.away) : 0
       ];
-
-      if (window.Chart) {{
-        const ctx1 = resetChartCanvas('chart1x2').getContext('2d');
-        charts.chart1x2 = new Chart(ctx1, {{
-          type: 'bar',
-          data: {{
-            labels: ['Mandante', 'Empate', 'Visitante'],
-            datasets: [{{
-              label: 'Modelo %',
-              data: [data.probs.home, data.probs.draw, data.probs.away],
-              backgroundColor: ['rgba(29, 78, 216, 0.7)', 'rgba(148, 163, 184, 0.7)', 'rgba(15, 118, 110, 0.7)'],
-              borderRadius: 8
-            }}, {{
-              label: 'Mercado %',
-              data: marketValues.map((value) => value.toFixed(1)),
-              backgroundColor: 'rgba(0,0,0,0.1)',
-              borderRadius: 8
-            }}]
-          }},
-          options: {{ responsive: true, maintainAspectRatio: false }}
-        }});
-
-        const ctx2 = resetChartCanvas('chartAlt').getContext('2d');
-        charts.chartAlt = new Chart(ctx2, {{
-          type: 'doughnut',
-          data: {{
-            labels: ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
-            datasets: [{{
-              data: [data.probs.btts, data.probs.over25, data.probs.under25],
-              backgroundColor: ['#fbbf24', '#ef4444', '#10b981']
-            }}]
-          }},
-          options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
-        }});
-
-        const ctx3 = resetChartCanvas('chartScores').getContext('2d');
-        charts.chartScores = new Chart(ctx3, {{
-          type: 'bar',
-          data: {{
-            labels: data.probs.scorelines.map(s => s[0]),
-            datasets: [{{
-              label: 'Probabilidade %',
-              data: data.probs.scorelines.map(s => s[1]),
-              backgroundColor: 'rgba(29, 78, 216, 0.6)',
-              borderRadius: 6
-            }}]
-          }},
-          options: {{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }}
-        }});
-        return;
-      }}
 
       drawFallbackBarChart(
         'chart1x2',
