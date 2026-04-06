@@ -1406,7 +1406,7 @@ def build_index_html() -> str:
       backdrop-filter: blur(8px);
       z-index: 2000;
       display: none;
-      place-items: center;
+      overflow-y: auto;
       padding: 20px;
     }}
     .modal-card {{
@@ -1418,6 +1418,7 @@ def build_index_html() -> str:
       overflow-y: auto;
       box-shadow: 0 40px 100px rgba(0,0,0,0.3);
       position: relative;
+      margin: 24px auto;
       animation: modalShow 0.3s ease-out;
     }}
     @keyframes modalShow {{
@@ -1885,7 +1886,8 @@ def build_index_html() -> str:
       document.getElementById('awayForm').textContent = data.context.away.recent_text;
       
       const matchModal = document.getElementById('matchModal');
-      matchModal.style.display = 'grid';
+      matchModal.style.display = 'block';
+      positionVisibleModal('matchModal');
       requestAnimationFrame(() => renderCharts(data));
     }}
 
@@ -1895,7 +1897,9 @@ def build_index_html() -> str:
     }}
 
     function openFilterModal() {{
-      document.getElementById('filterModal').style.display = 'grid';
+      const modal = document.getElementById('filterModal');
+      modal.style.display = 'block';
+      positionVisibleModal('filterModal');
     }}
 
     function closeFilterModal() {{
@@ -1916,11 +1920,35 @@ def build_index_html() -> str:
     }}
 
     function openAiPromptModal() {{
-      document.getElementById('aiPromptModal').style.display = 'grid';
+      const modal = document.getElementById('aiPromptModal');
+      modal.style.display = 'block';
+      positionVisibleModal('aiPromptModal');
     }}
 
     function closeAiPromptModal() {{
       document.getElementById('aiPromptModal').style.display = 'none';
+    }}
+
+    function getVisibleModalOffset() {{
+      try {{
+        if (window.frameElement && window.frameElement.getBoundingClientRect) {{
+          const frameRect = window.frameElement.getBoundingClientRect();
+          return Math.max(24, Math.round(-frameRect.top + 24));
+        }}
+      }} catch (error) {{
+        // Ignora restricoes de contexto e usa o fallback padrao.
+      }}
+      return 24;
+    }}
+
+    function positionVisibleModal(modalId) {{
+      const modal = document.getElementById(modalId);
+      if (!modal) return;
+      const card = modal.querySelector('.modal-card');
+      if (!card) return;
+      const topOffset = getVisibleModalOffset();
+      card.style.marginTop = topOffset + 'px';
+      card.style.marginBottom = '24px';
     }}
 
     function destroyCharts() {{
@@ -2446,6 +2474,15 @@ def build_index_html() -> str:
         closeFilterModal();
         closeAiPromptModal();
       }}
+    }});
+
+    window.addEventListener('resize', () => {{
+      ['matchModal', 'filterModal', 'aiPromptModal'].forEach((modalId) => {{
+        const modal = document.getElementById(modalId);
+        if (modal && modal.style.display !== 'none') {{
+          positionVisibleModal(modalId);
+        }}
+      }});
     }});
 
     const today = new Date();
