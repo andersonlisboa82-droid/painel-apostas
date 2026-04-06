@@ -1164,6 +1164,7 @@ def build_index_html() -> str:
     .btn.primary {{ background: linear-gradient(135deg, var(--blue), #2563eb); color: #fff; box-shadow: 0 16px 28px rgba(37,99,235,.22); }}
     .btn.secondary, .btn-link {{ background: #f8fafc; border-color: var(--line-strong); color: var(--text); }}
     .btn:hover, .btn-link:hover {{ transform: translateY(-1px); }}
+    .btn[disabled], .btn-link[disabled], .btn-float[disabled] {{ opacity: .68; cursor: wait; transform: none; box-shadow: none; }}
     .btn-mini {{ padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 8px; border: 1px solid var(--line-strong); background: #fff; cursor: pointer; }}
     .btn-mini:hover {{ background: var(--blue); color: #fff; border-color: var(--blue); }}
     .launcher-card {{ display: grid; gap: 18px; }}
@@ -1513,6 +1514,11 @@ def build_index_html() -> str:
     }}
     .btn-float:hover {{ transform: scale(1.1); }}
     .btn-float svg {{ width: 24px; height: 24px; fill: currentColor; }}
+    .btn-float.loading svg {{ animation: spin-refresh 1s linear infinite; }}
+    @keyframes spin-refresh {{
+      from {{ transform: rotate(0deg); }}
+      to {{ transform: rotate(360deg); }}
+    }}
     
     @media (max-width: 1180px) {{
       .dashboard-shell {{ grid-template-columns: 1fr; }}
@@ -1635,6 +1641,11 @@ def build_index_html() -> str:
               <span>Abra o prompt institucional em modal para atualizar a data, copiar o briefing e executar a leitura quantitativa.</span>
               <button id="openAiPromptModal" class="btn secondary" type="button">Abrir modulo</button>
             </article>
+            <article class="launcher-item">
+              <strong>Atualizar placares</strong>
+              <span>Faz um novo scraping, regenera o portal e recarrega a tela com os resultados e status mais recentes.</span>
+              <button id="refreshPortalLauncher" class="btn secondary" type="button">Atualizar agora</button>
+            </article>
           </div>
         </section>
 
@@ -1751,7 +1762,7 @@ def build_index_html() -> str:
         <div class="actions">
           <button id="applyFilter" class="btn primary" type="button">Aplicar filtro</button>
           <button id="clearFilter" class="btn secondary" type="button">Limpar filtros</button>
-          <a href="./atualizar_painel.bat" class="btn-link">Atualizar dados</a>
+          <button id="refreshPortalData" class="btn-link" type="button">Atualizar placares</button>
           <button id="reloadPage" class="btn secondary" type="button">Recarregar pagina</button>
           <button class="btn secondary" type="button" onclick="closeFilterModal()">Fechar</button>
         </div>
@@ -1798,7 +1809,7 @@ def build_index_html() -> str:
     <button id="scrollToTop" class="btn-float" title="Voltar ao topo" style="display:none;">
       <svg viewBox="0 0 24 24"><path d="M12 4l-8 8h16l-8-8z"/></svg>
     </button>
-    <button id="quickRefresh" class="btn-float" title="Recarregar dados" onclick="window.location.reload();">
+    <button id="quickRefresh" class="btn-float" title="Atualizar placares em tempo real" type="button">
       <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
     </button>
   </div>
@@ -2073,6 +2084,63 @@ def build_index_html() -> str:
       preview.textContent = lines.length ? lines.slice(0, 8).join('\\n') : 'Nenhum prompt carregado.';
     }}
 
+    function setRefreshButtonsLoading(isLoading) {{
+      ['refreshPortalData', 'refreshPortalLauncher', 'quickRefresh'].forEach((id) => {{
+        const element = document.getElementById(id);
+        if (!element) return;
+        element.disabled = isLoading;
+        if (id === 'quickRefresh') {{
+          element.classList.toggle('loading', isLoading);
+        }}
+      }});
+    }}
+
+    async function refreshPortalData() {{
+      const summary = document.getElementById('resultsSummary');
+      const apiHost = window.location.hostname ? window.location.hostname : '127.0.0.1';
+      const isStreamlitCloud = apiHost.includes('streamlit.app');
+      const isStaticPortal = window.location.port === '8000' || window.location.pathname.toLowerCase().endsWith('/index.html');
+
+      if (summary) {{
+        summary.textContent = 'Atualizando placares e reprocessando o portal...';
+      }}
+
+      if (isStreamlitCloud) {{
+        if (summary) {{
+          summary.textContent = 'Recarregando o app publicado para buscar os placares mais recentes.';
+        }}
+        window.location.reload();
+        return;
+      }}
+
+      setRefreshButtonsLoading(true);
+      try {{
+        const response = await fetch('http://' + apiHost + ':8765/api/refresh-portal', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ source: 'portal-ui' }})
+        }});
+        const data = await response.json();
+        if (!response.ok || !data.ok) {{
+          throw new Error(data.error || 'Falha ao atualizar os placares.');
+        }}
+        if (summary) {{
+          summary.textContent = 'Placares atualizados em ' + (data.updated_at || 'agora') + '. Recarregando o painel...';
+        }}
+        window.setTimeout(() => window.location.reload(), 700);
+      }} catch (error) {{
+        const message = error && error.message ? error.message : 'falha desconhecida.';
+        if (summary) {{
+          summary.textContent = 'Nao foi possivel atualizar os placares: ' + message;
+        }}
+        if (!isStaticPortal) {{
+          window.setTimeout(() => window.location.reload(), 700);
+        }}
+      }} finally {{
+        window.setTimeout(() => setRefreshButtonsLoading(false), 150);
+      }}
+    }}
+
     async function copyAiPrompt() {{
       const promptArea = document.getElementById('aiPromptArea');
       const status = document.getElementById('aiPromptStatus');
@@ -2213,6 +2281,9 @@ def build_index_html() -> str:
       applyRiskPreset();
       applyFilters();
     }});
+    document.getElementById('refreshPortalData').addEventListener('click', refreshPortalData);
+    document.getElementById('refreshPortalLauncher').addEventListener('click', refreshPortalData);
+    document.getElementById('quickRefresh').addEventListener('click', refreshPortalData);
     document.getElementById('reloadPage').addEventListener('click', () => {{ window.location.reload(); }});
     document.getElementById('openAiPromptModal').addEventListener('click', openAiPromptModal);
     document.getElementById('modalUpdateAiPrompt').addEventListener('click', updateAiPrompt);

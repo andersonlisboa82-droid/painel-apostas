@@ -5,9 +5,10 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -16,6 +17,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from analytics import calculate_match_probabilities, get_team_context, suggest_bet_strategy
+from gerar_html import build_index_html
 from nvidia_client import request_nvidia_completion
 from scraper import load_all_matches
 
@@ -23,6 +25,7 @@ from scraper import load_all_matches
 HOST = "0.0.0.0"
 PORT = 8765
 CACHE_TTL_SECONDS = 900
+APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 
 @dataclass
@@ -52,6 +55,18 @@ def get_cached_matches() -> pd.DataFrame:
         frame = load_all_matches()
         _matches_cache = CachedMatches(loaded_at=time.time(), frame=frame.copy())
         return frame
+
+
+def refresh_portal_snapshot() -> dict[str, str]:
+    global _matches_cache
+    with _cache_lock:
+        _matches_cache = None
+
+    html = build_index_html()
+    index_path = BASE_DIR / "index.html"
+    index_path.write_text(html, encoding="utf-8")
+    updated_at = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
+    return {"updated_at": updated_at, "index_path": str(index_path)}
 
 
 def build_match_context_for_date(selected_date: date) -> tuple[pd.DataFrame, str]:
@@ -182,6 +197,15 @@ class PortalAIHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": False, "error": "Rota nao encontrada."}, status_code=404)
 
     def do_POST(self) -> None:
+        if self.path == "/api/refresh-portal":
+            try:
+                payload = refresh_portal_snapshot()
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status_code=500)
+                return
+            self._send_json({"ok": True, **payload})
+            return
+
         if self.path != "/api/ai-analysis":
             self._send_json({"ok": False, "error": "Rota nao encontrada."}, status_code=404)
             return
