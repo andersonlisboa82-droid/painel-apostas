@@ -1945,60 +1945,236 @@ def build_index_html() -> str:
       return nextCanvas;
     }}
 
+    function prepareCanvas(canvas) {{
+      const ratio = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(320, Math.floor(rect.width || canvas.parentElement?.clientWidth || 320));
+      const height = Math.max(220, Math.floor(rect.height || canvas.parentElement?.clientHeight || 300));
+      canvas.width = Math.floor(width * ratio);
+      canvas.height = Math.floor(height * ratio);
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      return {{ ctx, width, height }};
+    }}
+
+    function drawFallbackBarChart(canvasId, labels, datasets, options = {{}}) {{
+      const canvas = resetChartCanvas(canvasId);
+      const prepared = prepareCanvas(canvas);
+      const ctx = prepared.ctx;
+      const width = prepared.width;
+      const height = prepared.height;
+      const horizontal = Boolean(options.horizontal);
+      const maxValue = Math.max(1, ...datasets.flatMap(dataset => dataset.data.map((value) => Number(value) || 0)));
+      const padding = {{ top: 26, right: 22, bottom: horizontal ? 20 : 54, left: horizontal ? 92 : 36 }};
+      const chartWidth = width - padding.left - padding.right;
+      const chartHeight = height - padding.top - padding.bottom;
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = 'rgba(148,163,184,0.24)';
+      ctx.lineWidth = 1;
+
+      for (let tick = 0; tick <= 4; tick += 1) {{
+        const progress = tick / 4;
+        if (horizontal) {{
+          const x = padding.left + (chartWidth * progress);
+          ctx.beginPath();
+          ctx.moveTo(x, padding.top);
+          ctx.lineTo(x, padding.top + chartHeight);
+          ctx.stroke();
+        }} else {{
+          const y = padding.top + chartHeight - (chartHeight * progress);
+          ctx.beginPath();
+          ctx.moveTo(padding.left, y);
+          ctx.lineTo(padding.left + chartWidth, y);
+          ctx.stroke();
+        }}
+      }}
+
+      if (horizontal) {{
+        const rowHeight = chartHeight / Math.max(labels.length, 1);
+        labels.forEach((label, index) => {{
+          const centerY = padding.top + rowHeight * index + rowHeight / 2;
+          ctx.fillStyle = '#334155';
+          ctx.font = '600 12px sans-serif';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, 12, centerY);
+
+          datasets.forEach((dataset, datasetIndex) => {{
+            const value = Number(dataset.data[index]) || 0;
+            const barHeight = Math.max(12, (rowHeight / Math.max(datasets.length, 1)) - 8);
+            const y = centerY - ((datasets.length * barHeight + (datasets.length - 1) * 6) / 2) + datasetIndex * (barHeight + 6);
+            const barWidth = (value / maxValue) * chartWidth;
+            ctx.fillStyle = dataset.backgroundColor;
+            ctx.fillRect(padding.left, y, barWidth, barHeight);
+            ctx.fillStyle = '#0f172a';
+            ctx.font = '700 11px sans-serif';
+            ctx.fillText(value.toFixed(1) + '%', padding.left + Math.min(barWidth + 8, chartWidth - 34), y + barHeight / 2 + 1);
+          }});
+        }});
+      }} else {{
+        const groupWidth = chartWidth / Math.max(labels.length, 1);
+        const barWidth = Math.min(36, (groupWidth - 18) / Math.max(datasets.length, 1));
+        labels.forEach((label, index) => {{
+          const originX = padding.left + groupWidth * index + (groupWidth / 2) - ((datasets.length * barWidth + (datasets.length - 1) * 8) / 2);
+          datasets.forEach((dataset, datasetIndex) => {{
+            const value = Number(dataset.data[index]) || 0;
+            const x = originX + datasetIndex * (barWidth + 8);
+            const barHeight = (value / maxValue) * chartHeight;
+            const y = padding.top + chartHeight - barHeight;
+            ctx.fillStyle = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[index] || dataset.backgroundColor[0] : dataset.backgroundColor;
+            ctx.fillRect(x, y, barWidth, barHeight);
+            ctx.fillStyle = '#0f172a';
+            ctx.font = '700 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(value.toFixed(1), x + barWidth / 2, y - 8);
+          }});
+          ctx.fillStyle = '#334155';
+          ctx.font = '600 12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(label, padding.left + groupWidth * index + groupWidth / 2, height - 20);
+        }});
+        ctx.textAlign = 'left';
+      }}
+    }}
+
+    function drawFallbackDonutChart(canvasId, labels, values, colors) {{
+      const canvas = resetChartCanvas(canvasId);
+      const prepared = prepareCanvas(canvas);
+      const ctx = prepared.ctx;
+      const width = prepared.width;
+      const height = prepared.height;
+      const total = Math.max(1, values.reduce((acc, value) => acc + (Number(value) || 0), 0));
+      const centerX = width * 0.33;
+      const centerY = height * 0.48;
+      const radius = Math.min(width, height) * 0.22;
+      const innerRadius = radius * 0.58;
+      let startAngle = -Math.PI / 2;
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(0, 0, width, height);
+
+      values.forEach((rawValue, index) => {{
+        const value = Number(rawValue) || 0;
+        const sliceAngle = (value / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
+        ctx.closePath();
+        ctx.fillStyle = colors[index];
+        ctx.fill();
+        startAngle += sliceAngle;
+      }});
+
+      ctx.beginPath();
+      ctx.fillStyle = '#f8fafc';
+      ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '700 13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Mercados', centerX, centerY - 4);
+      ctx.font = '600 12px sans-serif';
+      ctx.fillStyle = '#64748b';
+      ctx.fillText('alternativos', centerX, centerY + 14);
+
+      labels.forEach((label, index) => {{
+        const y = 42 + index * 28;
+        ctx.fillStyle = colors[index];
+        ctx.fillRect(width * 0.63, y - 9, 14, 14);
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '600 12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(label + '  ' + (Number(values[index]) || 0).toFixed(1) + '%', width * 0.63 + 22, y + 2);
+      }});
+      ctx.textAlign = 'left';
+    }}
+
     function renderCharts(data) {{
       destroyCharts();
-      
-      const ctx1 = resetChartCanvas('chart1x2').getContext('2d');
-      charts.chart1x2 = new Chart(ctx1, {{
-        type: 'bar',
-        data: {{
-          labels: ['Mandante', 'Empate', 'Visitante'],
-          datasets: [{{
-            label: 'Modelo %',
-            data: [data.probs.home, data.probs.draw, data.probs.away],
-            backgroundColor: ['rgba(29, 78, 216, 0.7)', 'rgba(148, 163, 184, 0.7)', 'rgba(15, 118, 110, 0.7)'],
-            borderRadius: 8
-          }}, {{
-            label: 'Mercado %',
-            data: [
-              data.odds.home > 0 ? (100/data.odds.home).toFixed(1) : 0,
-              data.odds.draw > 0 ? (100/data.odds.draw).toFixed(1) : 0,
-              data.odds.away > 0 ? (100/data.odds.away).toFixed(1) : 0
-            ],
-            backgroundColor: 'rgba(0,0,0,0.1)',
-            borderRadius: 8
-          }}]
-        }},
-        options: {{ responsive: true, maintainAspectRatio: false }}
-      }});
-      
-      const ctx2 = resetChartCanvas('chartAlt').getContext('2d');
-      charts.chartAlt = new Chart(ctx2, {{
-        type: 'doughnut',
-        data: {{
-          labels: ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
-          datasets: [{{
-            data: [data.probs.btts, data.probs.over25, data.probs.under25],
-            backgroundColor: ['#fbbf24', '#ef4444', '#10b981']
-          }}]
-        }},
-        options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
-      }});
-      
-      const ctx3 = resetChartCanvas('chartScores').getContext('2d');
-      charts.chartScores = new Chart(ctx3, {{
-        type: 'bar',
-        data: {{
-          labels: data.probs.scorelines.map(s => s[0]),
-          datasets: [{{
-            label: 'Probabilidade %',
-            data: data.probs.scorelines.map(s => s[1]),
-            backgroundColor: 'rgba(29, 78, 216, 0.6)',
-            borderRadius: 6
-          }}]
-        }},
-        options: {{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }}
-      }});
+
+      const marketValues = [
+        data.odds.home > 0 ? (100 / data.odds.home) : 0,
+        data.odds.draw > 0 ? (100 / data.odds.draw) : 0,
+        data.odds.away > 0 ? (100 / data.odds.away) : 0
+      ];
+
+      if (window.Chart) {{
+        const ctx1 = resetChartCanvas('chart1x2').getContext('2d');
+        charts.chart1x2 = new Chart(ctx1, {{
+          type: 'bar',
+          data: {{
+            labels: ['Mandante', 'Empate', 'Visitante'],
+            datasets: [{{
+              label: 'Modelo %',
+              data: [data.probs.home, data.probs.draw, data.probs.away],
+              backgroundColor: ['rgba(29, 78, 216, 0.7)', 'rgba(148, 163, 184, 0.7)', 'rgba(15, 118, 110, 0.7)'],
+              borderRadius: 8
+            }}, {{
+              label: 'Mercado %',
+              data: marketValues.map((value) => value.toFixed(1)),
+              backgroundColor: 'rgba(0,0,0,0.1)',
+              borderRadius: 8
+            }}]
+          }},
+          options: {{ responsive: true, maintainAspectRatio: false }}
+        }});
+
+        const ctx2 = resetChartCanvas('chartAlt').getContext('2d');
+        charts.chartAlt = new Chart(ctx2, {{
+          type: 'doughnut',
+          data: {{
+            labels: ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
+            datasets: [{{
+              data: [data.probs.btts, data.probs.over25, data.probs.under25],
+              backgroundColor: ['#fbbf24', '#ef4444', '#10b981']
+            }}]
+          }},
+          options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
+        }});
+
+        const ctx3 = resetChartCanvas('chartScores').getContext('2d');
+        charts.chartScores = new Chart(ctx3, {{
+          type: 'bar',
+          data: {{
+            labels: data.probs.scorelines.map(s => s[0]),
+            datasets: [{{
+              label: 'Probabilidade %',
+              data: data.probs.scorelines.map(s => s[1]),
+              backgroundColor: 'rgba(29, 78, 216, 0.6)',
+              borderRadius: 6
+            }}]
+          }},
+          options: {{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }}
+        }});
+        return;
+      }}
+
+      drawFallbackBarChart(
+        'chart1x2',
+        ['Mandante', 'Empate', 'Visitante'],
+        [
+          {{ label: 'Modelo %', data: [data.probs.home, data.probs.draw, data.probs.away], backgroundColor: ['#1d4ed8', '#94a3b8', '#0f766e'] }},
+          {{ label: 'Mercado %', data: marketValues, backgroundColor: 'rgba(15,23,42,0.22)' }}
+        ]
+      );
+      drawFallbackDonutChart(
+        'chartAlt',
+        ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
+        [data.probs.btts, data.probs.over25, data.probs.under25],
+        ['#fbbf24', '#ef4444', '#10b981']
+      );
+      drawFallbackBarChart(
+        'chartScores',
+        data.probs.scorelines.map((score) => score[0]),
+        [
+          {{ label: 'Probabilidade %', data: data.probs.scorelines.map((score) => score[1]), backgroundColor: '#1d4ed8' }}
+        ],
+        {{ horizontal: true }}
+      );
     }}
 
     function applyRiskPreset() {{
