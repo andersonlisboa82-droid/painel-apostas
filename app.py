@@ -18,6 +18,7 @@ APP_DIR = Path(__file__).resolve().parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
+from gerar_copa_mundo_html import build_world_cup_schedule_html
 from gerar_html import AI_PROMPT_TEMPLATE, build_index_html
 from portal_ai_server import run_ai_analysis
 from analytics import (
@@ -79,6 +80,7 @@ div[data-testid="stVerticalBlock"] > div:has(div.element-container) {
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
+WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
 
 
 def _build_match_detail_data(row_data: pd.Series, matches_df: pd.DataFrame) -> dict[str, object]:
@@ -734,6 +736,19 @@ def render_callout_grid(items: list[dict[str, str]]) -> None:
 
 def render_embedded_index_portal() -> None:
     components.html(build_index_html(), height=7800, scrolling=True)
+
+
+def _load_world_cup_portal_html() -> str:
+    if WORLD_CUP_HTML_FILE.exists():
+        return WORLD_CUP_HTML_FILE.read_text(encoding="utf-8")
+
+    html = build_world_cup_schedule_html()
+    WORLD_CUP_HTML_FILE.write_text(html, encoding="utf-8")
+    return html
+
+
+def render_embedded_world_cup_portal() -> None:
+    components.html(_load_world_cup_portal_html(), height=8600, scrolling=True)
 
 
 def clear_embedded_index_portal() -> None:
@@ -2036,6 +2051,7 @@ with st.sidebar:
         "Menus",
         options=[
             "Inicio",
+            "Copa 2026",
             "IA Institucional",
             "Jogos Seguros",
             "Painel do Modelo",
@@ -2196,6 +2212,7 @@ avg_model_edge = backtest_summary.get("avg_model_edge", 0.0)
 tuning_actions = backtest_summary.get("tuning_actions", [])
 page_descriptions = {
     "Inicio": "Visao executiva com resumo da competicao, IA institucional e resultados recentes do modelo.",
+    "Copa 2026": "Acesso direto ao HTML dedicado da Copa do Mundo 2026 com filtros, sugestoes de placar e calibragem do modelo.",
     "IA Institucional": "Central de leitura do dia com prompt profissional, execucao e resposta completa dentro do portal.",
     "Jogos Seguros": "Ranking das selecoes mais conservadoras dentro do filtro atual.",
     "Painel do Modelo": "Comparativo detalhado entre modelo, casas de aposta e entradas por valor.",
@@ -2325,6 +2342,17 @@ section[data-testid="stSidebar"] {
     render_embedded_index_portal()
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
+
+elif page == "Copa 2026":
+    render_callout_grid(
+        [
+            {"eyebrow": "HTML dedicado", "title": "Painel da Copa no Streamlit"},
+            {"eyebrow": "Horario SP", "title": "Tabela ordenada por Sao Paulo"},
+            {"eyebrow": "IA", "title": "Placares sugeridos por confronto"},
+            {"eyebrow": "Ajuste", "title": "Modelo recalibravel com resultados"},
+        ]
+    )
+    render_embedded_world_cup_portal()
 
 elif page == "IA Institucional":
     render_callout_grid(
