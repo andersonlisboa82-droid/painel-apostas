@@ -738,9 +738,15 @@ def render_embedded_index_portal() -> None:
     components.html(build_index_html(), height=7800, scrolling=True)
 
 
+@st.cache_data(show_spinner=False)
+def _read_cached_html_snapshot(path_str: str, modified_at: float) -> str:
+    del modified_at
+    return Path(path_str).read_text(encoding="utf-8")
+
+
 def _load_world_cup_portal_html() -> str:
     if WORLD_CUP_HTML_FILE.exists():
-        return WORLD_CUP_HTML_FILE.read_text(encoding="utf-8")
+        return _read_cached_html_snapshot(str(WORLD_CUP_HTML_FILE), WORLD_CUP_HTML_FILE.stat().st_mtime)
 
     html = build_world_cup_schedule_html()
     WORLD_CUP_HTML_FILE.write_text(html, encoding="utf-8")
@@ -748,7 +754,7 @@ def _load_world_cup_portal_html() -> str:
 
 
 def render_embedded_world_cup_portal() -> None:
-    components.html(_load_world_cup_portal_html(), height=8600, scrolling=True)
+    components.html(_load_world_cup_portal_html(), height=1200, scrolling=True)
 
 
 def clear_embedded_index_portal() -> None:
@@ -2061,6 +2067,10 @@ with st.sidebar:
         ],
         key="page_menu_v4",
     )
+    if st.button("Abrir Painel Copa 2026", use_container_width=True):
+        st.session_state["page_menu_v4"] = "Copa 2026"
+        st.rerun()
+    st.caption("Atalho rapido: use o botao acima ou selecione `Copa 2026` no menu.")
     st.caption("Use este menu lateral para navegar entre os modulos taticos, analiticos e de IA do portal.")
     st.markdown("---")
     st.markdown("### Configuracoes")
@@ -2339,6 +2349,23 @@ section[data-testid="stSidebar"] {
 """,
         unsafe_allow_html=True,
     )
+    st.markdown(
+        """
+<div style="max-width:1480px;margin:0 auto;padding:18px 20px 8px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,255,255,.94),rgba(245,249,255,.96));border:1px solid rgba(148,163,184,.18);border-radius:22px;padding:16px 18px;box-shadow:0 18px 40px rgba(15,23,42,.08);">
+    <div>
+      <div style="font:800 .8rem/1 'Space Grotesk',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;">Atalho da Copa</div>
+      <div style="margin-top:6px;font:700 1.05rem/1.1 'Space Grotesk',sans-serif;color:#0f2235;">Painel Copa do Mundo 2026</div>
+      <div style="margin-top:6px;color:#5a6d81;font-size:.92rem;">Use este acesso direto quando quiser abrir o HTML dedicado da Copa dentro do portal.</div>
+    </div>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+    if st.button("Abrir Painel Copa 2026", key="home_open_copa_2026", use_container_width=True):
+        st.session_state["page_menu_v4"] = "Copa 2026"
+        st.rerun()
     render_embedded_index_portal()
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()

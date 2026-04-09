@@ -3040,6 +3040,9 @@ def build_world_cup_schedule_html() -> str:
         radial-gradient(circle at bottom left, rgba(53,184,105,0.10), transparent 22%),
         linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,244,236,0.92));
       border: 1px solid rgba(16,35,58,0.08); box-shadow: 0 12px 30px rgba(16,35,58,0.08);
+      content-visibility: auto;
+      contain: layout paint style;
+      contain-intrinsic-size: 420px;
     }}
     .analysis-card::before {{
       content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; border-radius: 24px 0 0 24px;
@@ -3115,6 +3118,28 @@ def build_world_cup_schedule_html() -> str:
       display: none; padding: 30px 18px; text-align: center; color: var(--muted); border-radius: 22px;
       background: rgba(255,255,255,0.72); border: 1px dashed rgba(16,35,58,0.16);
     }}
+    .load-more-wrap {{
+      display: flex;
+      justify-content: center;
+      margin-top: 18px;
+    }}
+    .btn-load-more {{
+      display: none;
+      align-items: center;
+      justify-content: center;
+      min-width: 220px;
+      height: 48px;
+      padding: 0 18px;
+      border: 1px solid rgba(16,35,58,0.10);
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(247,250,245,0.96));
+      color: var(--ink);
+      font: inherit;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 12px 24px rgba(16,35,58,0.08);
+    }}
+    .btn-load-more:hover {{ transform: translateY(-1px); }}
     .update-toast {{
       display: none;
       position: fixed;
@@ -3201,6 +3226,9 @@ def build_world_cup_schedule_html() -> str:
         <div id="resultsCount" class="results-count"></div>
         <div id="emptyState" class="empty-state">Nenhum jogo combina com os filtros aplicados.</div>
         <div id="analysisGrid" class="analysis-grid">{cards_html}</div>
+        <div class="load-more-wrap">
+          <button id="loadMoreBtn" class="btn-load-more" type="button">Carregar mais jogos</button>
+        </div>
         {model_summary_html}
         <p class="footer-note">
           Fontes consultadas: <a href="{FIFA_SCHEDULE_RELEASE_URL}">Inside FIFA</a> e
@@ -3250,12 +3278,16 @@ def build_world_cup_schedule_html() -> str:
     const dateFilter = document.getElementById('dateFilter');
     const resultsCount = document.getElementById('resultsCount');
     const emptyState = document.getElementById('emptyState');
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    const PAGE_SIZE = 18;
+    let visibleLimit = PAGE_SIZE;
 
-    function applyFilters() {{
+    function applyFilters(resetLimit = false) {{
+      if (resetLimit) visibleLimit = PAGE_SIZE;
       const query = (searchInput.value || '').trim().toLowerCase();
       const stage = (stageFilter.value || '').trim();
       const dateValue = (dateFilter.value || '').trim();
-      let visible = 0;
+      const matchedCards = [];
 
       cards.forEach((card) => {{
         const searchBlob = card.dataset.search || '';
@@ -3265,18 +3297,32 @@ def build_world_cup_schedule_html() -> str:
         const matchesStage = !stage || cardStage === stage;
         const matchesDate = !dateValue || cardDate === dateValue;
         const show = matchesQuery && matchesStage && matchesDate;
-        card.style.display = show ? '' : 'none';
-        if (show) visible += 1;
+        card.style.display = 'none';
+        if (show) matchedCards.push(card);
       }});
 
-      resultsCount.textContent = visible === 1 ? '1 confronto visivel' : `${{visible}} confrontos visiveis`;
-      emptyState.style.display = visible === 0 ? 'block' : 'none';
+      matchedCards.forEach((card, index) => {{
+        card.style.display = index < visibleLimit ? '' : 'none';
+      }});
+
+      const visible = Math.min(visibleLimit, matchedCards.length);
+      const hidden = Math.max(0, matchedCards.length - visibleLimit);
+      resultsCount.textContent = matchedCards.length === 1 ? '1 confronto visivel' : `${{matchedCards.length}} confrontos visiveis`;
+      emptyState.style.display = matchedCards.length === 0 ? 'block' : 'none';
+      loadMoreBtn.style.display = hidden > 0 ? 'inline-flex' : 'none';
+      if (hidden > 0) {{
+        loadMoreBtn.textContent = `Carregar mais ${{Math.min(PAGE_SIZE, hidden)}} jogos`;
+      }}
     }}
 
-    searchInput.addEventListener('input', applyFilters);
-    stageFilter.addEventListener('change', applyFilters);
-    dateFilter.addEventListener('change', applyFilters);
-    applyFilters();
+    searchInput.addEventListener('input', () => applyFilters(true));
+    stageFilter.addEventListener('change', () => applyFilters(true));
+    dateFilter.addEventListener('change', () => applyFilters(true));
+    loadMoreBtn.addEventListener('click', () => {{
+      visibleLimit += PAGE_SIZE;
+      applyFilters(false);
+    }});
+    applyFilters(true);
   </script>
 </body>
 </html>
