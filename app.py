@@ -76,10 +76,10 @@ div[data-testid="stVerticalBlock"] > div:has(div.element-container) {
 </style>
 """, unsafe_allow_html=True)
 
-
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
+INDEX_HTML_FILE = APP_DIR / "index.html"
 WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
 
 
@@ -735,13 +735,22 @@ def render_callout_grid(items: list[dict[str, str]]) -> None:
 
 
 def render_embedded_index_portal() -> None:
-    components.html(build_index_html(), height=7800, scrolling=True)
+    components.html(_load_index_portal_html(), height=1200, scrolling=True)
 
 
 @st.cache_data(show_spinner=False)
 def _read_cached_html_snapshot(path_str: str, modified_at: float) -> str:
     del modified_at
     return Path(path_str).read_text(encoding="utf-8")
+
+
+def _load_index_portal_html() -> str:
+    if INDEX_HTML_FILE.exists():
+        return _read_cached_html_snapshot(str(INDEX_HTML_FILE), INDEX_HTML_FILE.stat().st_mtime)
+
+    html = build_index_html()
+    INDEX_HTML_FILE.write_text(html, encoding="utf-8")
+    return html
 
 
 def _load_world_cup_portal_html() -> str:
@@ -760,6 +769,155 @@ def render_embedded_world_cup_portal() -> None:
 def queue_page_navigation(page_name: str) -> None:
     st.session_state["pending_page_menu_v4"] = page_name
     st.rerun()
+
+
+def set_public_portal_shell() -> None:
+    st.markdown(
+        """
+<style>
+header[data-testid="stHeader"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+[data-testid="stSidebar"],
+[data-testid="stSidebarCollapsedControl"] {
+  display: none !important;
+}
+.stApp .block-container {
+  max-width: none !important;
+  padding: 0 !important;
+}
+[data-testid="stAppViewContainer"] {
+  background:
+    radial-gradient(1100px 520px at 0% 0%, rgba(59,130,246,0.10), transparent 55%),
+    linear-gradient(180deg, #edf4fb 0%, #eef6f2 100%) !important;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def render_public_landing() -> None:
+    set_public_portal_shell()
+    st.markdown(
+        """
+<style>
+.public-home-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 24px 12px;
+}
+.public-home-intro {
+  margin-bottom: 18px;
+  text-align: center;
+}
+.public-home-intro strong {
+  display: block;
+  font: 800 clamp(2rem, 5vw, 3.4rem)/1 "Space Grotesk", sans-serif;
+  color: #0f2235;
+}
+.public-home-intro span {
+  display: block;
+  margin-top: 10px;
+  color: #5a6d81;
+  font: 500 1rem/1.6 "Manrope", sans-serif;
+}
+.public-home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.public-home-card {
+  padding: 26px;
+  border-radius: 28px;
+  min-height: 220px;
+  box-shadow: 0 28px 60px rgba(15,23,42,.16);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+.public-home-link {
+  display: block;
+  text-decoration: none;
+}
+.public-home-link:hover .public-home-card {
+  transform: translateY(-4px);
+  box-shadow: 0 34px 72px rgba(15,23,42,.22);
+  filter: saturate(1.05);
+}
+.public-home-card.portal {
+  background: linear-gradient(135deg,#10233a,#1d4ed8);
+}
+.public-home-card.copa {
+  background: linear-gradient(135deg,#0f6a3c,#1c56b8);
+}
+.public-home-card strong {
+  display: block;
+  font: 800 2rem/1.02 "Space Grotesk", sans-serif;
+  color: #fff;
+}
+.public-home-card span {
+  display: block;
+  margin-top: 10px;
+  color: rgba(255,255,255,.84);
+  font: 500 1rem/1.6 "Manrope", sans-serif;
+}
+@media (max-width: 760px) {
+  .public-home-grid { grid-template-columns: 1fr; }
+}
+</style>
+<div class="public-home-shell">
+  <div class="public-home-intro">
+    <strong>Escolha onde entrar</strong>
+    <span>Abra o portal de apostas ou o HTML dedicado da Copa do Mundo 2026.</span>
+  </div>
+  <div class="public-home-grid">
+    <a class="public-home-link" href="?view=portal" target="_self">
+      <div class="public-home-card portal">
+        <strong>Portal Apostas</strong>
+        <span>Abrir o HTML principal do portal com o painel de apostas.</span>
+      </div>
+    </a>
+    <a class="public-home-link" href="?view=copa" target="_self">
+      <div class="public-home-card copa">
+        <strong>Copa do Mundo 2026</strong>
+        <span>Abrir o HTML dedicado da Copa com filtros, placares sugeridos e calibragem.</span>
+      </div>
+    </a>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+def render_public_back_button() -> None:
+    st.markdown(
+        """
+<div style="max-width:1480px;margin:0 auto;padding:18px 18px 6px;">
+  <a href="?" target="_self" style="display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:999px;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(245,249,255,.96));border:1px solid rgba(148,163,184,.20);box-shadow:0 12px 24px rgba(15,23,42,.08);font:800 .92rem/1 'Space Grotesk',sans-serif;color:#0f2235;text-decoration:none;">Voltar ao Index Inicial</a>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+public_home_view = str(st.query_params.get("view", "landing"))
+if public_home_view == "landing":
+    render_public_landing()
+    st.stop()
+if public_home_view == "portal":
+    set_public_portal_shell()
+    render_public_back_button()
+    render_embedded_index_portal()
+    st.stop()
+if public_home_view == "copa":
+    set_public_portal_shell()
+    render_public_back_button()
+    render_embedded_world_cup_portal()
+    st.stop()
 
 
 def clear_embedded_index_portal() -> None:
@@ -2065,6 +2223,7 @@ with st.sidebar:
         options=[
             "Inicio",
             "Copa 2026",
+            "Configuracoes",
             "IA Institucional",
             "Jogos Seguros",
             "Painel do Modelo",
@@ -2229,6 +2388,7 @@ tuning_actions = backtest_summary.get("tuning_actions", [])
 page_descriptions = {
     "Inicio": "Visao executiva com resumo da competicao, IA institucional e resultados recentes do modelo.",
     "Copa 2026": "Acesso direto ao HTML dedicado da Copa do Mundo 2026 com filtros, sugestoes de placar e calibragem do modelo.",
+    "Configuracoes": "Area para ajustar competicao, filtro por time e perfil de risco usando os controles do menu lateral.",
     "IA Institucional": "Central de leitura do dia com prompt profissional, execucao e resposta completa dentro do portal.",
     "Jogos Seguros": "Ranking das selecoes mais conservadoras dentro do filtro atual.",
     "Painel do Modelo": "Comparativo detalhado entre modelo, casas de aposta e entradas por valor.",
@@ -2360,17 +2520,22 @@ section[data-testid="stSidebar"] {
 <div style="max-width:1480px;margin:0 auto;padding:18px 20px 8px;">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,255,255,.94),rgba(245,249,255,.96));border:1px solid rgba(148,163,184,.18);border-radius:22px;padding:16px 18px;box-shadow:0 18px 40px rgba(15,23,42,.08);">
     <div>
-      <div style="font:800 .8rem/1 'Space Grotesk',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;">Atalho da Copa</div>
-      <div style="margin-top:6px;font:700 1.05rem/1.1 'Space Grotesk',sans-serif;color:#0f2235;">Painel Copa do Mundo 2026</div>
-      <div style="margin-top:6px;color:#5a6d81;font-size:.92rem;">Use este acesso direto quando quiser abrir o HTML dedicado da Copa dentro do portal.</div>
+      <div style="font:800 .8rem/1 'Space Grotesk',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;">Acesso rapido</div>
+      <div style="margin-top:6px;font:700 1.05rem/1.1 'Space Grotesk',sans-serif;color:#0f2235;">Escolha abrir o painel da Copa 2026 ou entrar nas configuracoes do portal.</div>
+      <div style="margin-top:6px;color:#5a6d81;font-size:.92rem;">Os botoes abaixo levam direto para o HTML da Copa ou para a area com filtros e ajustes do sistema.</div>
     </div>
   </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
-    if st.button("Abrir Painel Copa 2026", key="home_open_copa_2026", use_container_width=True):
-        queue_page_navigation("Copa 2026")
+    home_action_col1, home_action_col2 = st.columns(2)
+    with home_action_col1:
+        if st.button("Abrir HTML Copa 2026", key="home_open_copa_2026", use_container_width=True):
+            queue_page_navigation("Copa 2026")
+    with home_action_col2:
+        if st.button("Abrir Configuracoes", key="home_open_settings", use_container_width=True):
+            queue_page_navigation("Configuracoes")
     render_embedded_index_portal()
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
@@ -2385,6 +2550,35 @@ elif page == "Copa 2026":
         ]
     )
     render_embedded_world_cup_portal()
+
+elif page == "Configuracoes":
+    render_callout_grid(
+        [
+            {"eyebrow": "Competicao", "title": "Ajuste o torneio monitorado"},
+            {"eyebrow": "Filtro", "title": "Refine por time ou contexto"},
+            {"eyebrow": "Risco", "title": "Troque o perfil operacional"},
+            {"eyebrow": "Atualizacao", "title": "Recarregue a base manualmente"},
+        ]
+    )
+    render_card_grid(
+        [
+            {"eyebrow": "Competicao ativa", "value": competition_name},
+            {"eyebrow": "Filtro por time", "value": team_filter.strip() or "Todos os times"},
+            {"eyebrow": "Perfil de risco", "value": risk_profile},
+            {"eyebrow": "Cobertura de odds", "value": f"{odds_coverage}%"},
+        ]
+    )
+    render_split_highlight(
+        title="Como ajustar o portal",
+        copy="Use o menu lateral para alterar os parametros do sistema. Esta tela serve como atalho rapido para entrar no modo de configuracao com a barra lateral visivel.",
+        items=[
+            "Competicao: muda o universo de jogos analisados no portal.",
+            "Filtrar por time: reduz a leitura para confrontos do clube ou selecao desejada.",
+            "Perfil de risco: troca a regua de probabilidade, EV, odd maxima e casas minimas.",
+            "Atualizar agora: limpa cache e recarrega os dados da sessao.",
+        ],
+        tone="neutral",
+    )
 
 elif page == "IA Institucional":
     render_callout_grid(
