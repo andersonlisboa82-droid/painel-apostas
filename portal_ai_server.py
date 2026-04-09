@@ -17,6 +17,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from analytics import calculate_match_probabilities, get_team_context, suggest_bet_strategy
+from gerar_copa_mundo_html import build_world_cup_schedule_html
 from gerar_html import build_index_html
 from nvidia_client import request_nvidia_completion
 from scraper import load_all_matches
@@ -67,6 +68,15 @@ def refresh_portal_snapshot() -> dict[str, str]:
     index_path.write_text(html, encoding="utf-8")
     updated_at = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
     return {"updated_at": updated_at, "index_path": str(index_path)}
+
+
+def refresh_copa_snapshot() -> dict[str, str]:
+    """Regenera o copa_do_mundo.html buscando dados frescos do betexplorer."""
+    html = build_world_cup_schedule_html()
+    copa_path = BASE_DIR / "copa_do_mundo.html"
+    copa_path.write_text(html, encoding="utf-8")
+    updated_at = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
+    return {"updated_at": updated_at, "copa_path": str(copa_path)}
 
 
 def build_match_context_for_date(selected_date: date) -> tuple[pd.DataFrame, str]:
@@ -200,6 +210,15 @@ class PortalAIHandler(BaseHTTPRequestHandler):
         if self.path == "/api/refresh-portal":
             try:
                 payload = refresh_portal_snapshot()
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status_code=500)
+                return
+            self._send_json({"ok": True, **payload})
+            return
+
+        if self.path == "/api/refresh-copa":
+            try:
+                payload = refresh_copa_snapshot()
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status_code=500)
                 return

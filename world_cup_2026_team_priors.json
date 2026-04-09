@@ -1,0 +1,386 @@
+{
+  "Algeria": {
+    "team": "Algeria",
+    "strength": 68,
+    "attack": 1.02,
+    "defense": 1.05,
+    "draw_bias": 1.0,
+    "note": "Equipe experiente"
+  },
+  "Argentina": {
+    "team": "Argentina",
+    "strength": 85,
+    "attack": 1.18,
+    "defense": 1.1,
+    "draw_bias": 1.02,
+    "note": "Favorita ao título"
+  },
+  "Australia": {
+    "team": "Australia",
+    "strength": 62,
+    "attack": 0.98,
+    "defense": 1.02,
+    "draw_bias": 1.0,
+    "note": "Equipe em ascensão"
+  },
+  "Austria": {
+    "team": "Austria",
+    "strength": 70,
+    "attack": 1.05,
+    "defense": 1.08,
+    "draw_bias": 1.02,
+    "note": "Equipe sólida"
+  },
+  "Belgium": {
+    "team": "Belgium",
+    "strength": 82,
+    "attack": 1.15,
+    "defense": 1.12,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "Bosnia and Herzegovina": {
+    "team": "Bosnia and Herzegovina",
+    "strength": 65,
+    "attack": 1.0,
+    "defense": 1.04,
+    "draw_bias": 1.0,
+    "note": "Equipe em declínio"
+  },
+  "Brazil": {
+    "team": "Brazil",
+    "strength": 88,
+    "attack": 1.2,
+    "defense": 1.15,
+    "draw_bias": 1.06,
+    "note": "Favorita ao título"
+  },
+  "Canada": {
+    "team": "Canada",
+    "strength": 60,
+    "attack": 0.95,
+    "defense": 1.0,
+    "draw_bias": 0.98,
+    "note": "Equipe em ascensão"
+  },
+  "Cape Verde": {
+    "team": "Cape Verde",
+    "strength": 55,
+    "attack": 0.9,
+    "defense": 0.95,
+    "draw_bias": 0.96,
+    "note": "Equipe desconhecida"
+  },
+  "Colombia": {
+    "team": "Colombia",
+    "strength": 75,
+    "attack": 1.08,
+    "defense": 1.1,
+    "draw_bias": 1.02,
+    "note": "Equipe experiente"
+  },
+  "Croatia": {
+    "team": "Croatia",
+    "strength": 80,
+    "attack": 1.12,
+    "defense": 1.14,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "Curacao": {
+    "team": "Curacao",
+    "strength": 50,
+    "attack": 0.85,
+    "defense": 0.9,
+    "draw_bias": 0.94,
+    "note": "Equipe desconhecida"
+  },
+  "Czechia": {
+    "team": "Czechia",
+    "strength": 65,
+    "attack": 1.0,
+    "defense": 1.04,
+    "draw_bias": 1.0,
+    "note": "Equipe em declínio"
+  },
+  "D.R. Congo": {
+    "team": "D.R. Congo",
+    "strength": 58,
+    "attack": 0.92,
+    "defense": 0.96,
+    "draw_bias": 0.98,
+    "note": "Equipe desconhecida"
+  },
+  "Ecuador": {
+    "team": "Ecuador",
+    "strength": 68,
+    "attack": 1.02,
+    "defense": 1.05,
+    "draw_bias": 1.0,
+    "note": "Equipe experiente"
+  },
+  "Egypt": {
+    "team": "Egypt",
+    "strength": 62,
+    "attack": 0.98,
+    "defense": 1.02,
+    "draw_bias": 1.0,
+    "note": "Equipe em ascensão"
+  },
+  "England": {
+    "team": "England",
+    "strength": 84,
+    "attack": 1.18,
+    "defense": 1.12,
+    "draw_bias": 1.04,
+    "note": "Favorita ao título"
+  },
+  "France": {
+    "team": "France",
+    "strength": 90,
+    "attack": 1.22,
+    "defense": 1.18,
+    "draw_bias": 1.08,
+    "note": "Favorita ao título"
+  },
+  "Germany": {
+    "team": "Germany",
+    "strength": 86,
+    "attack": 1.2,
+    "defense": 1.15,
+    "draw_bias": 1.06,
+    "note": "Favorita ao título"
+  },
+  "Ghana": {
+    "team": "Ghana",
+    "strength": 60,
+    "attack": 0.95,
+    "defense": 1.0,
+    "draw_bias": 0.98,
+    "note": "Equipe em ascensão"
+  },
+  "Haiti": {
+    "team": "Haiti",
+    "strength": 52,
+    "attack": 0.88,
+    "defense": 0.92,
+    "draw_bias": 0.94,
+    "note": "Equipe desconhecida"
+  },
+  "Iran": {
+    "team": "Iran",
+    "strength": 70,
+    "attack": 1.05,
+    "defense": 1.08,
+    "draw_bias": 1.02,
+    "note": "Equipe sólida"
+  },
+  "Iraq": {
+    "team": "Iraq",
+    "strength": 58,
+    "attack": 0.92,
+    "defense": 0.96,
+    "draw_bias": 0.98,
+    "note": "Equipe desconhecida"
+  },
+  "Ivory Coast": {
+    "team": "Ivory Coast",
+    "strength": 68,
+    "attack": 1.02,
+    "defense": 1.05,
+    "draw_bias": 1.0,
+    "note": "Equipe experiente"
+  },
+  "Japan": {
+    "team": "Japan",
+    "strength": 72,
+    "attack": 1.08,
+    "defense": 1.1,
+    "draw_bias": 1.02,
+    "note": "Equipe experiente"
+  },
+  "Jordan": {
+    "team": "Jordan",
+    "strength": 55,
+    "attack": 0.9,
+    "defense": 0.95,
+    "draw_bias": 0.96,
+    "note": "Equipe desconhecida"
+  },
+  "Mexico": {
+    "team": "Mexico",
+    "strength": 78,
+    "attack": 1.12,
+    "defense": 1.12,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "Morocco": {
+    "team": "Morocco",
+    "strength": 75,
+    "attack": 1.08,
+    "defense": 1.1,
+    "draw_bias": 1.02,
+    "note": "Equipe experiente"
+  },
+  "Netherlands": {
+    "team": "Netherlands",
+    "strength": 82,
+    "attack": 1.15,
+    "defense": 1.12,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "New Zealand": {
+    "team": "New Zealand",
+    "strength": 50,
+    "attack": 0.85,
+    "defense": 0.9,
+    "draw_bias": 0.94,
+    "note": "Equipe desconhecida"
+  },
+  "Norway": {
+    "team": "Norway",
+    "strength": 68,
+    "attack": 1.02,
+    "defense": 1.05,
+    "draw_bias": 1.0,
+    "note": "Equipe experiente"
+  },
+  "Panama": {
+    "team": "Panama",
+    "strength": 60,
+    "attack": 0.95,
+    "defense": 1.0,
+    "draw_bias": 0.98,
+    "note": "Equipe em ascensão"
+  },
+  "Paraguay": {
+    "team": "Paraguay",
+    "strength": 65,
+    "attack": 1.0,
+    "defense": 1.04,
+    "draw_bias": 1.0,
+    "note": "Equipe em declínio"
+  },
+  "Portugal": {
+    "team": "Portugal",
+    "strength": 80,
+    "attack": 1.12,
+    "defense": 1.14,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "Qatar": {
+    "team": "Qatar",
+    "strength": 58,
+    "attack": 0.92,
+    "defense": 0.96,
+    "draw_bias": 0.98,
+    "note": "Equipe desconhecida"
+  },
+  "Saudi Arabia": {
+    "team": "Saudi Arabia",
+    "strength": 62,
+    "attack": 0.98,
+    "defense": 1.02,
+    "draw_bias": 1.0,
+    "note": "Equipe em ascensão"
+  },
+  "Scotland": {
+    "team": "Scotland",
+    "strength": 70,
+    "attack": 1.05,
+    "defense": 1.08,
+    "draw_bias": 1.02,
+    "note": "Equipe sólida"
+  },
+  "Senegal": {
+    "team": "Senegal",
+    "strength": 72,
+    "attack": 1.08,
+    "defense": 1.1,
+    "draw_bias": 1.02,
+    "note": "Equipe experiente"
+  },
+  "South Africa": {
+    "team": "South Africa",
+    "strength": 60,
+    "attack": 0.95,
+    "defense": 1.0,
+    "draw_bias": 0.98,
+    "note": "Equipe em ascensão"
+  },
+  "South Korea": {
+    "team": "South Korea",
+    "strength": 70,
+    "attack": 1.05,
+    "defense": 1.08,
+    "draw_bias": 1.02,
+    "note": "Equipe sólida"
+  },
+  "Spain": {
+    "team": "Spain",
+    "strength": 84,
+    "attack": 1.18,
+    "defense": 1.12,
+    "draw_bias": 1.04,
+    "note": "Favorita ao título"
+  },
+  "Sweden": {
+    "team": "Sweden",
+    "strength": 75,
+    "attack": 1.08,
+    "defense": 1.1,
+    "draw_bias": 1.02,
+    "note": "Equipe experiente"
+  },
+  "Switzerland": {
+    "team": "Switzerland",
+    "strength": 78,
+    "attack": 1.12,
+    "defense": 1.12,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "Tunisia": {
+    "team": "Tunisia",
+    "strength": 65,
+    "attack": 1.0,
+    "defense": 1.04,
+    "draw_bias": 1.0,
+    "note": "Equipe em declínio"
+  },
+  "Turkey": {
+    "team": "Turkey",
+    "strength": 72,
+    "attack": 1.08,
+    "defense": 1.1,
+    "draw_bias": 1.02,
+    "note": "Equipe experiente"
+  },
+  "USA": {
+    "team": "USA",
+    "strength": 78,
+    "attack": 1.12,
+    "defense": 1.12,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "Uruguay": {
+    "team": "Uruguay",
+    "strength": 80,
+    "attack": 1.12,
+    "defense": 1.14,
+    "draw_bias": 1.04,
+    "note": "Equipe experiente"
+  },
+  "Uzbekistan": {
+    "team": "Uzbekistan",
+    "strength": 55,
+    "attack": 0.9,
+    "defense": 0.95,
+    "draw_bias": 0.96,
+    "note": "Equipe desconhecida"
+  }
+}

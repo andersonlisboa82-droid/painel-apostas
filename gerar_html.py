@@ -24,7 +24,7 @@ from scraper import COMPETITIONS, load_competition_matches
 
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
-PORTAL_RELEASE_LABEL = "05/04/2026 21:35 | graficos-canvas"
+PORTAL_RELEASE_LABEL = "09/04/2026 | v2-modern-canvas"
 
 AI_PROMPT_TEMPLATE = """Atue como um analista quantitativo profissional de futebol especializado em modelagem estatistica, leitura de mercado e identificacao de value bets (+EV), com abordagem semelhante a analistas de apostas institucionais.
 
@@ -909,24 +909,24 @@ def build_index_html() -> str:
   <title>Football Data Desk | Index Inicial</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
     :root {{
-      --bg: #eef3f8;
-      --card: rgba(255,255,255,0.9);
-      --line: rgba(148,163,184,0.28);
+      --bg: #eef4f7;
+      --card: rgba(255,255,255,0.92);
+      --line: rgba(148,163,184,0.24);
       --line-strong: rgba(148,163,184,0.42);
-      --text: #112031;
-      --muted: #5b6b7d;
+      --text: #0f2235;
+      --muted: #5a6d81;
       --blue: #1d4ed8;
       --teal: #0f766e;
       --amber: #d97706;
-      --shadow: 0 22px 50px rgba(15,23,42,0.09);
+      --shadow: 0 24px 60px rgba(15,23,42,0.10);
     }}
     * {{ box-sizing: border-box; }}
     html {{ scroll-behavior: smooth; }}
     body {{
       margin: 0;
-      font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
+      font-family: 'Manrope', 'Segoe UI', sans-serif;
       color: var(--text);
       background:
         radial-gradient(900px 420px at 0% 0%, rgba(59,130,246,0.16), transparent 55%),
@@ -960,7 +960,7 @@ def build_index_html() -> str:
       font-weight: 800;
       letter-spacing: .08em;
     }}
-    .brand-copy strong {{ display: block; font-size: .96rem; letter-spacing: -.02em; }}
+    .brand-copy strong {{ display: block; font-size: .96rem; letter-spacing: -.02em; font-family: "Space Grotesk", sans-serif; }}
     .brand-copy span {{ display: block; margin-top: 3px; color: var(--muted); font-size: .83rem; }}
     .topbar-meta {{ display: flex; flex-wrap: wrap; gap: 10px; }}
     .meta-pill {{
@@ -1004,17 +1004,17 @@ def build_index_html() -> str:
     .hero-grid {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.9fr); gap: 18px; align-items: end; }}
     .hero-grid, .metrics, .quick-nav {{ position: relative; z-index: 1; }}
     .hero-tag {{ display: inline-flex; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16); color: #dbeafe; }}
-    .hero h1 {{ margin: 14px 0 0; max-width: 12ch; font-size: clamp(2.2rem, 4vw, 3.6rem); line-height: .96; letter-spacing: -.04em; }}
+    .hero h1 {{ margin: 14px 0 0; max-width: 12ch; font-size: clamp(2.2rem, 4vw, 3.6rem); line-height: .96; letter-spacing: -.04em; font-family: "Space Grotesk", sans-serif; }}
     .hero p {{ margin: 14px 0 0; max-width: 64ch; color: rgba(226,232,240,.88); line-height: 1.68; }}
     .hero-stack {{ display: grid; gap: 12px; }}
     .hero-note {{ padding: 16px 18px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }}
     .hero-note span {{ display: block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #bfdbfe; }}
-    .hero-note strong {{ display: block; margin-top: 8px; font-size: 1.7rem; line-height: 1.05; }}
+    .hero-note strong {{ display: block; margin-top: 8px; font-size: 1.7rem; line-height: 1.05; font-family: "Space Grotesk", sans-serif; }}
     .hero-note p {{ display: none; }}
     .metrics {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }}
     .metric {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }}
     .metric span {{ display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #cfe4ff; }}
-    .metric strong {{ display: block; margin-top: 10px; font-size: 1.65rem; letter-spacing: -.04em; }}
+    .metric strong {{ display: block; margin-top: 10px; font-size: 1.65rem; letter-spacing: -.04em; font-family: "Space Grotesk", sans-serif; }}
     .metric p {{ margin: 8px 0 0; font-size: .86rem; color: rgba(226,232,240,.8); line-height: 1.45; }}
     .metric-track {{ margin-top: 12px; height: 7px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }}
     .metric-track i {{ display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #93c5fd, #6ee7b7); }}
@@ -1045,6 +1045,7 @@ def build_index_html() -> str:
     .rail-card h3 {{
       margin: 0;
       font-size: 1rem;
+      font-family: "Space Grotesk", sans-serif;
     }}
     .rail-card p {{
       margin: 8px 0 0;
@@ -1077,6 +1078,7 @@ def build_index_html() -> str:
     .rail-link-head strong {{
       font-size: .92rem;
       letter-spacing: -.02em;
+      font-family: "Space Grotesk", sans-serif;
     }}
     .rail-link-head span, .rail-link-meta span {{
       color: var(--muted);
@@ -1106,6 +1108,7 @@ def build_index_html() -> str:
     }}
     .spark-head strong {{
       font-size: .92rem;
+      font-family: "Space Grotesk", sans-serif;
     }}
     .spark-head span {{
       color: var(--muted);
@@ -1150,8 +1153,8 @@ def build_index_html() -> str:
     }}
     .controls-head, .card-head, .panel-head {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }}
     .eyebrow {{ display: inline-flex; margin-bottom: 8px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--blue); }}
-    h2 {{ margin: 0; font-size: clamp(1.35rem, 2vw, 1.85rem); letter-spacing: -.03em; }}
-    h3 {{ margin: 4px 0 0; font-size: 1.06rem; letter-spacing: -.02em; }}
+    h2 {{ margin: 0; font-size: clamp(1.35rem, 2vw, 1.85rem); letter-spacing: -.03em; font-family: "Space Grotesk", sans-serif; }}
+    h3 {{ margin: 4px 0 0; font-size: 1.06rem; letter-spacing: -.02em; font-family: "Space Grotesk", sans-serif; }}
     .copy, .section-copy, .panel-copy {{ margin: 8px 0 0; color: var(--muted); line-height: 1.6; }}
     .summary-box {{ min-width: min(100%, 280px); padding: 14px 16px; border-radius: 18px; background: linear-gradient(135deg, #eff6ff, #ecfeff); border: 1px solid rgba(59,130,246,.14); color: #15314a; font-size: .92rem; line-height: 1.55; box-shadow: inset 0 1px 0 rgba(255,255,255,.55); }}
     .filters {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
@@ -1186,6 +1189,7 @@ def build_index_html() -> str:
     .launcher-item strong {{
       font-size: 1rem;
       letter-spacing: -.02em;
+      font-family: "Space Grotesk", sans-serif;
     }}
     .launcher-item span {{
       color: var(--muted);
@@ -1245,6 +1249,7 @@ def build_index_html() -> str:
     .risk-card strong {{
       font-size: 1.02rem;
       letter-spacing: -.02em;
+      font-family: "Space Grotesk", sans-serif;
     }}
     .risk-card p {{
       margin: 0;
@@ -1276,16 +1281,16 @@ def build_index_html() -> str:
     .ai-module-grid {{ display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 16px; margin-top: 18px; }}
     .ai-module-side {{ display: grid; gap: 12px; }}
     .ai-mini-card {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }}
-    .ai-mini-card strong {{ display: block; font-size: .96rem; }}
+    .ai-mini-card strong {{ display: block; font-size: .96rem; font-family: "Space Grotesk", sans-serif; }}
     .ai-mini-card p {{ display: none; }}
     .ai-mini-card label {{ display: block; margin-bottom: 8px; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #bfdbfe; }}
     .ai-mini-card input {{ width: 100%; height: 44px; border-radius: 12px; border: 1px solid rgba(191,219,254,.22); padding: 0 14px; font: inherit; color: #ffffff; background: rgba(255,255,255,.08); outline: none; }}
     .ai-mini-card input:focus {{ border-color: rgba(191,219,254,.48); box-shadow: 0 0 0 4px rgba(29,78,216,.12); }}
     .ai-prompt-shell {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }}
     .ai-prompt-head {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }}
-    .ai-prompt-head strong {{ font-size: 1rem; }}
+    .ai-prompt-head strong {{ font-size: 1rem; font-family: "Space Grotesk", sans-serif; }}
     .ai-prompt-head span {{ color: #bfdbfe; font-size: .82rem; }}
-    .ai-prompt-area {{ width: 100%; min-height: 620px; resize: vertical; border-radius: 16px; border: 1px solid rgba(191,219,254,.18); padding: 16px; font: 500 .92rem/1.6 "Plus Jakarta Sans", "Segoe UI", sans-serif; color: #e2e8f0; background: rgba(8,22,37,.72); outline: none; }}
+    .ai-prompt-area {{ width: 100%; min-height: 620px; resize: vertical; border-radius: 16px; border: 1px solid rgba(191,219,254,.18); padding: 16px; font: 500 .92rem/1.6 "Manrope", "Segoe UI", sans-serif; color: #e2e8f0; background: rgba(8,22,37,.72); outline: none; }}
     .ai-prompt-actions {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }}
     .ai-prompt-preview {{ min-height: 180px; padding: 16px; border-radius: 16px; border: 1px solid rgba(191,219,254,.16); background: rgba(8,22,37,.62); color: #dbeafe; white-space: pre-wrap; line-height: 1.7; }}
     .ai-status {{ margin-top: 10px; color: #bbf7d0; font-size: .85rem; min-height: 1.2em; }}
@@ -1317,7 +1322,7 @@ def build_index_html() -> str:
     .stats-rail {{ display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; min-width: min(100%, 320px); }}
     .stat-chip {{ padding: 14px; border-radius: 16px; background: linear-gradient(180deg, #fff, #f8fafc); border: 1px solid var(--line); }}
     .stat-chip span {{ display: block; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }}
-    .stat-chip strong {{ display: block; margin-top: 8px; font-size: 1.34rem; letter-spacing: -.04em; }}
+    .stat-chip strong {{ display: block; margin-top: 8px; font-size: 1.34rem; letter-spacing: -.04em; font-family: "Space Grotesk", sans-serif; }}
     .panel {{ margin-top: 18px; padding: 16px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.82)); border: 1px solid var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.6); }}
     .panel-safe {{ border-color: rgba(16,185,129,.22); }}
     .panel-value {{ border-color: rgba(37,99,235,.22); }}
@@ -1481,14 +1486,14 @@ def build_index_html() -> str:
     }}
     .context-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }}
     .context-card {{ padding: 16px; border-radius: 16px; background: #f1f5f9; border: 1px solid var(--line); }}
-    .context-card h4 {{ margin: 0 0 10px; font-size: 0.9rem; color: var(--blue); }}
+    .context-card h4 {{ margin: 0 0 10px; font-size: 0.9rem; color: var(--blue); font-family: "Space Grotesk", sans-serif; }}
     .context-stat {{ display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.85rem; }}
     .context-stat strong {{ color: var(--text); }}
     
     .glossary {{ display: grid; gap: 14px; }}
     .glossary-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
     .glossary-item {{ padding: 16px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.76)); border: 1px solid var(--line); }}
-    .glossary-item strong {{ display: block; margin-bottom: 6px; font-size: .95rem; }}
+    .glossary-item strong {{ display: block; margin-bottom: 6px; font-size: .95rem; font-family: "Space Grotesk", sans-serif; }}
     .glossary-item p {{ margin: 0; color: var(--muted); line-height: 1.6; }}
     .foot {{ margin-top: 18px; color: var(--muted); font-size: .9rem; text-align: center; }}
     
@@ -1975,195 +1980,60 @@ def build_index_html() -> str:
       return nextCanvas;
     }}
 
-    function prepareCanvas(canvas) {{
-      const ratio = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      const parentWidth = canvas.parentElement && canvas.parentElement.clientWidth ? canvas.parentElement.clientWidth : 320;
-      const parentHeight = canvas.parentElement && canvas.parentElement.clientHeight ? canvas.parentElement.clientHeight : 300;
-      const width = Math.max(320, Math.floor(rect.width || parentWidth || 320));
-      const height = Math.max(220, Math.floor(rect.height || parentHeight || 300));
-      canvas.width = Math.floor(width * ratio);
-      canvas.height = Math.floor(height * ratio);
-      canvas.style.width = width + 'px';
-      canvas.style.height = height + 'px';
-      const ctx = canvas.getContext('2d');
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-      return {{ ctx, width, height }};
-    }}
-
-    function drawFallbackBarChart(canvasId, labels, datasets, options = {{}}) {{
-      const canvas = resetChartCanvas(canvasId);
-      const prepared = prepareCanvas(canvas);
-      const ctx = prepared.ctx;
-      const width = prepared.width;
-      const height = prepared.height;
-      const horizontal = Boolean(options.horizontal);
-      let maxValue = 1;
-      datasets.forEach((dataset) => {{
-        dataset.data.forEach((value) => {{
-          const numericValue = Number(value) || 0;
-          if (numericValue > maxValue) {{
-            maxValue = numericValue;
-          }}
-        }});
-      }});
-      const padding = {{ top: 26, right: 22, bottom: horizontal ? 20 : 54, left: horizontal ? 92 : 36 }};
-      const chartWidth = width - padding.left - padding.right;
-      const chartHeight = height - padding.top - padding.bottom;
-
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(0, 0, width, height);
-      ctx.strokeStyle = 'rgba(148,163,184,0.24)';
-      ctx.lineWidth = 1;
-
-      for (let tick = 0; tick <= 4; tick += 1) {{
-        const progress = tick / 4;
-        if (horizontal) {{
-          const x = padding.left + (chartWidth * progress);
-          ctx.beginPath();
-          ctx.moveTo(x, padding.top);
-          ctx.lineTo(x, padding.top + chartHeight);
-          ctx.stroke();
-        }} else {{
-          const y = padding.top + chartHeight - (chartHeight * progress);
-          ctx.beginPath();
-          ctx.moveTo(padding.left, y);
-          ctx.lineTo(padding.left + chartWidth, y);
-          ctx.stroke();
-        }}
-      }}
-
-      if (horizontal) {{
-        const rowHeight = chartHeight / Math.max(labels.length, 1);
-        labels.forEach((label, index) => {{
-          const centerY = padding.top + rowHeight * index + rowHeight / 2;
-          ctx.fillStyle = '#334155';
-          ctx.font = '600 12px sans-serif';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(label, 12, centerY);
-
-          datasets.forEach((dataset, datasetIndex) => {{
-            const value = Number(dataset.data[index]) || 0;
-            const barHeight = Math.max(12, (rowHeight / Math.max(datasets.length, 1)) - 8);
-            const y = centerY - ((datasets.length * barHeight + (datasets.length - 1) * 6) / 2) + datasetIndex * (barHeight + 6);
-            const barWidth = (value / maxValue) * chartWidth;
-            ctx.fillStyle = dataset.backgroundColor;
-            ctx.fillRect(padding.left, y, barWidth, barHeight);
-            ctx.fillStyle = '#0f172a';
-            ctx.font = '700 11px sans-serif';
-            ctx.fillText(value.toFixed(1) + '%', padding.left + Math.min(barWidth + 8, chartWidth - 34), y + barHeight / 2 + 1);
-          }});
-        }});
-      }} else {{
-        const groupWidth = chartWidth / Math.max(labels.length, 1);
-        const barWidth = Math.min(36, (groupWidth - 18) / Math.max(datasets.length, 1));
-        labels.forEach((label, index) => {{
-          const originX = padding.left + groupWidth * index + (groupWidth / 2) - ((datasets.length * barWidth + (datasets.length - 1) * 8) / 2);
-          datasets.forEach((dataset, datasetIndex) => {{
-            const value = Number(dataset.data[index]) || 0;
-            const x = originX + datasetIndex * (barWidth + 8);
-            const barHeight = (value / maxValue) * chartHeight;
-            const y = padding.top + chartHeight - barHeight;
-            ctx.fillStyle = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[index] || dataset.backgroundColor[0] : dataset.backgroundColor;
-            ctx.fillRect(x, y, barWidth, barHeight);
-            ctx.fillStyle = '#0f172a';
-            ctx.font = '700 11px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(value.toFixed(1), x + barWidth / 2, y - 8);
-          }});
-          ctx.fillStyle = '#334155';
-          ctx.font = '600 12px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(label, padding.left + groupWidth * index + groupWidth / 2, height - 20);
-        }});
-        ctx.textAlign = 'left';
-      }}
-    }}
-
-    function drawFallbackDonutChart(canvasId, labels, values, colors) {{
-      const canvas = resetChartCanvas(canvasId);
-      const prepared = prepareCanvas(canvas);
-      const ctx = prepared.ctx;
-      const width = prepared.width;
-      const height = prepared.height;
-      const total = Math.max(1, values.reduce((acc, value) => acc + (Number(value) || 0), 0));
-      const centerX = width * 0.33;
-      const centerY = height * 0.48;
-      const radius = Math.min(width, height) * 0.22;
-      const innerRadius = radius * 0.58;
-      let startAngle = -Math.PI / 2;
-
-      ctx.fillStyle = '#f8fafc';
-      ctx.fillRect(0, 0, width, height);
-
-      values.forEach((rawValue, index) => {{
-        const value = Number(rawValue) || 0;
-        const sliceAngle = (value / total) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(centerX, centerY);
-        ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
-        ctx.closePath();
-        ctx.fillStyle = colors[index];
-        ctx.fill();
-        startAngle += sliceAngle;
-      }});
-
-      ctx.beginPath();
-      ctx.fillStyle = '#f8fafc';
-      ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#0f172a';
-      ctx.font = '700 13px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Mercados', centerX, centerY - 4);
-      ctx.font = '600 12px sans-serif';
-      ctx.fillStyle = '#64748b';
-      ctx.fillText('alternativos', centerX, centerY + 14);
-
-      labels.forEach((label, index) => {{
-        const y = 42 + index * 28;
-        ctx.fillStyle = colors[index];
-        ctx.fillRect(width * 0.63, y - 9, 14, 14);
-        ctx.fillStyle = '#0f172a';
-        ctx.font = '600 12px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(label + '  ' + (Number(values[index]) || 0).toFixed(1) + '%', width * 0.63 + 22, y + 2);
-      }});
-      ctx.textAlign = 'left';
-    }}
-
     function renderCharts(data) {{
       destroyCharts();
-
-      const marketValues = [
-        data.odds.home > 0 ? (100 / data.odds.home) : 0,
-        data.odds.draw > 0 ? (100 / data.odds.draw) : 0,
-        data.odds.away > 0 ? (100 / data.odds.away) : 0
-      ];
-
-      drawFallbackBarChart(
-        'chart1x2',
-        ['Mandante', 'Empate', 'Visitante'],
-        [
-          {{ label: 'Modelo %', data: [data.probs.home, data.probs.draw, data.probs.away], backgroundColor: ['#1d4ed8', '#94a3b8', '#0f766e'] }},
-          {{ label: 'Mercado %', data: marketValues, backgroundColor: 'rgba(15,23,42,0.22)' }}
-        ]
-      );
-      drawFallbackDonutChart(
-        'chartAlt',
-        ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
-        [data.probs.btts, data.probs.over25, data.probs.under25],
-        ['#fbbf24', '#ef4444', '#10b981']
-      );
-      drawFallbackBarChart(
-        'chartScores',
-        data.probs.scorelines.map((score) => score[0]),
-        [
-          {{ label: 'Probabilidade %', data: data.probs.scorelines.map((score) => score[1]), backgroundColor: '#1d4ed8' }}
-        ],
-        {{ horizontal: true }}
-      );
+      
+      const ctx1 = resetChartCanvas('chart1x2').getContext('2d');
+      charts.chart1x2 = new Chart(ctx1, {{
+        type: 'bar',
+        data: {{
+          labels: ['Mandante', 'Empate', 'Visitante'],
+          datasets: [{{
+            label: 'Modelo %',
+            data: [data.probs.home, data.probs.draw, data.probs.away],
+            backgroundColor: ['rgba(29, 78, 216, 0.7)', 'rgba(148, 163, 184, 0.7)', 'rgba(15, 118, 110, 0.7)'],
+            borderRadius: 8
+          }}, {{
+            label: 'Mercado %',
+            data: [
+              data.odds.home > 0 ? (100/data.odds.home).toFixed(1) : 0,
+              data.odds.draw > 0 ? (100/data.odds.draw).toFixed(1) : 0,
+              data.odds.away > 0 ? (100/data.odds.away).toFixed(1) : 0
+            ],
+            backgroundColor: 'rgba(0,0,0,0.1)',
+            borderRadius: 8
+          }}]
+        }},
+        options: {{ responsive: true, maintainAspectRatio: false }}
+      }});
+      
+      const ctx2 = resetChartCanvas('chartAlt').getContext('2d');
+      charts.chartAlt = new Chart(ctx2, {{
+        type: 'doughnut',
+        data: {{
+          labels: ['BTTS Sim', 'Over 2.5', 'Under 2.5'],
+          datasets: [{{
+            data: [data.probs.btts, data.probs.over25, data.probs.under25],
+            backgroundColor: ['#fbbf24', '#ef4444', '#10b981']
+          }}]
+        }},
+        options: {{ responsive: true, maintainAspectRatio: false, plugins: {{ legend: {{ position: 'bottom' }} }} }}
+      }});
+      
+      const ctx3 = resetChartCanvas('chartScores').getContext('2d');
+      charts.chartScores = new Chart(ctx3, {{
+        type: 'bar',
+        data: {{
+          labels: data.probs.scorelines.map(s => s[0]),
+          datasets: [{{
+            label: 'Probabilidade %',
+            data: data.probs.scorelines.map(s => s[1]),
+            backgroundColor: 'rgba(29, 78, 216, 0.6)',
+            borderRadius: 6
+          }}]
+        }},
+        options: {{ indexAxis: 'y', responsive: true, maintainAspectRatio: false }}
+      }});
     }}
 
     function applyRiskPreset() {{
