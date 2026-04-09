@@ -486,6 +486,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
 
         rows_html.append(
             "<tr "
+            "data-filter-scope=\"general\" "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
             f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
@@ -545,7 +546,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                     }
                 )
             rec_rows.append(
-                f"<tr data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
+                f"<tr data-filter-scope=\"model\" data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
@@ -590,6 +591,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
         score_text = f"{_fmt_score(row.home_goals)} x {_fmt_score(row.away_goals)}"
         finished_rows.append(
             "<tr "
+            "data-filter-scope=\"general\" "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
             f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
@@ -642,7 +644,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             detail_key = register_detail(detail_json)
 
             safe_rows.append(
-                f"<tr data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
+                f"<tr data-filter-scope=\"model\" data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(str(row.market), str(row.home_team), str(row.away_team)))}</td>"
@@ -800,7 +802,7 @@ def _build_risk_block(title: str, stage: str, description: str, meta: list[str],
     ordered_entries = sorted(entries, key=lambda item: (-float(item["probability"]), -float(item["ev"]), str(item["competition"]), str(item["matchup"])))[:12]
     for entry in ordered_entries:
         rows.append(
-            "<tr>"
+            f"<tr data-filter-scope='model' data-odd='{float(entry['odd']):.2f}' data-prob='{float(entry['probability']):.4f}' data-ev='{float(entry['ev']):.4f}' data-books='{int(entry['bookmakers'])}'>"
             f"<td>{escape(str(entry['competition']))}</td>"
             f"<td>{escape(str(entry['date_text']))}</td>"
             f"<td>{escape(str(entry['matchup']))}</td>"
@@ -854,12 +856,12 @@ def build_index_html() -> str:
 
     competition_options = "".join(f"<option>{escape(str(item['name']))}</option>" for item in competition_stats)
     competition_jump_links = "".join(
-        f"<a href=\"#{escape(str(item['id']))}\" class=\"jump-link\">{escape(str(item['name']))}<span>{int(item['safe'])} seguros</span></a>"
+        f"<a href=\"#{escape(str(item['id']))}\" class=\"jump-link\" data-comp-name=\"{escape(str(item['name']))}\">{escape(str(item['name']))}<span>{int(item['safe'])} seguros</span></a>"
         for item in competition_stats
     )
     side_league_cards = "".join(
         (
-            f"<a href=\"#{escape(str(item['id']))}\" class=\"rail-link\">"
+            f"<a href=\"#{escape(str(item['id']))}\" class=\"rail-link\" data-comp-name=\"{escape(str(item['name']))}\">"
             f"<div class=\"rail-link-head\"><strong>{escape(str(item['name']))}</strong><span>{int(item['fixtures'])} jogos</span></div>"
             f"<div class=\"rail-link-meta\"><span>{int(item['safe'])} seguros</span><span>{int(item['fixtures_valid'])} odds</span></div>"
             f"<div class=\"rail-track\"><i style=\"width:{round((int(item['fixtures_valid']) / int(item['fixtures'])) * 100) if int(item['fixtures']) else 0}%\"></i></div>"
@@ -1022,6 +1024,8 @@ def build_index_html() -> str:
     .quick-nav::before {{ content: "Areas monitoradas"; width: 100%; margin-bottom: 2px; font-size: .76rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #bfdbfe; }}
     .jump-link {{ display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.12); color: #fff; text-decoration: none; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }}
     .jump-link span {{ font-size: .76rem; letter-spacing: .05em; text-transform: uppercase; color: #bfdbfe; }}
+    .jump-link.active {{ background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.32); box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 8px 20px rgba(8,22,37,.18); }}
+    .jump-link.active span {{ color: #ffffff; }}
     .dashboard-shell {{
       display: grid;
       grid-template-columns: minmax(250px, 280px) minmax(0, 1fr);
@@ -1067,6 +1071,11 @@ def build_index_html() -> str:
       border: 1px solid rgba(148,163,184,.22);
       text-decoration: none;
       color: inherit;
+    }}
+    .rail-link.active {{
+      border-color: rgba(29,78,216,.34);
+      background: linear-gradient(135deg, rgba(239,246,255,.96), rgba(236,253,245,.92));
+      box-shadow: 0 14px 28px rgba(29,78,216,.10);
     }}
     .rail-link-head, .rail-link-meta {{
       display: flex;
@@ -1629,34 +1638,6 @@ def build_index_html() -> str:
       </aside>
 
       <main class="dashboard-main">
-        <section class="card launcher-card">
-          <div class="controls-head">
-            <div>
-              <div class="eyebrow">Acoes do portal</div>
-              <h2>Atalhos do portal e leitura principal</h2>
-              <p class="copy">Os filtros detalhados continuam disponiveis no modal, mas os blocos de risco abaixo agora mostram diretamente os jogos que ja se encaixam em cada faixa.</p>
-            </div>
-            <div id="resultsSummary" class="summary-box">Mostrando todas as competicoes e tabelas disponiveis.</div>
-          </div>
-          <div class="launcher-grid">
-            <article class="launcher-item">
-              <strong>Filtros inteligentes</strong>
-              <span>Ajuste competicao, risco, time, odds, EV e casas em uma unica janela de configuracao.</span>
-              <button id="openFilterModal" class="btn secondary" type="button">Configurar</button>
-            </article>
-            <article class="launcher-item">
-              <strong>Modulo de IA</strong>
-              <span>Abra o prompt institucional em modal para atualizar a data, copiar o briefing e executar a leitura quantitativa.</span>
-              <button id="openAiPromptModal" class="btn secondary" type="button">Abrir modulo</button>
-            </article>
-            <article class="launcher-item">
-              <strong>Atualizar placares</strong>
-              <span>Faz um novo scraping, regenera o portal e recarrega a tela com os resultados e status mais recentes.</span>
-              <button id="refreshPortalLauncher" class="btn secondary" type="button">Atualizar agora</button>
-            </article>
-          </div>
-        </section>
-
         <section class="card risk-strip">
           <div class="risk-strip-head">
             <div>
@@ -1664,6 +1645,7 @@ def build_index_html() -> str:
               <h2>Blocos prontos com os jogos que ja se encaixam</h2>
               <p>Cada bloco abaixo organiza automaticamente os confrontos pelas faixas de risco do portal. Assim voce le o contexto do risco e ja abre o jogo certo sem precisar configurar nada antes.</p>
             </div>
+            <div id="resultsSummary" class="summary-box">Mostrando todas as competicoes e tabelas disponiveis.</div>
           </div>
           <div class="risk-grid">{risk_blocks_html}</div>
         </section>
@@ -1689,6 +1671,43 @@ def build_index_html() -> str:
             <div class="glossary-item"><strong>EV</strong><p>Valor esperado da aposta. EV positivo indica vantagem matematica no longo prazo.</p></div>
             <div class="glossary-item"><strong>Casas</strong><p>Quantidade de casas de apostas consideradas na linha de odd usada na comparacao.</p></div>
             <div class="glossary-item"><strong>Stake</strong><p>Valor sugerido para a aposta com base em banca e Kelly fracionado.</p></div>
+          </div>
+        </section>
+
+        <section class="card launcher-card">
+          <div class="controls-head">
+            <div>
+              <div class="eyebrow">Acoes do portal</div>
+              <h2>Central de comandos do painel</h2>
+              <p class="copy">Deixamos todos os atalhos operacionais reunidos no final da pagina para manter o topo focado nas leituras e nos jogos.</p>
+            </div>
+          </div>
+          <div class="launcher-grid">
+            <article class="launcher-item">
+              <strong>Filtros inteligentes</strong>
+              <span>Ajuste competicao, risco, time, odds, EV e casas em uma unica janela de configuracao.</span>
+              <button id="openFilterModal" class="btn secondary" type="button">Configurar</button>
+            </article>
+            <article class="launcher-item">
+              <strong>Limpeza rapida</strong>
+              <span>Remove os filtros ativos e devolve o painel para a leitura completa de todas as competicoes.</span>
+              <button id="clearFilterLauncher" class="btn secondary" type="button">Limpar filtros</button>
+            </article>
+            <article class="launcher-item">
+              <strong>Modulo de IA</strong>
+              <span>Abra o prompt institucional em modal para atualizar a data, copiar o briefing e executar a leitura quantitativa.</span>
+              <button id="openAiPromptModal" class="btn secondary" type="button">Abrir modulo</button>
+            </article>
+            <article class="launcher-item">
+              <strong>Atualizar placares</strong>
+              <span>Faz um novo scraping, regenera o portal e recarrega a tela com os resultados e status mais recentes.</span>
+              <button id="refreshPortalLauncher" class="btn secondary" type="button">Atualizar agora</button>
+            </article>
+            <article class="launcher-item">
+              <strong>Recarregar pagina</strong>
+              <span>Atualiza a visualizacao atual do portal caso queira forcar uma nova leitura do HTML carregado.</span>
+              <button id="reloadPageLauncher" class="btn secondary" type="button">Recarregar</button>
+            </article>
           </div>
         </section>
 
@@ -1759,13 +1778,13 @@ def build_index_html() -> str:
       <div class="modal-body">
         <div class="filters">
           <div class="field"><label for="fcomp">Competicao</label><select id="fcomp"><option value="">Todas</option>{competition_options}</select><div class="hint">Filtra o painel para um campeonato especifico.</div></div>
-          <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para odd, probabilidade, EV e casas.</div></div>
+          <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para as tabelas do modelo, sem esconder os resultados finalizados.</div></div>
           <div class="field"><label for="fteam">Time</label><input id="fteam" type="text" placeholder="Ex: Flamengo" /><div class="hint">Busca o nome do time em qualquer tabela visivel.</div></div>
-          <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers.</div></div>
-          <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd.</div></div>
-          <div class="field"><label for="foddmax">Odd maxima</label><input id="foddmax" type="number" step="0.01" min="1.01" placeholder="2.20" /><div class="hint">Limita selecoes acima de uma odd alvo.</div></div>
+          <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers nas tabelas do modelo.</div></div>
+          <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd nas leituras recomendadas.</div></div>
+          <div class="field"><label for="foddmax">Odd maxima</label><input id="foddmax" type="number" step="0.01" min="1.01" placeholder="2.20" /><div class="hint">Limita selecoes acima de uma odd alvo nas tabelas do modelo.</div></div>
           <div class="field"><label for="fprobmin">Probabilidade minima</label><input id="fprobmin" type="number" step="0.01" min="0" max="1" placeholder="0.55" /><div class="hint">Usada apenas nas tabelas com leitura do modelo.</div></div>
-          <div class="field"><label for="fevmin">EV minimo</label><input id="fevmin" type="number" step="0.005" min="0" max="1" placeholder="0.02" /><div class="hint">Mostra entradas com vantagem esperada minima.</div></div>
+          <div class="field"><label for="fevmin">EV minimo</label><input id="fevmin" type="number" step="0.005" min="0" max="1" placeholder="0.02" /><div class="hint">Mostra entradas do modelo com vantagem esperada minima.</div></div>
         </div>
         <div class="actions">
           <button id="applyFilter" class="btn primary" type="button">Aplicar filtro</button>
@@ -2060,6 +2079,19 @@ def build_index_html() -> str:
       }}
     }}
 
+    function resetPortalFilters() {{
+      document.getElementById('fcomp').value = '';
+      document.getElementById('frisk').value = 'Baixo risco';
+      document.getElementById('fteam').value = '';
+      document.getElementById('foddmin').value = '';
+      document.getElementById('foddmax').value = '';
+      document.getElementById('fprobmin').value = '';
+      document.getElementById('fevmin').value = '';
+      document.getElementById('fbooks').value = '';
+      applyRiskPreset();
+      applyFilters();
+    }}
+
     function classifyRowsByRisk() {{
       const rows = Array.from(document.querySelectorAll('tr[data-odd]'));
       rows.forEach(row => {{
@@ -2091,6 +2123,23 @@ def build_index_html() -> str:
       ];
       if (team) parts.push('busca por "' + team + '"');
       summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' • ') + '.';
+    }}
+
+    function updateCompetitionNavState() {{
+      const activeCompetition = (document.getElementById('fcomp').value || '').trim().toLowerCase();
+      const navLinks = Array.from(document.querySelectorAll('.jump-link[data-comp-name], .rail-link[data-comp-name]'));
+      navLinks.forEach((link) => {{
+        const linkCompetition = (link.getAttribute('data-comp-name') || '').trim().toLowerCase();
+        link.classList.toggle('active', !!activeCompetition && linkCompetition === activeCompetition);
+      }});
+    }}
+
+    function toggleCompetitionFilter(compName) {{
+      const competitionField = document.getElementById('fcomp');
+      if (!competitionField) return;
+      const normalized = (compName || '').trim();
+      competitionField.value = competitionField.value === normalized ? '' : normalized;
+      applyFilters();
     }}
 
     const aiPromptTemplate = {ai_prompt_js!r};
@@ -2263,8 +2312,9 @@ def build_index_html() -> str:
           const txt = (row.textContent || '').toLowerCase();
           const teamOk = !team || txt.includes(team);
           let oddOk = true;
+          const filterScope = row.getAttribute('data-filter-scope') || 'general';
           const oneOdd = row.getAttribute('data-odd');
-          if (oneOdd) {{
+          if (filterScope === 'model' && oneOdd) {{
             const value = parseFloat(oneOdd);
             if (!Number.isNaN(value)) {{
               if (oddMin !== null && value < oddMin) oddOk = false;
@@ -2276,16 +2326,6 @@ def build_index_html() -> str:
             if (probMin !== null && !Number.isNaN(rowProb) && rowProb < probMin) oddOk = false;
             if (evMin !== null && !Number.isNaN(rowEv) && rowEv < evMin) oddOk = false;
             if (booksMin !== null && !Number.isNaN(rowBooks) && rowBooks < booksMin) oddOk = false;
-          }} else {{
-            const odds = ['data-odd-home', 'data-odd-draw', 'data-odd-away']
-              .map(attr => parseFloat(row.getAttribute(attr) || ''))
-              .filter(value => !Number.isNaN(value));
-            if (odds.length > 0) {{
-              const minValue = Math.min(...odds);
-              const maxValue = Math.max(...odds);
-              if (oddMin !== null && maxValue < oddMin) oddOk = false;
-              if (oddMax !== null && minValue > oddMax) oddOk = false;
-            }}
           }}
           row.style.display = teamOk && oddOk ? '' : 'none';
         }});
@@ -2297,6 +2337,7 @@ def build_index_html() -> str:
 
       classifyRowsByRisk();
       updateResultsSummary(shownCards, visibleRows);
+      updateCompetitionNavState();
     }}
 
     document.getElementById('openFilterModal').addEventListener('click', openFilterModal);
@@ -2304,22 +2345,13 @@ def build_index_html() -> str:
     document.getElementById('fcomp').addEventListener('change', applyFilters);
     document.getElementById('fteam').addEventListener('input', applyFilters);
     document.getElementById('frisk').addEventListener('change', () => {{ applyRiskPreset(); applyFilters(); }});
-    document.getElementById('clearFilter').addEventListener('click', () => {{
-      document.getElementById('fcomp').value = '';
-      document.getElementById('frisk').value = 'Baixo risco';
-      document.getElementById('fteam').value = '';
-      document.getElementById('foddmin').value = '';
-      document.getElementById('foddmax').value = '';
-      document.getElementById('fprobmin').value = '';
-      document.getElementById('fevmin').value = '';
-      document.getElementById('fbooks').value = '';
-      applyRiskPreset();
-      applyFilters();
-    }});
+    document.getElementById('clearFilter').addEventListener('click', resetPortalFilters);
+    document.getElementById('clearFilterLauncher').addEventListener('click', resetPortalFilters);
     document.getElementById('refreshPortalData').addEventListener('click', refreshPortalData);
     document.getElementById('refreshPortalLauncher').addEventListener('click', refreshPortalData);
     document.getElementById('quickRefresh').addEventListener('click', refreshPortalData);
     document.getElementById('reloadPage').addEventListener('click', () => {{ window.location.reload(); }});
+    document.getElementById('reloadPageLauncher').addEventListener('click', () => {{ window.location.reload(); }});
     document.getElementById('openAiPromptModal').addEventListener('click', openAiPromptModal);
     document.getElementById('modalUpdateAiPrompt').addEventListener('click', updateAiPrompt);
     document.getElementById('modalCopyAiPrompt').addEventListener('click', copyAiPrompt);
@@ -2351,6 +2383,22 @@ def build_index_html() -> str:
         const modal = document.getElementById(modalId);
         if (modal && modal.style.display !== 'none') {{
           positionVisibleModal(modalId);
+        }}
+      }});
+    }});
+
+    Array.from(document.querySelectorAll('.jump-link[data-comp-name], .rail-link[data-comp-name]')).forEach((link) => {{
+      link.addEventListener('click', (event) => {{
+        event.preventDefault();
+        toggleCompetitionFilter(link.getAttribute('data-comp-name') || '');
+        const anchor = link.getAttribute('href');
+        if (anchor && anchor.startsWith('#')) {{
+          const target = document.querySelector(anchor);
+          if (target && document.getElementById('fcomp').value) {{
+            target.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+          }} else {{
+            window.scrollTo({{ top: 0, behavior: 'smooth' }});
+          }}
         }}
       }});
     }});

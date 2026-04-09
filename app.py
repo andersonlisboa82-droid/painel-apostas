@@ -792,6 +792,9 @@ header[data-testid="stHeader"],
     radial-gradient(1100px 520px at 0% 0%, rgba(59,130,246,0.10), transparent 55%),
     linear-gradient(180deg, #edf4fb 0%, #eef6f2 100%) !important;
 }
+.public-back-shell:not(:first-of-type) {
+  display: none !important;
+}
 </style>
 """,
         unsafe_allow_html=True,
@@ -871,19 +874,19 @@ def render_public_landing() -> None:
 <div class="public-home-shell">
   <div class="public-home-intro">
     <strong>Escolha onde entrar</strong>
-    <span>Abra o portal de apostas ou o HTML dedicado da Copa do Mundo 2026.</span>
+    <span>Abra o portal de apostas ou o portal da Copa do Mundo 2026.</span>
   </div>
   <div class="public-home-grid">
     <a class="public-home-link" href="?view=portal" target="_self">
       <div class="public-home-card portal">
         <strong>Portal Apostas</strong>
-        <span>Abrir o HTML principal do portal com o painel de apostas.</span>
+        <span>Abrir o portal principal com o painel de apostas.</span>
       </div>
     </a>
     <a class="public-home-link" href="?view=copa" target="_self">
       <div class="public-home-card copa">
         <strong>Copa do Mundo 2026</strong>
-        <span>Abrir o HTML dedicado da Copa com filtros, placares sugeridos e calibragem.</span>
+        <span>Abrir o portal da Copa com filtros, placares sugeridos e calibragem.</span>
       </div>
     </a>
   </div>
@@ -896,8 +899,8 @@ def render_public_landing() -> None:
 def render_public_back_button() -> None:
     st.markdown(
         """
-<div style="max-width:1480px;margin:0 auto;padding:18px 18px 6px;">
-  <a href="?" target="_self" style="display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:999px;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(245,249,255,.96));border:1px solid rgba(148,163,184,.20);box-shadow:0 12px 24px rgba(15,23,42,.08);font:800 .92rem/1 'Space Grotesk',sans-serif;color:#0f2235;text-decoration:none;">Voltar ao Index Inicial</a>
+<div class="public-back-shell" style="max-width:1480px;margin:0 auto;padding:18px 18px 6px;">
+  <a class="public-back-link" href="?" target="_self" style="display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:999px;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(245,249,255,.96));border:1px solid rgba(148,163,184,.20);box-shadow:0 12px 24px rgba(15,23,42,.08);font:800 .92rem/1 'Space Grotesk',sans-serif;color:#0f2235;text-decoration:none;">Voltar para a pagina inicial</a>
 </div>
 """,
         unsafe_allow_html=True,
@@ -2387,7 +2390,7 @@ avg_model_edge = backtest_summary.get("avg_model_edge", 0.0)
 tuning_actions = backtest_summary.get("tuning_actions", [])
 page_descriptions = {
     "Inicio": "Visao executiva com resumo da competicao, IA institucional e resultados recentes do modelo.",
-    "Copa 2026": "Acesso direto ao HTML dedicado da Copa do Mundo 2026 com filtros, sugestoes de placar e calibragem do modelo.",
+    "Copa 2026": "Acesso direto ao portal da Copa do Mundo 2026 com filtros, sugestoes de placar e calibragem do modelo.",
     "Configuracoes": "Area para ajustar competicao, filtro por time e perfil de risco usando os controles do menu lateral.",
     "IA Institucional": "Central de leitura do dia com prompt profissional, execucao e resposta completa dentro do portal.",
     "Jogos Seguros": "Ranking das selecoes mais conservadoras dentro do filtro atual.",
@@ -2406,7 +2409,7 @@ if page != "Inicio":
     <div class="brand-mark">FD</div>
     <div class="brand-copy">
       <strong>Football Data Desk</strong>
-      <span>Painel executivo no Streamlit com a mesma linguagem visual do dashboard HTML.</span>
+      <span>Painel executivo no Streamlit com a mesma linguagem visual do portal principal.</span>
     </div>
   </div>
   <div class="topbar-meta">
@@ -2521,8 +2524,8 @@ section[data-testid="stSidebar"] {
   <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,255,255,.94),rgba(245,249,255,.96));border:1px solid rgba(148,163,184,.18);border-radius:22px;padding:16px 18px;box-shadow:0 18px 40px rgba(15,23,42,.08);">
     <div>
       <div style="font:800 .8rem/1 'Space Grotesk',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;">Acesso rapido</div>
-      <div style="margin-top:6px;font:700 1.05rem/1.1 'Space Grotesk',sans-serif;color:#0f2235;">Escolha abrir o painel da Copa 2026 ou entrar nas configuracoes do portal.</div>
-      <div style="margin-top:6px;color:#5a6d81;font-size:.92rem;">Os botoes abaixo levam direto para o HTML da Copa ou para a area com filtros e ajustes do sistema.</div>
+      <div style="margin-top:6px;font:700 1.05rem/1.1 'Space Grotesk',sans-serif;color:#0f2235;">Escolha abrir o portal da Copa 2026 ou entrar nas configuracoes do portal.</div>
+      <div style="margin-top:6px;color:#5a6d81;font-size:.92rem;">Os botoes abaixo levam direto para o portal da Copa ou para a area com filtros e ajustes do sistema.</div>
     </div>
   </div>
 </div>
@@ -2531,7 +2534,7 @@ section[data-testid="stSidebar"] {
     )
     home_action_col1, home_action_col2 = st.columns(2)
     with home_action_col1:
-        if st.button("Abrir HTML Copa 2026", key="home_open_copa_2026", use_container_width=True):
+        if st.button("Abrir Portal Copa 2026", key="home_open_copa_2026", use_container_width=True):
             queue_page_navigation("Copa 2026")
     with home_action_col2:
         if st.button("Abrir Configuracoes", key="home_open_settings", use_container_width=True):
@@ -2543,7 +2546,7 @@ section[data-testid="stSidebar"] {
 elif page == "Copa 2026":
     render_callout_grid(
         [
-            {"eyebrow": "HTML dedicado", "title": "Painel da Copa no Streamlit"},
+            {"eyebrow": "Portal dedicado", "title": "Painel da Copa no Streamlit"},
             {"eyebrow": "Horario SP", "title": "Tabela ordenada por Sao Paulo"},
             {"eyebrow": "IA", "title": "Placares sugeridos por confronto"},
             {"eyebrow": "Ajuste", "title": "Modelo recalibravel com resultados"},
