@@ -757,6 +757,11 @@ def render_embedded_world_cup_portal() -> None:
     components.html(_load_world_cup_portal_html(), height=1200, scrolling=True)
 
 
+def queue_page_navigation(page_name: str) -> None:
+    st.session_state["pending_page_menu_v4"] = page_name
+    st.rerun()
+
+
 def clear_embedded_index_portal() -> None:
     components.html(
         """
@@ -2051,6 +2056,8 @@ hr {{
 with st.sidebar:
     if "page_menu_v4" not in st.session_state:
         st.session_state["page_menu_v4"] = "Inicio"
+    if "pending_page_menu_v4" in st.session_state:
+        st.session_state["page_menu_v4"] = st.session_state.pop("pending_page_menu_v4")
 
     st.markdown("### Football Data Desk")
     page = st.radio(
@@ -2068,8 +2075,7 @@ with st.sidebar:
         key="page_menu_v4",
     )
     if st.button("Abrir Painel Copa 2026", use_container_width=True):
-        st.session_state["page_menu_v4"] = "Copa 2026"
-        st.rerun()
+        queue_page_navigation("Copa 2026")
     st.caption("Atalho rapido: use o botao acima ou selecione `Copa 2026` no menu.")
     st.caption("Use este menu lateral para navegar entre os modulos taticos, analiticos e de IA do portal.")
     st.markdown("---")
@@ -2364,8 +2370,7 @@ section[data-testid="stSidebar"] {
         unsafe_allow_html=True,
     )
     if st.button("Abrir Painel Copa 2026", key="home_open_copa_2026", use_container_width=True):
-        st.session_state["page_menu_v4"] = "Copa 2026"
-        st.rerun()
+        queue_page_navigation("Copa 2026")
     render_embedded_index_portal()
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
