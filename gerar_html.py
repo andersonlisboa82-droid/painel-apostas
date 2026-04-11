@@ -20,6 +20,7 @@ from analytics import (
     suggest_bet_strategy,
     get_team_context,
 )
+from real_match_stats import build_match_stats_cache_key, load_real_match_stats_cache
 from scraper import COMPETITIONS, load_competition_matches
 
 
@@ -298,6 +299,18 @@ def _format_match_datetime(date_text: object, event_timestamp: object = None, st
     return raw if raw else "-"
 
 
+def _match_filter_date(date_text: object, event_timestamp: object = None, status: str = "") -> str:
+    parsed_ts = pd.to_datetime(event_timestamp, errors="coerce", utc=True)
+    if not pd.isna(parsed_ts):
+        return parsed_ts.tz_convert(APP_TIMEZONE).strftime("%Y-%m-%d")
+
+    display_date = _format_match_datetime(date_text, event_timestamp, status)
+    match = re.search(r"(\d{2})/(\d{2})/(\d{4})", display_date)
+    if match:
+        return f"{match.group(3)}-{match.group(2)}-{match.group(1)}"
+    return ""
+
+
 def _market_label(market: str, home_team: str, away_team: str) -> str:
     if market == "Casa":
         return f"Vitoria {home_team}"
@@ -379,7 +392,13 @@ def _classify_model_risk(row, probs, home_team: str, away_team: str) -> tuple[st
     return stage, _risk_stage_context(stage, best_label, has_valid_odd=odd_value > 1.0)
 
 
-def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
+def _get_detail_json(
+    df: pd.DataFrame,
+    row,
+    probs,
+    tip=None,
+    cached_real_stats_payload: dict[str, object] | None = None,
+) -> str:
     home_ctx = get_team_context(df, str(row.home_team))
     away_ctx = get_team_context(df, str(row.away_team))
     status = str(getattr(row, "status", ""))
@@ -409,6 +428,10 @@ def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
         "away": str(row.away_team),
         "date": display_date,
         "status": status,
+        "competition": str(getattr(row, "competition", "")),
+        "date_text_raw": str(getattr(row, "date_text", "")),
+        "event_timestamp": str(getattr(row, "event_timestamp", "") or ""),
+        "match_url": str(getattr(row, "match_url", "") or ""),
         "final_score": final_score,
         "actual_result": actual_result,
         "model_result": model_result,
@@ -432,6 +455,8 @@ def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
         },
         "context": {"home": home_ctx, "away": away_ctx},
     }
+    if cached_real_stats_payload and cached_real_stats_payload.get("available"):
+        data["prefetched_real_stats"] = cached_real_stats_payload
     if tip:
         data["tip"] = {
             "market": _market_label(tip.best_market, str(row.home_team), str(row.away_team)),
@@ -443,7 +468,11 @@ def _get_detail_json(df: pd.DataFrame, row, probs, tip=None) -> str:
     return json.dumps(data, ensure_ascii=False)
 
 
-def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[str, int | str], dict[str, object], list[dict[str, object]]]:
+def _build_competition_section(
+    name: str,
+    df: pd.DataFrame,
+    real_stats_cache: dict[str, dict[str, object]] | None = None,
+) -> tuple[str, dict[str, int | str], dict[str, object], list[dict[str, object]], list[dict[str, object]]]:
     finished = df[df["status"] == "Finalizado"].copy()
     fixtures = df[df["status"] == "Agendado"].copy()
     finished = _sort_matches_for_display(finished, ascending=False)
@@ -457,6 +486,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     analysis_options = []
     detail_store: dict[str, object] = {}
     risk_entries: list[dict[str, object]] = []
+    match_catalog: list[dict[str, object]] = []
     detail_index = 0
     finished_hits = 0
     finished_evaluated = 0
@@ -474,8 +504,9 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
         detail_store[detail_key] = detail_data
         return detail_key
 
-    for row in fixtures.head(40).itertuples(index=False):
+    for row in fixtures.itertuples(index=False):
         display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
+        filter_date = _match_filter_date(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         detail_json = "{}"
         try:
             probs = calculate_match_probabilities(df, row.home_team, row.away_team)
@@ -483,10 +514,28 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
         except Exception:
             pass
         detail_key = register_detail(detail_json)
+        if detail_key:
+            detail_data = detail_store.get(detail_key, {})
+            match_catalog.append(
+                {
+                    "competition": name,
+                    "status": str(getattr(row, "status", "")),
+                    "filter_date": filter_date,
+                    "date_label": display_date,
+                    "matchup": f"{row.home_team} x {row.away_team}",
+                    "home": str(row.home_team),
+                    "away": str(row.away_team),
+                    "detail_key": detail_key,
+                    "model_result": str(detail_data.get("model_result", "-")),
+                    "model_probability": float(detail_data.get("model_probability", 0.0) or 0.0),
+                    "model_risk_stage": str(detail_data.get("model_risk_stage", "Fora dos criterios")),
+                }
+            )
 
         rows_html.append(
             "<tr "
             "data-filter-scope=\"general\" "
+            f"data-date=\"{escape(filter_date)}\" "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
             f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
@@ -516,6 +565,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
 
     for row in fixtures_valid.head(20).itertuples(index=False):
         display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
+        filter_date = _match_filter_date(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         try:
             probs = calculate_match_probabilities(df, row.home_team, row.away_team)
             tip = suggest_bet_strategy(
@@ -535,6 +585,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                     {
                         "stage": risk_stage,
                         "competition": name,
+                        "filter_date": filter_date,
                         "date_text": display_date,
                         "matchup": f"{row.home_team} x {row.away_team}",
                         "suggestion": _market_label(tip.best_market, str(row.home_team), str(row.away_team)),
@@ -546,7 +597,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                     }
                 )
             rec_rows.append(
-                f"<tr data-filter-scope=\"model\" data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
+                f"<tr data-filter-scope=\"model\" data-date=\"{escape(filter_date)}\" data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
@@ -562,10 +613,20 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
 
     for row in finished.head(20).itertuples(index=False):
         display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
+        filter_date = _match_filter_date(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         detail_json = "{}"
         model_result = "-"
         model_probability = "-"
         model_hit_label = "-"
+        cached_real_stats_payload = None
+        if real_stats_cache is not None:
+            cache_key = build_match_stats_cache_key(
+                str(row.home_team),
+                str(row.away_team),
+                str(getattr(row, "date_text", "")),
+                getattr(row, "event_timestamp", None),
+            )
+            cached_real_stats_payload = real_stats_cache.get(cache_key)
         try:
             probs = calculate_match_probabilities(df, row.home_team, row.away_team)
             model_result, best_prob = _best_model_result(probs, str(row.home_team), str(row.away_team))
@@ -583,15 +644,38 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
                     model_hit_label = "Acertou"
                 else:
                     model_hit_label = "Errou"
-            detail_json = _get_detail_json(df, row, probs)
+            detail_json = _get_detail_json(
+                df,
+                row,
+                probs,
+                cached_real_stats_payload=cached_real_stats_payload,
+            )
         except Exception:
             pass
         detail_key = register_detail(detail_json)
+        if detail_key:
+            detail_data = detail_store.get(detail_key, {})
+            match_catalog.append(
+                {
+                    "competition": name,
+                    "status": str(getattr(row, "status", "")),
+                    "filter_date": filter_date,
+                    "date_label": display_date,
+                    "matchup": f"{row.home_team} x {row.away_team}",
+                    "home": str(row.home_team),
+                    "away": str(row.away_team),
+                    "detail_key": detail_key,
+                    "model_result": str(detail_data.get("model_result", "-")),
+                    "model_probability": float(detail_data.get("model_probability", 0.0) or 0.0),
+                    "model_risk_stage": str(detail_data.get("model_risk_stage", "Fora dos criterios")),
+                }
+            )
 
         score_text = f"{_fmt_score(row.home_goals)} x {_fmt_score(row.away_goals)}"
         finished_rows.append(
             "<tr "
             "data-filter-scope=\"general\" "
+            f"data-date=\"{escape(filter_date)}\" "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
             f"data-odd-away=\"{_fmt_odd(row.odds_away)}\" "
@@ -626,6 +710,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
     if not safe_df.empty:
         for row in safe_df.head(10).itertuples(index=False):
             display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), "Agendado")
+            filter_date = _match_filter_date(row.date_text, getattr(row, "event_timestamp", None), "Agendado")
             try:
                 probs = calculate_match_probabilities(df, row.home_team, row.away_team)
                 # Find original odds for detail view
@@ -644,7 +729,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
             detail_key = register_detail(detail_json)
 
             safe_rows.append(
-                f"<tr data-filter-scope=\"model\" data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
+                f"<tr data-filter-scope=\"model\" data-date=\"{escape(filter_date)}\" data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(str(row.market), str(row.home_team), str(row.away_team)))}</td>"
@@ -794,7 +879,7 @@ def _build_competition_section(name: str, df: pd.DataFrame) -> tuple[str, dict[s
   <p class="empty-state" hidden>Nenhuma linha desta competicao atende aos filtros atuais.</p>
 </section>
 """
-    return section_html, stats, detail_store, risk_entries
+    return section_html, stats, detail_store, risk_entries, match_catalog
 
 
 def _build_risk_block(title: str, stage: str, description: str, meta: list[str], entries: list[dict[str, object]], tone_class: str) -> str:
@@ -802,7 +887,7 @@ def _build_risk_block(title: str, stage: str, description: str, meta: list[str],
     ordered_entries = sorted(entries, key=lambda item: (-float(item["probability"]), -float(item["ev"]), str(item["competition"]), str(item["matchup"])))[:12]
     for entry in ordered_entries:
         rows.append(
-            f"<tr data-filter-scope='model' data-odd='{float(entry['odd']):.2f}' data-prob='{float(entry['probability']):.4f}' data-ev='{float(entry['ev']):.4f}' data-books='{int(entry['bookmakers'])}'>"
+            f"<tr data-filter-scope='model' data-date='{escape(str(entry.get('filter_date', '')))}' data-odd='{float(entry['odd']):.2f}' data-prob='{float(entry['probability']):.4f}' data-ev='{float(entry['ev']):.4f}' data-books='{int(entry['bookmakers'])}'>"
             f"<td>{escape(str(entry['competition']))}</td>"
             f"<td>{escape(str(entry['date_text']))}</td>"
             f"<td>{escape(str(entry['matchup']))}</td>"
@@ -830,19 +915,29 @@ def _build_risk_block(title: str, stage: str, description: str, meta: list[str],
     """
 
 
-def build_index_html() -> str:
+def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) -> str:
     sections: list[str] = []
     competition_stats: list[dict[str, int | str]] = []
     detail_registry: dict[str, object] = {}
     global_risk_entries: list[dict[str, object]] = []
+    global_match_catalog: list[dict[str, object]] = []
+    real_stats_cache = load_real_match_stats_cache()
 
     for comp in COMPETITIONS:
-        df = load_competition_matches(comp)
-        section_html, stats, section_details, section_risk_entries = _build_competition_section(comp, df)
+        if competition_frames and comp in competition_frames:
+            df = competition_frames[comp].copy()
+        else:
+            df = load_competition_matches(comp)
+        section_html, stats, section_details, section_risk_entries, section_match_catalog = _build_competition_section(
+            comp,
+            df,
+            real_stats_cache=real_stats_cache,
+        )
         sections.append(section_html)
         competition_stats.append(stats)
         detail_registry.update(section_details)
         global_risk_entries.extend(section_risk_entries)
+        global_match_catalog.extend(section_match_catalog)
 
     total_finished = sum(int(item["finished"]) for item in competition_stats)
     total_fixtures = sum(int(item["fixtures"]) for item in competition_stats)
@@ -855,6 +950,16 @@ def build_index_html() -> str:
     recommendations_rate = round((total_recommendations / total_odds) * 100) if total_odds else 0
 
     competition_options = "".join(f"<option>{escape(str(item['name']))}</option>" for item in competition_stats)
+    competition_filter_cards = "".join(
+        (
+            f"<button class=\"competition-filter-card\" type=\"button\" data-comp-filter=\"{escape(str(item['name']))}\">"
+            f"<strong>{escape(str(item['name']))}</strong>"
+            f"<span>{int(item['fixtures'])} jogos futuros</span>"
+            f"<small>{int(item['safe'])} seguros • {int(item['fixtures_valid'])} com odds</small>"
+            "</button>"
+        )
+        for item in competition_stats
+    )
     competition_jump_links = "".join(
         f"<a href=\"#{escape(str(item['id']))}\" class=\"jump-link\" data-comp-name=\"{escape(str(item['name']))}\">{escape(str(item['name']))}<span>{int(item['safe'])} seguros</span></a>"
         for item in competition_stats
@@ -871,6 +976,7 @@ def build_index_html() -> str:
     )
     ai_prompt_html = escape(AI_PROMPT_TEMPLATE)
     ai_prompt_js = AI_PROMPT_TEMPLATE
+    match_catalog_json = json.dumps(global_match_catalog, ensure_ascii=False)
     low_risk_entries = [item for item in global_risk_entries if item["stage"] == "Baixo risco"]
     medium_risk_entries = [item for item in global_risk_entries if item["stage"] == "Medio risco"]
     high_risk_entries = [item for item in global_risk_entries if item["stage"] == "Alto risco"]
@@ -935,7 +1041,7 @@ def build_index_html() -> str:
         radial-gradient(860px 420px at 100% 0%, rgba(16,185,129,0.14), transparent 50%),
         linear-gradient(180deg, #f8fafc 0%, var(--bg) 65%, #e9eef5 100%);
     }}
-    .container {{ max-width: 1320px; margin: 0 auto; padding: 24px 20px 44px; }}
+    .container {{ width: 100%; max-width: none; margin: 0 auto; padding: 24px clamp(18px, 2.2vw, 30px) 44px; }}
     .topbar {{
       display: flex;
       justify-content: space-between;
@@ -1028,16 +1134,17 @@ def build_index_html() -> str:
     .jump-link.active span {{ color: #ffffff; }}
     .dashboard-shell {{
       display: grid;
-      grid-template-columns: minmax(250px, 280px) minmax(0, 1fr);
+      grid-template-columns: 1fr;
       gap: 18px;
       align-items: start;
       margin-top: 18px;
     }}
     .side-rail {{
-      position: sticky;
-      top: 18px;
+      position: static;
       display: grid;
+      grid-template-columns: minmax(280px, 0.3fr) minmax(400px, 1fr);
       gap: 14px;
+      align-items: start;
     }}
     .rail-card {{
       padding: 18px;
@@ -1160,13 +1267,71 @@ def build_index_html() -> str:
       border-radius: 999px;
       background: linear-gradient(90deg, var(--blue), var(--teal));
     }}
-    .controls-head, .card-head, .panel-head {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }}
+    .controls-head, .panel-head {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }}
+    .card-head {{
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(360px, 1fr);
+      gap: 18px;
+      align-items: start;
+    }}
     .eyebrow {{ display: inline-flex; margin-bottom: 8px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--blue); }}
     h2 {{ margin: 0; font-size: clamp(1.35rem, 2vw, 1.85rem); letter-spacing: -.03em; font-family: "Space Grotesk", sans-serif; }}
     h3 {{ margin: 4px 0 0; font-size: 1.06rem; letter-spacing: -.02em; font-family: "Space Grotesk", sans-serif; }}
     .copy, .section-copy, .panel-copy {{ margin: 8px 0 0; color: var(--muted); line-height: 1.6; }}
     .summary-box {{ min-width: min(100%, 280px); padding: 14px 16px; border-radius: 18px; background: linear-gradient(135deg, #eff6ff, #ecfeff); border: 1px solid rgba(59,130,246,.14); color: #15314a; font-size: .92rem; line-height: 1.55; box-shadow: inset 0 1px 0 rgba(255,255,255,.55); }}
     .filters {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }}
+    .competition-filter-shell {{
+      display: grid;
+      gap: 12px;
+      margin-bottom: 8px;
+    }}
+    .competition-filter-shell label {{
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #334155;
+    }}
+    .competition-filter-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }}
+    .competition-filter-card {{
+      display: grid;
+      gap: 6px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(241,245,249,.84));
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
+    }}
+    .competition-filter-card:hover {{
+      transform: translateY(-2px);
+      box-shadow: 0 18px 32px rgba(15,23,42,.08);
+      border-color: rgba(29,78,216,.24);
+    }}
+    .competition-filter-card strong {{
+      font-size: .98rem;
+      font-family: "Space Grotesk", sans-serif;
+      letter-spacing: -.02em;
+    }}
+    .competition-filter-card span,
+    .competition-filter-card small {{
+      color: var(--muted);
+      line-height: 1.45;
+    }}
+    .competition-filter-card.active {{
+      border-color: rgba(29,78,216,.34);
+      background: linear-gradient(135deg, rgba(239,246,255,.98), rgba(236,253,245,.94));
+      box-shadow: 0 18px 34px rgba(29,78,216,.12);
+    }}
+    .competition-filter-card.all-card {{
+      border-style: dashed;
+    }}
     .field {{ display: grid; gap: 8px; padding: 14px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.76)); border: 1px solid var(--line); }}
     .field label {{ font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #334155; }}
     .field input, .field select {{ height: 44px; border-radius: 12px; border: 1px solid var(--line-strong); padding: 0 14px; font: inherit; color: var(--text); background: rgba(255,255,255,.98); outline: none; }}
@@ -1325,10 +1490,10 @@ def build_index_html() -> str:
       height: 100%;
       background: linear-gradient(180deg, var(--blue), var(--teal));
     }}
-    .title-block {{ max-width: 760px; }}
+    .title-block {{ max-width: none; min-width: 0; }}
     .title-row {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }}
     .badge {{ padding: 8px 12px; border-radius: 999px; background: linear-gradient(135deg, #ecfeff, #eff6ff); border: 1px solid rgba(15,118,110,.16); color: var(--teal); font-size: .8rem; font-weight: 700; }}
-    .stats-rail {{ display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; min-width: min(100%, 320px); }}
+    .stats-rail {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; min-width: 0; width: 100%; }}
     .stat-chip {{ padding: 14px; border-radius: 16px; background: linear-gradient(180deg, #fff, #f8fafc); border: 1px solid var(--line); }}
     .stat-chip span {{ display: block; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }}
     .stat-chip strong {{ display: block; margin-top: 8px; font-size: 1.34rem; letter-spacing: -.04em; font-family: "Space Grotesk", sans-serif; }}
@@ -1411,6 +1576,81 @@ def build_index_html() -> str:
     tr.risk-high td {{ background: #fff1f2; }}
     tr.risk-none td {{ background: #f8fafc; }}
     .empty-state {{ margin: 16px 0 2px; padding: 14px 16px; border-radius: 14px; background: #fff7ed; border: 1px solid rgba(245,158,11,.22); color: #9a3412; font-size: .92rem; }}
+    .date-focus[hidden] {{ display: none; }}
+    .date-focus-head {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }}
+    .date-focus-head p {{
+      margin: 8px 0 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }}
+    .date-focus-grid {{
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }}
+    .date-match-card {{
+      display: grid;
+      gap: 12px;
+      padding: 18px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(246,249,252,.88));
+      box-shadow: 0 16px 28px rgba(15,23,42,.06);
+    }}
+    .date-match-top {{
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }}
+    .date-match-top strong {{
+      font-size: 1rem;
+      font-family: "Space Grotesk", sans-serif;
+      letter-spacing: -.02em;
+    }}
+    .date-match-meta {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .date-match-meta span,
+    .date-match-note {{
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #f8fafc;
+      border: 1px solid rgba(148,163,184,.20);
+      color: #334155;
+      font-size: .78rem;
+      font-weight: 700;
+    }}
+    .date-match-copy {{
+      color: var(--muted);
+      font-size: .9rem;
+      line-height: 1.55;
+    }}
+    .date-match-actions {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }}
+    .date-focus-empty {{
+      margin-top: 16px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: #fff7ed;
+      border: 1px solid rgba(245,158,11,.22);
+      color: #9a3412;
+    }}
     
     /* MODAL STYLES */
     .modal-overlay {{
@@ -1498,6 +1738,18 @@ def build_index_html() -> str:
     .context-card h4 {{ margin: 0 0 10px; font-size: 0.9rem; color: var(--blue); font-family: "Space Grotesk", sans-serif; }}
     .context-stat {{ display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 0.85rem; }}
     .context-stat strong {{ color: var(--text); }}
+    .real-stats-grid {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }}
+    .real-stat-card {{ padding: 16px; border-radius: 16px; background: linear-gradient(180deg, #f8fafc, #eef5fb); border: 1px solid var(--line); }}
+    .real-stat-card span {{ display: block; font-size: .76rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }}
+    .real-stat-card strong {{ display: block; margin-top: 8px; font-size: 1.15rem; letter-spacing: -.03em; font-family: "Space Grotesk", sans-serif; }}
+    .real-stat-card small {{ display: block; margin-top: 8px; color: var(--muted); font-size: .82rem; line-height: 1.5; }}
+    .real-stats-status {{ margin-top: 14px; color: var(--muted); line-height: 1.55; }}
+    .real-stats-link {{ margin-top: 12px; display: inline-flex; }}
+    .projection-status {{ margin-top: 14px; color: var(--muted); line-height: 1.55; }}
+    .projection-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }}
+    .accuracy-good {{ color: #15803d !important; }}
+    .accuracy-mid {{ color: #b45309 !important; }}
+    .accuracy-low {{ color: #be123c !important; }}
     
     .glossary {{ display: grid; gap: 14px; }}
     .glossary-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }}
@@ -1537,15 +1789,15 @@ def build_index_html() -> str:
     }}
     
     @media (max-width: 1180px) {{
-      .dashboard-shell {{ grid-template-columns: 1fr; }}
-      .side-rail {{ position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .side-rail {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .card-head {{ grid-template-columns: 1fr; }}
     }}
-    @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+    @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
     @media (max-width: 760px) {{
       .container {{ padding: 18px 14px 32px; }}
       .topbar {{ align-items: flex-start; }}
       .hero, .card, .competition-card {{ padding: 18px; }}
-      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid {{ grid-template-columns: 1fr; }}
+      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: 1fr; }}
       .topbar, .brand-block, .topbar-meta {{ flex-direction: column; align-items: flex-start; }}
       .btn, .btn-link {{ width: 100%; }}
       .analysis-selector-row {{ grid-template-columns: 1fr; }}
@@ -1573,17 +1825,8 @@ def build_index_html() -> str:
 
     <section class="hero">
       <div class="hero-grid">
-        <div>
-          <div class="hero-tag">Central quantitativa institucional</div>
-          <h1>Radar premium de probabilidades, valor e protecao operacional</h1>
-          <p>Gerado em {_current_app_timestamp()} no horario de Sao Paulo a partir de scraping de paginas publicas do BetExplorer. Esta capa foi redesenhada para funcionar como portal executivo de entrada, concentrando jogos seguros, comparativo modelo x mercado, agenda e historico de calibracao.</p>
-        </div>
+        <div></div>
         <div class="hero-stack">
-          <div class="hero-note">
-            <span>Fluxo sugerido</span>
-            <strong>Radar  Modelo  Hedge</strong>
-            <p>Comece pelos blocos conservadores, valide o desempenho recente do modelo contra o mercado e depois avance para cenarios de fechamento e protecao.</p>
-          </div>
           <div class="hero-note">
             <span>Painel inicial</span>
             <strong>{len(competition_stats)} competicoes</strong>
@@ -1605,39 +1848,43 @@ def build_index_html() -> str:
 
     <div class="dashboard-shell">
       <aside class="side-rail">
+        <section class="rail-card" style="margin-bottom: 14px;">
+          <div class="eyebrow">Filtro de Data</div>
+          <h3>Busca por data</h3>
+          <p>Reune todos os jogos da data no painel especial.</p>
+          <div class="field" style="margin-top: 14px; padding: 0; background: transparent; border: none;">
+            <input id="fdate" type="date" style="width: 100%; border: 1px solid var(--line-strong);" />
+          </div>
+        </section>
+
         <section class="rail-card">
           <div class="eyebrow">Radar lateral</div>
-          <h3>Navegacao rapida</h3>
-          <p>Use esta lateral para saltar entre competicoes e acompanhar a cobertura de odds sem perder o contexto.</p>
-          <div class="rail-list">{side_league_cards}</div>
-        </section>
-        <section class="rail-card spark-card">
-          <div class="eyebrow">Leitura expressa</div>
-          <div class="spark-head"><strong>Cobertura de mercado</strong><span>{odds_coverage}%</span></div>
-          <div class="sparkline" aria-hidden="true">
-            <svg viewBox="0 0 160 70" preserveAspectRatio="none">
-              <path d="M0 70 L0 50 L32 48 L64 44 L96 40 L128 28 L160 20 L160 70 Z"></path>
-              <polyline points="0,50 32,48 64,44 96,40 128,28 160,20"></polyline>
-            </svg>
-          </div>
-          <div class="spark-head"><strong>Filtro conservador</strong><span>{safe_rate}%</span></div>
-          <div class="sparkline" aria-hidden="true">
-            <svg viewBox="0 0 160 70" preserveAspectRatio="none">
-              <path d="M0 70 L0 58 L32 54 L64 48 L96 46 L128 42 L160 36 L160 70 Z"></path>
-              <polyline points="0,58 32,54 64,48 96,46 128,42 160,36"></polyline>
-            </svg>
-          </div>
-          <div class="spark-head"><strong>Entradas com EV</strong><span>{recommendations_rate}%</span></div>
-          <div class="sparkline" aria-hidden="true">
-            <svg viewBox="0 0 160 70" preserveAspectRatio="none">
-              <path d="M0 70 L0 56 L32 46 L64 40 L96 30 L128 18 L160 10 L160 70 Z"></path>
-              <polyline points="0,56 32,46 64,40 96,30 128,18 160,10"></polyline>
-            </svg>
+          <h3>Focos por competicao</h3>
+          <p>Toque nos cards para filtrar o dashboard inteiro.</p>
+          <div class="competition-filter-grid" style="grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); margin-top: 14px;">
+            <button class="competition-filter-card all-card active" type="button" data-comp-filter="">
+              <strong>Todas as competicoes</strong>
+              <small>Limpar o foco de competicao.</small>
+            </button>
+            {competition_filter_cards}
           </div>
         </section>
       </aside>
 
       <main class="dashboard-main">
+        <section id="dateFocusPanel" class="card date-focus" hidden>
+          <div class="date-focus-head">
+            <div>
+              <div class="eyebrow">Recorte por data</div>
+              <h2 id="dateFocusTitle">Jogos da data filtrada</h2>
+              <p id="dateFocusCopy">Selecione uma data no filtro para reunir todos os confrontos do dia em um unico lugar, com acesso direto a analise.</p>
+            </div>
+            <div id="dateFocusMeta" class="summary-box">Sem data aplicada.</div>
+          </div>
+          <div id="dateFocusGrid" class="date-focus-grid"></div>
+          <div id="dateFocusEmpty" class="date-focus-empty" hidden>Nenhum jogo desta data atende aos filtros atuais de competicao ou busca por time.</div>
+        </section>
+
         <section class="card risk-strip">
           <div class="risk-strip-head">
             <div>
@@ -1761,6 +2008,85 @@ def build_index_html() -> str:
             </div>
           </div>
         </div>
+
+        <div class="modal-section">
+          <h3>Estatisticas Reais do Jogo</h3>
+          <div class="real-stats-grid">
+            <div class="real-stat-card">
+              <span>Escanteios</span>
+              <strong id="realCorners">-</strong>
+            </div>
+            <div class="real-stat-card">
+              <span>Cartoes Amarelos</span>
+              <strong id="realYellowCards">-</strong>
+            </div>
+            <div class="real-stat-card">
+              <span>Faltas</span>
+              <strong id="realFouls">-</strong>
+            </div>
+            <div class="real-stat-card">
+              <span>Posse de Bola</span>
+              <strong id="realPossession">-</strong>
+            </div>
+          </div>
+          <div id="realStatsStatus" class="real-stats-status">Abra um jogo finalizado para consultar cartoes e escanteios reais.</div>
+          <a id="realStatsSourceLink" class="btn-link real-stats-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Ver fonte externa</a>
+        </div>
+
+        <div class="modal-grid">
+          <div class="modal-section">
+            <h3>Medias Recentes por Time</h3>
+            <div class="context-grid">
+              <div class="context-card">
+                <h4 id="projectionHomeTeamName">Mandante</h4>
+                <div class="context-stat">Esc. a favor: <strong id="homeAvgCornersFor">-</strong></div>
+                <div class="context-stat">Esc. cedidos: <strong id="homeAvgCornersAgainst">-</strong></div>
+                <div class="context-stat">Cartoes proprios: <strong id="homeAvgYellowFor">-</strong></div>
+                <div class="context-stat">Cartoes do rival: <strong id="homeAvgYellowAgainst">-</strong></div>
+                <div class="context-stat">Amostra: <strong id="homeProjectionSample">-</strong></div>
+              </div>
+              <div class="context-card">
+                <h4 id="projectionAwayTeamName">Visitante</h4>
+                <div class="context-stat">Esc. a favor: <strong id="awayAvgCornersFor">-</strong></div>
+                <div class="context-stat">Esc. cedidos: <strong id="awayAvgCornersAgainst">-</strong></div>
+                <div class="context-stat">Cartoes proprios: <strong id="awayAvgYellowFor">-</strong></div>
+                <div class="context-stat">Cartoes do rival: <strong id="awayAvgYellowAgainst">-</strong></div>
+                <div class="context-stat">Amostra: <strong id="awayProjectionSample">-</strong></div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-section">
+            <h3>Projecao do Confronto</h3>
+            <div class="projection-grid">
+              <div class="real-stat-card">
+                <span>Proj. Escanteios</span>
+                <strong id="projectedCorners">-</strong>
+              </div>
+              <div class="real-stat-card">
+                <span>Proj. Cartoes</span>
+                <strong id="projectedYellowCards">-</strong>
+              </div>
+            </div>
+            <div id="projectionStatus" class="projection-status">As medias recentes por time serao carregadas junto com os detalhes do jogo.</div>
+          </div>
+        </div>
+
+        <div class="modal-section">
+          <h3>Aderencia ao Real</h3>
+          <div class="projection-grid">
+            <div class="real-stat-card">
+              <span>Escanteios</span>
+              <strong id="cornersAccuracyLabel">-</strong>
+              <small id="cornersAccuracyDetail">-</small>
+            </div>
+            <div class="real-stat-card">
+              <span>Cartoes</span>
+              <strong id="yellowCardsAccuracyLabel">-</strong>
+              <small id="yellowCardsAccuracyDetail">-</small>
+            </div>
+          </div>
+          <div id="projectionAccuracyStatus" class="projection-status">A analise de aderencia sera calculada quando houver projecao e estatistica real do jogo.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1776,9 +2102,22 @@ def build_index_html() -> str:
         <button class="modal-close" type="button" onclick="closeFilterModal()">×</button>
       </div>
       <div class="modal-body">
+        <div class="competition-filter-shell">
+          <label>Competicao</label>
+          <input id="fcomp" type="hidden" value="" />
+          <div class="competition-filter-grid">
+            <button class="competition-filter-card all-card active" type="button" data-comp-filter="">
+              <strong>Todas as competicoes</strong>
+              <span>Visao consolidada do portal</span>
+              <small>Mostra todos os campeonatos monitorados</small>
+            </button>
+            {competition_filter_cards}
+          </div>
+          <div class="hint">Toque em um card para focar em uma competicao ou volte para a visao completa.</div>
+        </div>
         <div class="filters">
-          <div class="field"><label for="fcomp">Competicao</label><select id="fcomp"><option value="">Todas</option>{competition_options}</select><div class="hint">Filtra o painel para um campeonato especifico.</div></div>
           <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para as tabelas do modelo, sem esconder os resultados finalizados.</div></div>
+          <!-- O filtro de data foi movido para a barra lateral a pedido do usuario -->
           <div class="field"><label for="fteam">Time</label><input id="fteam" type="text" placeholder="Ex: Flamengo" /><div class="hint">Busca o nome do time em qualquer tabela visivel.</div></div>
           <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers nas tabelas do modelo.</div></div>
           <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd nas leituras recomendadas.</div></div>
@@ -1861,13 +2200,334 @@ def build_index_html() -> str:
     }};
 
     let charts = {{}};
+    let activeMatchStatsRequest = 0;
     const matchDetailsStore = {json.dumps(detail_registry, ensure_ascii=False)};
+    const dateMatchCatalog = {match_catalog_json};
+
+    function setRealStatsCardValue(elementId, value) {{
+      const element = document.getElementById(elementId);
+      if (!element) return;
+      element.textContent = value || '-';
+    }}
+
+    function formatRealStatPair(metric) {{
+      if (!metric || metric.home === undefined || metric.away === undefined) return '-';
+      const unit = metric.unit || '';
+      return `${{metric.home}}${{unit}} x ${{metric.away}}${{unit}}`;
+    }}
+
+    function formatAverageValue(value) {{
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+      return Number(value).toFixed(1);
+    }}
+
+    function formatProjectionPair(metric) {{
+      if (!metric || metric.home === null || metric.home === undefined || metric.away === null || metric.away === undefined) return '-';
+      return `${{Number(metric.home).toFixed(1)}} x ${{Number(metric.away).toFixed(1)}}`;
+    }}
+
+    function parseMetricNumber(value) {{
+      if (value === null || value === undefined || value === '') return null;
+      const parsed = Number(value);
+      return Number.isNaN(parsed) ? null : parsed;
+    }}
+
+    function clearAccuracyTone(elementId) {{
+      const element = document.getElementById(elementId);
+      if (!element) return;
+      element.classList.remove('accuracy-good', 'accuracy-mid', 'accuracy-low');
+    }}
+
+    function setAccuracyCardValue(labelId, detailId, accuracyPayload) {{
+      clearAccuracyTone(labelId);
+      setRealStatsCardValue(labelId, accuracyPayload ? accuracyPayload.label : '-');
+      setRealStatsCardValue(detailId, accuracyPayload ? accuracyPayload.detail : '-');
+      if (!accuracyPayload || !accuracyPayload.toneClass) return;
+      const labelElement = document.getElementById(labelId);
+      if (labelElement) {{
+        labelElement.classList.add(accuracyPayload.toneClass);
+      }}
+    }}
+
+    function classifyProjectionAccuracy(sideError, totalError) {{
+      const referenceError = Math.max(sideError, totalError / 2);
+      if (referenceError <= 0.8) return {{ label: 'Muito proxima', toneClass: 'accuracy-good' }};
+      if (referenceError <= 1.5) return {{ label: 'Proxima', toneClass: 'accuracy-good' }};
+      if (referenceError <= 2.5) return {{ label: 'Moderada', toneClass: 'accuracy-mid' }};
+      return {{ label: 'Distante', toneClass: 'accuracy-low' }};
+    }}
+
+    function buildProjectionAccuracy(metricProjection, metricReal) {{
+      const projectedHome = parseMetricNumber(metricProjection && metricProjection.home);
+      const projectedAway = parseMetricNumber(metricProjection && metricProjection.away);
+      const realHome = parseMetricNumber(metricReal && metricReal.home);
+      const realAway = parseMetricNumber(metricReal && metricReal.away);
+
+      if (projectedHome === null || projectedAway === null || realHome === null || realAway === null) return null;
+
+      const projectedTotal = parseMetricNumber(metricProjection && metricProjection.total);
+      const finalProjectedTotal = projectedTotal === null ? projectedHome + projectedAway : projectedTotal;
+      const realTotal = realHome + realAway;
+      const sideError = (Math.abs(projectedHome - realHome) + Math.abs(projectedAway - realAway)) / 2;
+      const totalError = Math.abs(finalProjectedTotal - realTotal);
+      const accuracy = classifyProjectionAccuracy(sideError, totalError);
+
+      return {{
+        label: accuracy.label,
+        toneClass: accuracy.toneClass,
+        detail: `Proj. ${{formatProjectionPair({{ home: projectedHome, away: projectedAway }})}} | Real ${{formatRealStatPair({{ home: realHome, away: realAway }})}} | Erro ${{sideError.toFixed(1)}} por time`,
+        sideError,
+        totalError
+      }};
+    }}
+
+    function getEventSortValue(item) {{
+      const timestamp = item && item.event_timestamp ? Date.parse(item.event_timestamp) : NaN;
+      return Number.isNaN(timestamp) ? 0 : timestamp;
+    }}
+
+    function buildRecentTeamHistory(teamName, currentData) {{
+      const currentSortValue = getEventSortValue(currentData) || Number.MAX_SAFE_INTEGER;
+      return Object.values(matchDetailsStore)
+        .filter((item) => item && item.status === 'Finalizado' && (item.home === teamName || item.away === teamName))
+        .filter((item) => {{
+          const itemSortValue = getEventSortValue(item);
+          if (!itemSortValue || itemSortValue >= currentSortValue) return false;
+          return !(item.home === currentData.home && item.away === currentData.away && item.event_timestamp === currentData.event_timestamp);
+        }})
+        .sort((a, b) => getEventSortValue(b) - getEventSortValue(a))
+        .slice(0, 12)
+        .map((item) => ({{
+          home_team: item.home,
+          away_team: item.away,
+          status: item.status,
+          date_text: item.date_text_raw || item.date || '',
+          event_timestamp: item.event_timestamp || ''
+        }}));
+    }}
+
+    function resetRealStatsBlock(message) {{
+      setRealStatsCardValue('realCorners', '-');
+      setRealStatsCardValue('realYellowCards', '-');
+      setRealStatsCardValue('realFouls', '-');
+      setRealStatsCardValue('realPossession', '-');
+      const status = document.getElementById('realStatsStatus');
+      if (status) {{
+        status.textContent = message || 'Abra um jogo finalizado para consultar cartoes e escanteios reais.';
+      }}
+      const sourceLink = document.getElementById('realStatsSourceLink');
+      if (sourceLink) {{
+        sourceLink.hidden = true;
+        sourceLink.removeAttribute('href');
+      }}
+    }}
+
+    function resetProjectionBlock(message, accuracyMessage) {{
+      document.getElementById('projectionHomeTeamName').textContent = 'Mandante';
+      document.getElementById('projectionAwayTeamName').textContent = 'Visitante';
+      ['homeAvgCornersFor', 'homeAvgCornersAgainst', 'homeAvgYellowFor', 'homeAvgYellowAgainst', 'homeProjectionSample',
+       'awayAvgCornersFor', 'awayAvgCornersAgainst', 'awayAvgYellowFor', 'awayAvgYellowAgainst', 'awayProjectionSample',
+       'projectedCorners', 'projectedYellowCards'].forEach((id) => setRealStatsCardValue(id, '-'));
+      setAccuracyCardValue('cornersAccuracyLabel', 'cornersAccuracyDetail', null);
+      setAccuracyCardValue('yellowCardsAccuracyLabel', 'yellowCardsAccuracyDetail', null);
+      const status = document.getElementById('projectionStatus');
+      if (status) {{
+        status.textContent = message || 'As medias recentes por time serao carregadas junto com os detalhes do jogo.';
+      }}
+      const accuracyStatus = document.getElementById('projectionAccuracyStatus');
+      if (accuracyStatus) {{
+        accuracyStatus.textContent = accuracyMessage || 'A analise de aderencia sera calculada quando houver projecao e estatistica real do jogo.';
+      }}
+    }}
+
+    function applyTeamProjection(data, projectionPayload) {{
+      document.getElementById('projectionHomeTeamName').textContent = data.home;
+      document.getElementById('projectionAwayTeamName').textContent = data.away;
+
+      const homeProfile = projectionPayload && projectionPayload.home ? projectionPayload.home : null;
+      const awayProfile = projectionPayload && projectionPayload.away ? projectionPayload.away : null;
+      const projection = projectionPayload && projectionPayload.projection ? projectionPayload.projection : {{}};
+
+      if (homeProfile && homeProfile.available && homeProfile.averages) {{
+        setRealStatsCardValue('homeAvgCornersFor', formatAverageValue(homeProfile.averages.corners_for));
+        setRealStatsCardValue('homeAvgCornersAgainst', formatAverageValue(homeProfile.averages.corners_against));
+        setRealStatsCardValue('homeAvgYellowFor', formatAverageValue(homeProfile.averages.yellow_for));
+        setRealStatsCardValue('homeAvgYellowAgainst', formatAverageValue(homeProfile.averages.yellow_against));
+        setRealStatsCardValue('homeProjectionSample', String(homeProfile.sample_size || 0));
+      }}
+
+      if (awayProfile && awayProfile.available && awayProfile.averages) {{
+        setRealStatsCardValue('awayAvgCornersFor', formatAverageValue(awayProfile.averages.corners_for));
+        setRealStatsCardValue('awayAvgCornersAgainst', formatAverageValue(awayProfile.averages.corners_against));
+        setRealStatsCardValue('awayAvgYellowFor', formatAverageValue(awayProfile.averages.yellow_for));
+        setRealStatsCardValue('awayAvgYellowAgainst', formatAverageValue(awayProfile.averages.yellow_against));
+        setRealStatsCardValue('awayProjectionSample', String(awayProfile.sample_size || 0));
+      }}
+
+      setRealStatsCardValue('projectedCorners', formatProjectionPair(projection.corners));
+      setRealStatsCardValue('projectedYellowCards', formatProjectionPair(projection.yellow_cards));
+
+      const status = document.getElementById('projectionStatus');
+      if (status) {{
+        status.textContent = projectionPayload && projectionPayload.message
+          ? projectionPayload.message
+          : 'Nao foi possivel calcular medias recentes e projecoes para este confronto.';
+      }}
+    }}
+
+    function applyProjectionAccuracy(data, statsPayload, projectionPayload) {{
+      setAccuracyCardValue('cornersAccuracyLabel', 'cornersAccuracyDetail', null);
+      setAccuracyCardValue('yellowCardsAccuracyLabel', 'yellowCardsAccuracyDetail', null);
+
+      const accuracyStatus = document.getElementById('projectionAccuracyStatus');
+      if (data.status !== 'Finalizado') {{
+        if (accuracyStatus) {{
+          accuracyStatus.textContent = 'A aderencia ao real aparece apenas em jogos finalizados.';
+        }}
+        return;
+      }}
+
+      const projection = projectionPayload && projectionPayload.projection ? projectionPayload.projection : {{}};
+      const cornersAccuracy = buildProjectionAccuracy(projection.corners, statsPayload && statsPayload.corners ? statsPayload.corners : null);
+      const yellowAccuracy = buildProjectionAccuracy(
+        projection.yellow_cards,
+        statsPayload && statsPayload.yellow_cards ? statsPayload.yellow_cards : null
+      );
+
+      setAccuracyCardValue('cornersAccuracyLabel', 'cornersAccuracyDetail', cornersAccuracy);
+      setAccuracyCardValue('yellowCardsAccuracyLabel', 'yellowCardsAccuracyDetail', yellowAccuracy);
+
+      if (!accuracyStatus) return;
+
+      const summaries = [];
+      if (cornersAccuracy) {{
+        summaries.push(`escanteios ${{cornersAccuracy.label.toLowerCase()}} (erro total ${{cornersAccuracy.totalError.toFixed(1)}})`);
+      }}
+      if (yellowAccuracy) {{
+        summaries.push(`cartoes ${{yellowAccuracy.label.toLowerCase()}} (erro total ${{yellowAccuracy.totalError.toFixed(1)}})`);
+      }}
+
+      if (summaries.length) {{
+        accuracyStatus.textContent = 'Comparacao com o real: ' + summaries.join(' | ') + '.';
+        return;
+      }}
+
+      if (!statsPayload || (!statsPayload.corners && !statsPayload.yellow_cards)) {{
+        accuracyStatus.textContent = 'Nao encontrei estatisticas reais suficientes para comparar a projecao com o jogo.';
+        return;
+      }}
+
+      accuracyStatus.textContent = projectionPayload && projectionPayload.message
+        ? projectionPayload.message
+        : 'Nao foi possivel calcular a aderencia entre projecao e real para este jogo.';
+    }}
+
+    function applyRealStatsPayload(payload, customMessage) {{
+      if (!payload || !payload.stats) return false;
+      setRealStatsCardValue('realCorners', formatRealStatPair(payload.stats.corners));
+      setRealStatsCardValue('realYellowCards', formatRealStatPair(payload.stats.yellow_cards));
+      setRealStatsCardValue('realFouls', formatRealStatPair(payload.stats.fouls));
+      setRealStatsCardValue('realPossession', formatRealStatPair(payload.stats.possession));
+
+      const status = document.getElementById('realStatsStatus');
+      if (status) {{
+        status.textContent = customMessage || payload.message || 'Estatisticas reais carregadas.';
+      }}
+
+      const sourceLink = document.getElementById('realStatsSourceLink');
+      if (sourceLink) {{
+        if (payload.source_url) {{
+          sourceLink.href = payload.source_url;
+          sourceLink.hidden = false;
+        }} else {{
+          sourceLink.hidden = true;
+          sourceLink.removeAttribute('href');
+        }}
+      }}
+      return true;
+    }}
+
+    async function loadRealMatchStats(data, requestId) {{
+      const status = document.getElementById('realStatsStatus');
+      const apiHost = window.location.hostname ? window.location.hostname : '127.0.0.1';
+      const isStreamlitCloud = apiHost.includes('streamlit.app');
+      const prefetchedRealStats = data && data.prefetched_real_stats && data.prefetched_real_stats.available
+        ? data.prefetched_real_stats
+        : null;
+
+      if (isStreamlitCloud) {{
+        resetRealStatsBlock('Estatisticas reais sob demanda ficam disponiveis apenas no ambiente local do portal.');
+        resetProjectionBlock(
+          'Medias e projecoes por time ficam disponiveis apenas no ambiente local do portal.',
+          'A comparacao com o real fica disponivel apenas no ambiente local do portal.'
+        );
+        return;
+      }}
+
+      if (prefetchedRealStats) {{
+        applyRealStatsPayload(prefetchedRealStats, 'Estatisticas reais carregadas do historico salvo no portal.');
+      }} else if (data.status === 'Finalizado' && status) {{
+        status.textContent = 'Buscando cartoes e escanteios reais do jogo...';
+      }} else {{
+        resetRealStatsBlock('Estatisticas reais do jogo ficam disponiveis apenas apos o encerramento da partida.');
+      }}
+      resetProjectionBlock(
+        'Calculando medias recentes e projecoes por time...',
+        data.status === 'Finalizado'
+          ? 'A aderencia da projecao sera calculada quando a consulta terminar.'
+          : 'A aderencia ao real aparece apenas em jogos finalizados.'
+      );
+
+      try {{
+        const response = await fetch('http://' + apiHost + ':8765/api/match-stats', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            home_team: data.home,
+            away_team: data.away,
+            status: data.status,
+            date_text: data.date_text_raw || data.date || '',
+            event_timestamp: data.event_timestamp || '',
+            home_history: buildRecentTeamHistory(data.home, data),
+            away_history: buildRecentTeamHistory(data.away, data)
+          }})
+        }});
+        const payload = await response.json();
+        if (requestId !== activeMatchStatsRequest) return;
+        if (!response.ok || !payload.ok) {{
+          throw new Error(payload.error || 'Falha ao consultar estatisticas reais.');
+        }}
+
+        let statsForAccuracy = prefetchedRealStats && prefetchedRealStats.stats ? prefetchedRealStats.stats : null;
+        if (payload.available && payload.stats) {{
+          applyRealStatsPayload(payload);
+          statsForAccuracy = payload.stats;
+        }} else if (!prefetchedRealStats) {{
+          resetRealStatsBlock(payload.message || 'Nao encontrei estatisticas reais para este jogo.');
+        }}
+
+        applyTeamProjection(data, payload.team_projection);
+        applyProjectionAccuracy(data, statsForAccuracy, payload.team_projection);
+      }} catch (error) {{
+        if (requestId !== activeMatchStatsRequest) return;
+        if (!prefetchedRealStats) {{
+          resetRealStatsBlock('Nao foi possivel carregar cartoes e escanteios reais agora.');
+        }} else if (status) {{
+          status.textContent = 'Estatisticas reais carregadas do historico salvo no portal. Nao foi possivel atualizar a consulta externa agora.';
+        }}
+        resetProjectionBlock(
+          'Nao foi possivel calcular medias recentes e projecoes por time agora.',
+          'Nao foi possivel comparar a projecao com o real agora.'
+        );
+      }}
+    }}
 
     function showMatchDetails(btn) {{
       const detailKey = btn.getAttribute('data-detail-key');
       if (!detailKey) return;
       const data = matchDetailsStore[detailKey];
       if (!data || Object.keys(data).length === 0) return;
+      activeMatchStatsRequest += 1;
       
       document.getElementById('modalTitle').textContent = data.home + ' x ' + data.away;
       const modalMeta = [];
@@ -1912,11 +2572,26 @@ def build_index_html() -> str:
       const matchModal = document.getElementById('matchModal');
       matchModal.style.display = 'block';
       positionVisibleModal('matchModal');
+      resetRealStatsBlock(
+        data.status === 'Finalizado'
+          ? 'Buscando cartoes e escanteios reais do jogo...'
+          : 'Estatisticas reais do jogo ficam disponiveis apenas apos o encerramento da partida.'
+      );
+      resetProjectionBlock(
+        'Calculando medias recentes e projecoes por time...',
+        data.status === 'Finalizado'
+          ? 'A aderencia da projecao sera calculada quando a consulta terminar.'
+          : 'A aderencia ao real aparece apenas em jogos finalizados.'
+      );
+      loadRealMatchStats(data, activeMatchStatsRequest);
       requestAnimationFrame(() => renderCharts(data));
     }}
 
     function closeMatchDetails() {{
+      activeMatchStatsRequest += 1;
       destroyCharts();
+      resetRealStatsBlock();
+      resetProjectionBlock();
       document.getElementById('matchModal').style.display = 'none';
     }}
 
@@ -2082,6 +2757,7 @@ def build_index_html() -> str:
     function resetPortalFilters() {{
       document.getElementById('fcomp').value = '';
       document.getElementById('frisk').value = 'Baixo risco';
+      document.getElementById('fdate').value = '';
       document.getElementById('fteam').value = '';
       document.getElementById('foddmin').value = '';
       document.getElementById('foddmax').value = '';
@@ -2090,6 +2766,76 @@ def build_index_html() -> str:
       document.getElementById('fbooks').value = '';
       applyRiskPreset();
       applyFilters();
+    }}
+
+    function renderDateFocusMatches() {{
+      const selectedDate = document.getElementById('fdate').value;
+      const panel = document.getElementById('dateFocusPanel');
+      const grid = document.getElementById('dateFocusGrid');
+      const empty = document.getElementById('dateFocusEmpty');
+      const title = document.getElementById('dateFocusTitle');
+      const copy = document.getElementById('dateFocusCopy');
+      const meta = document.getElementById('dateFocusMeta');
+      const competition = (document.getElementById('fcomp').value || '').trim().toLowerCase();
+      const team = (document.getElementById('fteam').value || '').trim().toLowerCase();
+
+      if (!selectedDate) {{
+        panel.hidden = true;
+        grid.innerHTML = '';
+        empty.hidden = true;
+        return;
+      }}
+
+      const matches = dateMatchCatalog
+        .filter((item) => item && item.filter_date === selectedDate)
+        .filter((item) => !competition || (item.competition || '').trim().toLowerCase() === competition)
+        .filter((item) => {{
+          if (!team) return true;
+          const haystack = `${{item.competition || ''}} ${{item.matchup || ''}} ${{item.home || ''}} ${{item.away || ''}}`.toLowerCase();
+          return haystack.includes(team);
+        }})
+        .sort((a, b) => getEventSortValue(matchDetailsStore[a.detail_key] || a) - getEventSortValue(matchDetailsStore[b.detail_key] || b));
+
+      panel.hidden = false;
+      title.textContent = 'Jogos de ' + formatSelectedDate(selectedDate);
+      copy.textContent = 'Todos os confrontos desta data aparecem aqui mesmo quando nao entram nas faixas principais de risco. Abra a analise para ver leitura, placares provaveis e contexto.';
+      meta.textContent = matches.length + (matches.length === 1 ? ' jogo reunido' : ' jogos reunidos') + ' com analise direta.';
+
+      if (!matches.length) {{
+        grid.innerHTML = '';
+        empty.hidden = false;
+        return;
+      }}
+
+      empty.hidden = true;
+      grid.innerHTML = matches.map((item) => {{
+        const detail = matchDetailsStore[item.detail_key] || {{}};
+        const probability = Number(item.model_probability || 0);
+        const tipLine = detail.tip
+          ? `Sugestao do modelo: ${{detail.tip.market}} | Odd ${{detail.tip.odd.toFixed(2)}} | EV ${{detail.tip.ev}}%`
+          : `Leitura principal: ${{item.model_result || 'Sem leitura'}}${{probability ? ' | ' + probability.toFixed(1) + '%' : ''}}`;
+        const statusLabel = item.status || 'Agendado';
+        const matchupLabel = item.matchup || ((item.home || '') + ' x ' + (item.away || ''));
+        return `
+          <article class="date-match-card">
+            <div class="date-match-top">
+              <div>
+                <span class="eyebrow">${{item.competition || 'Competicao'}}</span>
+                <strong>${{matchupLabel}}</strong>
+              </div>
+              <div class="date-match-meta">
+                <span>${{statusLabel}}</span>
+                <span>${{item.date_label || formatSelectedDate(selectedDate)}}</span>
+              </div>
+            </div>
+            <div class="date-match-note">${{item.model_risk_stage || 'Fora dos criterios'}}</div>
+            <div class="date-match-copy">${{tipLine}}</div>
+            <div class="date-match-actions">
+              <button class="btn secondary" type="button" data-detail-key="${{item.detail_key}}" onclick="showMatchDetails(this)">Abrir analise</button>
+            </div>
+          </article>
+        `;
+      }}).join('');
     }}
 
     function classifyRowsByRisk() {{
@@ -2114,6 +2860,7 @@ def build_index_html() -> str:
     function updateResultsSummary(shownCards, visibleRows) {{
       const competition = document.getElementById('fcomp').value || 'todas as competicoes';
       const risk = document.getElementById('frisk').value;
+      const selectedDate = document.getElementById('fdate').value;
       const team = (document.getElementById('fteam').value || '').trim();
       const summary = document.getElementById('resultsSummary');
       const parts = [
@@ -2122,6 +2869,7 @@ def build_index_html() -> str:
         'perfil ' + risk.toLowerCase(),
       ];
       if (team) parts.push('busca por "' + team + '"');
+      if (selectedDate) parts.push('data ' + formatSelectedDate(selectedDate));
       summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' • ') + '.';
     }}
 
@@ -2131,6 +2879,15 @@ def build_index_html() -> str:
       navLinks.forEach((link) => {{
         const linkCompetition = (link.getAttribute('data-comp-name') || '').trim().toLowerCase();
         link.classList.toggle('active', !!activeCompetition && linkCompetition === activeCompetition);
+      }});
+      const filterCards = Array.from(document.querySelectorAll('.competition-filter-card[data-comp-filter]'));
+      filterCards.forEach((card) => {{
+        const cardCompetition = (card.getAttribute('data-comp-filter') || '').trim().toLowerCase();
+        if (!activeCompetition) {{
+          card.classList.toggle('active', cardCompetition === '');
+        }} else {{
+          card.classList.toggle('active', cardCompetition === activeCompetition);
+        }}
       }});
     }}
 
@@ -2209,7 +2966,11 @@ def build_index_html() -> str:
           throw new Error(data.error || 'Falha ao atualizar os placares.');
         }}
         if (summary) {{
-          summary.textContent = 'Placares atualizados em ' + (data.updated_at || 'agora') + '. Recarregando o painel...';
+          const report = data.real_stats_report || null;
+          const statsLine = report
+            ? ' Cartoes/escanteios historicos: ' + (report.available_total || 0) + ' jogos salvos, ' + (report.saved_now || 0) + ' novos nesta atualizacao.'
+            : '';
+          summary.textContent = 'Placares atualizados em ' + (data.updated_at || 'agora') + '.' + statsLine + ' Recarregando o painel...';
         }}
         window.setTimeout(() => window.location.reload(), 700);
       }} catch (error) {{
@@ -2281,6 +3042,7 @@ def build_index_html() -> str:
 
     function applyFilters() {{
       const comp = (document.getElementById('fcomp').value || '').toLowerCase();
+      const selectedDate = document.getElementById('fdate').value || '';
       const team = (document.getElementById('fteam').value || '').toLowerCase().trim();
       const oddMinRaw = document.getElementById('foddmin').value;
       const oddMaxRaw = document.getElementById('foddmax').value;
@@ -2310,7 +3072,9 @@ def build_index_html() -> str:
         const rows = Array.from(card.querySelectorAll('tbody tr'));
         rows.forEach(row => {{
           const txt = (row.textContent || '').toLowerCase();
+          const rowDate = row.getAttribute('data-date') || '';
           const teamOk = !team || txt.includes(team);
+          const dateOk = !selectedDate || rowDate === selectedDate;
           let oddOk = true;
           const filterScope = row.getAttribute('data-filter-scope') || 'general';
           const oneOdd = row.getAttribute('data-odd');
@@ -2327,7 +3091,7 @@ def build_index_html() -> str:
             if (evMin !== null && !Number.isNaN(rowEv) && rowEv < evMin) oddOk = false;
             if (booksMin !== null && !Number.isNaN(rowBooks) && rowBooks < booksMin) oddOk = false;
           }}
-          row.style.display = teamOk && oddOk ? '' : 'none';
+          row.style.display = teamOk && oddOk && dateOk ? '' : 'none';
         }});
 
         const cardVisibleRows = rows.filter(row => row.style.display !== 'none').length;
@@ -2336,13 +3100,17 @@ def build_index_html() -> str:
       }});
 
       classifyRowsByRisk();
+      renderDateFocusMatches();
       updateResultsSummary(shownCards, visibleRows);
       updateCompetitionNavState();
     }}
 
     document.getElementById('openFilterModal').addEventListener('click', openFilterModal);
     document.getElementById('applyFilter').addEventListener('click', applyFilters);
-    document.getElementById('fcomp').addEventListener('change', applyFilters);
+    document.querySelectorAll('.competition-filter-card[data-comp-filter]').forEach((card) => {{
+      card.addEventListener('click', () => toggleCompetitionFilter(card.getAttribute('data-comp-filter') || ''));
+    }});
+    document.getElementById('fdate').addEventListener('change', applyFilters);
     document.getElementById('fteam').addEventListener('input', applyFilters);
     document.getElementById('frisk').addEventListener('change', () => {{ applyRiskPreset(); applyFilters(); }});
     document.getElementById('clearFilter').addEventListener('click', resetPortalFilters);
@@ -2419,7 +3187,7 @@ def build_index_html() -> str:
 
 def main() -> None:
     html = build_index_html()
-    with open("index.html", "w", encoding="utf-8") as f:
+    with open("dashboard.html", "w", encoding="utf-8") as f:
         f.write(html)
 
 

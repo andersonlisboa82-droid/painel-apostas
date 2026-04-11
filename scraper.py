@@ -24,6 +24,8 @@ COMPETITIONS = {
     "Brasileirao": "https://www.betexplorer.com/br/football/brazil/serie-a-betano/",
     "La Liga": "https://www.betexplorer.com/br/football/spain/laliga/",
     "Premier League": "https://www.betexplorer.com/br/football/england/premier-league/",
+    "Copa Sul-Americana": "https://www.betexplorer.com/br/football/south-america/copa-sudamericana/",
+    "Libertadores da America": "https://www.betexplorer.com/br/football/south-america/copa-libertadores/",
     "Copa do Mundo": "https://www.betexplorer.com/br/football/world/world-cup-2026/",
 }
 

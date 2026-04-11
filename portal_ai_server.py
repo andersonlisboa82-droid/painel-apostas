@@ -20,7 +20,14 @@ from analytics import calculate_match_probabilities, get_team_context, suggest_b
 from gerar_copa_mundo_html import build_world_cup_schedule_html
 from gerar_html import build_index_html
 from nvidia_client import request_nvidia_completion
-from scraper import load_all_matches
+from real_match_stats import (
+    build_projection_payload,
+    build_team_stat_profile,
+    build_team_stat_projection,
+    get_real_match_stats,
+    prefetch_finished_match_stats,
+)
+from scraper import COMPETITIONS, load_all_matches
 
 
 HOST = "0.0.0.0"
@@ -58,16 +65,28 @@ def get_cached_matches() -> pd.DataFrame:
         return frame
 
 
-def refresh_portal_snapshot() -> dict[str, str]:
+def refresh_portal_snapshot() -> dict[str, object]:
     global _matches_cache
     with _cache_lock:
         _matches_cache = None
 
-    html = build_index_html()
-    index_path = BASE_DIR / "index.html"
-    index_path.write_text(html, encoding="utf-8")
+    matches_frame = get_cached_matches()
+    real_stats_report = prefetch_finished_match_stats(
+        matches_frame,
+        competitions=list(COMPETITIONS.keys()),
+        per_competition_limit=20,
+        max_workers=6,
+        force_refresh=False,
+    )
+    competition_frames = {
+        competition: matches_frame[matches_frame["competition"] == competition].copy()
+        for competition in COMPETITIONS
+    }
+    html = build_index_html(competition_frames=competition_frames)
+    dashboard_path = BASE_DIR / "dashboard.html"
+    dashboard_path.write_text(html, encoding="utf-8")
     updated_at = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
-    return {"updated_at": updated_at, "index_path": str(index_path)}
+    return {"updated_at": updated_at, "dashboard_path": str(dashboard_path), "real_stats_report": real_stats_report}
 
 
 def refresh_copa_snapshot() -> dict[str, str]:
@@ -223,6 +242,70 @@ class PortalAIHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(exc)}, status_code=500)
                 return
             self._send_json({"ok": True, **payload})
+            return
+
+        if self.path == "/api/refresh-match-stats":
+            try:
+                matches_frame = get_cached_matches()
+                payload = prefetch_finished_match_stats(
+                    matches_frame,
+                    competitions=list(COMPETITIONS.keys()),
+                    per_competition_limit=20,
+                    max_workers=6,
+                    force_refresh=False,
+                )
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status_code=500)
+                return
+            self._send_json({"ok": True, **payload})
+            return
+
+        if self.path == "/api/match-stats":
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(raw_body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._send_json({"ok": False, "error": "JSON invalido."}, status_code=400)
+                return
+
+            home_team = str(payload.get("home_team") or "").strip()
+            away_team = str(payload.get("away_team") or "").strip()
+            status = str(payload.get("status") or "").strip()
+            date_text = str(payload.get("date_text") or "").strip()
+            event_timestamp = str(payload.get("event_timestamp") or "").strip() or None
+            home_history = payload.get("home_history") if isinstance(payload.get("home_history"), list) else None
+            away_history = payload.get("away_history") if isinstance(payload.get("away_history"), list) else None
+
+            if not home_team or not away_team:
+                self._send_json({"ok": False, "error": "Times do jogo nao informados."}, status_code=400)
+                return
+
+            try:
+                stats_payload = get_real_match_stats(
+                    home_team=home_team,
+                    away_team=away_team,
+                    status=status,
+                    date_text=date_text,
+                    event_timestamp=event_timestamp,
+                )
+                if home_history is not None and away_history is not None:
+                    home_profile = build_team_stat_profile(pd.DataFrame(home_history), home_team, event_timestamp=None)
+                    away_profile = build_team_stat_profile(pd.DataFrame(away_history), away_team, event_timestamp=None)
+                    projection_payload = build_projection_payload(home_profile, away_profile)
+                else:
+                    matches_frame = get_cached_matches()
+                    projection_payload = build_team_stat_projection(
+                        matches_df=matches_frame,
+                        home_team=home_team,
+                        away_team=away_team,
+                        event_timestamp=event_timestamp,
+                    )
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status_code=500)
+                return
+
+            self._send_json({"ok": True, **stats_payload, "team_projection": projection_payload})
             return
 
         if self.path != "/api/ai-analysis":

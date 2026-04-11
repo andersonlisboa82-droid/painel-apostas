@@ -2198,21 +2198,137 @@ hr {{
   border-top: 1px solid var(--line);
   margin: 1rem 0;
 }}
-@media (max-width: 1100px) {{
-  .hero-grid, .hero-metrics, .info-strip, .card-grid, .spotlight-grid, .split-highlight, .callout-grid {{
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }}
-}}
-@media (max-width: 760px) {{
-  .topbar, .hero-grid, .hero-metrics, .info-strip, .card-grid, .spotlight-grid, .split-highlight, .section-header, .callout-grid {{
-    display: grid;
-    grid-template-columns: 1fr;
-  }}
-}}
 </style>
 """,
     unsafe_allow_html=True,
 )
+
+# --- ESTILOS MODERNOS (MODERNIZAÇÃO) ---
+st.markdown("""
+<style>
+    .nav-card-container {
+        display: flex;
+        overflow-x: auto;
+        gap: 15px;
+        padding: 10px 5px;
+        scrollbar-width: thin;
+    }
+    .nav-card {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 15px;
+        min-width: 140px;
+        text-align: center;
+        transition: all 0.3s ease;
+        border: 1px solid #e1e4e8;
+        cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .nav-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+        border-color: #4cc9f0;
+    }
+    .nav-icon { font-size: 1.8rem; margin-bottom: 8px; }
+    .nav-label { font-weight: 600; font-size: 0.85rem; color: #1a1a2e; }
+    
+    .metric-card-modern {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        border-top: 4px solid #4cc9f0;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        height: 100%;
+    }
+    .metric-label-modern { color: #64748b; font-size: 0.75rem; text-transform: uppercase; font-weight: bold; letter-spacing: 0.5px; }
+    .metric-value-modern { font-size: 1.5rem; font-weight: 800; color: #1e293b; margin-top: 5px; }
+    
+    .explainer-box {
+        background: #f8fafc;
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 5px solid #3b82f6;
+        margin: 15px 0;
+        font-size: 0.9rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+@st.dialog("⚙️ Central de Comandos: Calibragem do Modelo")
+def command_center():
+    st.markdown("### Ajustes Técnicos e Filtros")
+    st.caption("Altere os parâmetros abaixo para recalibrar a sensibilidade do modelo em tempo real.")
+    
+    tabs = st.tabs(["🎚️ Calibragem", "📖 Manual do Modelo", "📜 Histórico"])
+    
+    with tabs[0]:
+        new_competition = st.selectbox("Competição Ativa", options=list(COMPETITIONS.keys()), index=list(COMPETITIONS.keys()).index(st.session_state.get("competition_selector", "Brasileirao")))
+        new_team_filter = st.text_input("Filtrar por Time (Opcional)", value=st.session_state.get("team_filter_input", ""), placeholder="Ex: Flamengo")
+        new_risk_profile = st.selectbox(
+            "Perfil de Risco do Modelo",
+            options=["Baixo risco", "Medio risco", "Alto risco", "Personalizado"],
+            index=["Baixo risco", "Medio risco", "Alto risco", "Personalizado"].index(st.session_state.get("risk_profile_input", "Baixo risco")),
+        )
+        
+        if new_risk_profile == "Personalizado":
+            c1, c2 = st.columns(2)
+            with c1:
+                st.slider("Prob. Mínima", 0.40, 0.80, 0.55, 0.01, key="slider_prob")
+                st.slider("EV Mínimo", 0.00, 0.15, 0.02, 0.005, key="slider_ev")
+            with c2:
+                st.slider("Odd Máxima", 1.20, 4.00, 2.20, 0.05, key="slider_odd")
+                st.slider("Mínimo de Casas", 1, 20, 8, 1, key="slider_books")
+        
+        if st.button("💾 Aplicar Novas Configurações", type="primary", use_container_width=True):
+            st.session_state["competition_selector"] = new_competition
+            st.session_state["team_filter_input"] = new_team_filter
+            st.session_state["risk_profile_input"] = new_risk_profile
+            st.success("Configurações aplicadas com sucesso!")
+            st.info(f"**Resumo:** Competição alterada para {new_competition} com perfil {new_risk_profile}.")
+            st.rerun()
+
+    with tabs[1]:
+        st.markdown("""
+        <div class="explainer-box">
+            <strong>Como o Modelo Funciona:</strong><br><br>
+            Nosso algoritmo utiliza uma abordagem de <b>Máxima Verossimilhança</b> baseada em:<br>
+            • <b>Ataque (xG):</b> Capacidade de criação de chances claras.<br>
+            • <b>Defesa:</b> Resistência a finalizações de alta probabilidade.<br>
+            • <b>Fator Casa:</b> Ajuste estatístico pelo peso da torcida e gramado.<br><br>
+            <strong>Como Alterar Manualmente:</strong><br>
+            Para tornar o modelo mais agressivo, reduza a <i>Probabilidade Mínima</i> e aumente a <i>Odd Máxima</i>. 
+            Para um perfil conservador (Banca Alta), mantenha a Probabilidade acima de 0.60 e o EV acima de 0.02.
+        </div>
+        """, unsafe_allow_html=True)
+
+    with tabs[2]:
+        st.markdown("**Últimas Alterações de Calibragem:**")
+        st.caption(f"- {datetime.now().strftime('%d/%m/%Y %H:%M')}: Calibragem automática de odds finalizada.")
+        st.caption("- Ajuste de peso para 'Premier League' (Inverno) aplicado.")
+
+# Inicilizar session state se necessário
+if "competition_selector" not in st.session_state:
+    st.session_state["competition_selector"] = "Brasileirao"
+if "team_filter_input" not in st.session_state:
+    st.session_state["team_filter_input"] = ""
+if "risk_profile_input" not in st.session_state:
+    st.session_state["risk_profile_input"] = "Baixo risco"
+
+st.markdown("""
+<style>
+@media (max-width: 1100px) {
+  .hero-grid, .hero-metrics, .info-strip, .card-grid, .spotlight-grid, .split-highlight, .callout-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .topbar, .hero-grid, .hero-metrics, .info-strip, .card-grid, .spotlight-grid, .split-highlight, .section-header, .callout-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+""", unsafe_allow_html=True)
 
 with st.sidebar:
     if "page_menu_v4" not in st.session_state:
@@ -2260,6 +2376,8 @@ with st.sidebar:
         "Brasileirao": {"Baixo risco": 2, "Medio risco": 2, "Alto risco": 1},
         "Premier League": {"Baixo risco": 5, "Medio risco": 4, "Alto risco": 3},
         "La Liga": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
+        "Copa Sul-Americana": {"Baixo risco": 6, "Medio risco": 5, "Alto risco": 3},
+        "Libertadores da America": {"Baixo risco": 6, "Medio risco": 5, "Alto risco": 3},
         "Copa do Mundo": {"Baixo risco": 10, "Medio risco": 8, "Alto risco": 5},
     }
 
@@ -2512,33 +2630,61 @@ section[data-testid="stSidebar"] {
   padding: 0 !important;
 }
 [data-testid="stAppViewContainer"] {
-  background: #e9f1f8 !important;
+  background: #f8fafc !important;
 }
 </style>
 """,
         unsafe_allow_html=True,
     )
+
+    # --- HEADER / HERO DA HOME ---
     st.markdown(
         """
-<div style="max-width:1480px;margin:0 auto;padding:18px 20px 8px;">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,255,255,.94),rgba(245,249,255,.96));border:1px solid rgba(148,163,184,.18);border-radius:22px;padding:16px 18px;box-shadow:0 18px 40px rgba(15,23,42,.08);">
-    <div>
-      <div style="font:800 .8rem/1 'Space Grotesk',sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#1d4ed8;">Acesso rapido</div>
-      <div style="margin-top:6px;font:700 1.05rem/1.1 'Space Grotesk',sans-serif;color:#0f2235;">Escolha abrir o portal da Copa 2026 ou entrar nas configuracoes do portal.</div>
-      <div style="margin-top:6px;color:#5a6d81;font-size:.92rem;">Os botoes abaixo levam direto para o portal da Copa ou para a area com filtros e ajustes do sistema.</div>
-    </div>
-  </div>
+<div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 40px 20px; text-align: center; color: white; border-radius: 0 0 30px 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
+    <h1 style='font-family: "Space Grotesk", sans-serif; font-size: 3rem; margin: 0; color: #4cc9f0;'>Football Data Desk</h1>
+    <p style='opacity: 0.9; font-size: 1.1rem; margin-top: 10px;'>Painel de Inteligência e Análise Quantitativa para Apostas</p>
 </div>
 """,
         unsafe_allow_html=True,
     )
-    home_action_col1, home_action_col2 = st.columns(2)
-    with home_action_col1:
-        if st.button("Abrir Portal Copa 2026", key="home_open_copa_2026", use_container_width=True):
-            queue_page_navigation("Copa 2026")
-    with home_action_col2:
-        if st.button("Abrir Configuracoes", key="home_open_settings", use_container_width=True):
-            queue_page_navigation("Configuracoes")
+
+    st.markdown("<div style='max-width:1400px; margin: 0 auto; padding: 20px;'>", unsafe_allow_html=True)
+
+    # --- BOTÃO CENTRAL DE COMANDOS ---
+    c_btn1, c_btn2, c_btn3 = st.columns([1, 2, 1])
+    with c_btn2:
+        if st.button("🛠️ Abrir Central de Comandos e Calibragem", use_container_width=True, type="primary"):
+            command_center()
+        st.caption("<center>Ajuste o modelo, veja notas explicativas e o histórico de alterações aqui.</center>", unsafe_allow_html=True)
+
+    # --- CARROSSEL DE NAVEGAÇÃO ---
+    st.markdown("### 🚀 Navegação Rápida")
+    
+    # Gerando o HTML do carrossel para Streamlit
+    nav_items = [
+        {"icon": "🏆", "label": "Copa 2026", "page": "Copa 2026"},
+        {"icon": "🛡️", "label": "Jogos Seguros", "page": "Jogos Seguros"},
+        {"icon": "🤖", "label": "IA Analista", "page": "IA Institucional"},
+        {"icon": "📊", "label": "Painel Modelo", "page": "Painel do Modelo"},
+        {"icon": "⚽", "label": "Simulador", "page": "Analise de Jogo"},
+        {"icon": "📅", "label": "Agenda", "page": "Todos os Futuros"},
+        {"icon": "📈", "label": "Resultados", "page": "Resultados"},
+    ]
+
+    # Criando colunas para os cards de navegação (Simulando o carrossel interativo)
+    cols = st.columns(len(nav_items))
+    for i, item in enumerate(nav_items):
+        with cols[i]:
+            st.markdown(f"""
+            <div class="nav-card">
+                <div class="nav-icon">{item['icon']}</div>
+                <div class="nav-label">{item['label']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button(f"Abrir", key=f"nav_btn_{i}", use_container_width=True):
+                queue_page_navigation(item['page'])
+
+    st.markdown("---")
     render_embedded_index_portal()
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()

@@ -3332,8 +3332,74 @@ def build_world_cup_html() -> str:
     return build_world_cup_schedule_html()
 
 
+TEAM_PT_BR_NAMES_REPLACE = {
+    "Mexico": "México", "México": "México", "Sudáfrica": "África do Sul", "South Africa": "África do Sul",
+    "South Korea": "Coreia do Sul", "República de Corea": "Coreia do Sul", "Corea del Sur": "Coreia do Sul",
+    "Czechia": "República Tcheca", "Chequia": "República Tcheca",
+    "Canada": "Canadá", "Canadá": "Canadá",
+    "Bosnia and Herzegovina": "Bósnia", "Bosnia y Herzegovina": "Bósnia",
+    "USA": "Estados Unidos", "Estados Unidos": "Estados Unidos",
+    "Paraguay": "Paraguai", "Paraguay": "Paraguai",
+    "Qatar": "Catar", "Catar": "Catar",
+    "Switzerland": "Suíça", "Suiza": "Suíça",
+    "Brazil": "Brasil", "Brasil": "Brasil",
+    "Morocco": "Marrocos", "Marruecos": "Marrocos",
+    "Haiti": "Haiti",
+    "Scotland": "Escócia", "Escocia": "Escócia",
+    "Australia": "Austrália", "Australia": "Austrália",
+    "Turkey": "Turquia", "Turquía": "Turquia", "Turquia": "Turquia",
+    "Germany": "Alemanha", "Alemania": "Alemanha",
+    "Curacao": "Curaçao", "Curazao": "Curaçao",
+    "Netherlands": "Holanda", "Países Bajos": "Holanda", "Paises Bajos": "Holanda",
+    "Japan": "Japão", "Japón": "Japão", "Japon": "Japão",
+    "Ivory Coast": "Costa do Marfim", "Costa de Marfil": "Costa do Marfim",
+    "Ecuador": "Equador",
+    "Sweden": "Suécia", "Suecia": "Suécia",
+    "Tunisia": "Tunísia", "Túnez": "Tunísia", "Tunez": "Tunísia",
+    "Spain": "Espanha", "España": "Espanha", "Espana": "Espanha",
+    "Cape Verde": "Cabo Verde",
+    "Belgium": "Bélgica", "Bélgica": "Bélgica", "Belgica": "Bélgica",
+    "Egypt": "Egito", "Egipto": "Egito",
+    "Saudi Arabia": "Arábia Saudita", "Arabia Saudita": "Arábia Saudita",
+    "Uruguay": "Uruguai",
+    "Iran": "Irã", "Irán": "Irã", "Iran": "Irã",
+    "New Zealand": "Nova Zelândia", "Nueva Zelanda": "Nova Zelândia",
+    "France": "França", "Francia": "França",
+    "Senegal": "Senegal",
+    "Iraq": "Iraque", "Irak": "Iraque",
+    "Norway": "Noruega",
+    "Argentina": "Argentina",
+    "Algeria": "Argélia", "Argelia": "Argélia",
+    "Austria": "Áustria", "Austria": "Áustria",
+    "Jordan": "Jordânia", "Jordania": "Jordânia",
+    "Portugal": "Portugal",
+    "D.R. Congo": "RD Congo", "RD del Congo": "RD Congo",
+    "England": "Inglaterra",
+    "Croatia": "Croácia", "Croacia": "Croácia",
+    "Ghana": "Gana",
+    "Panama": "Panamá", "Panamá": "Panamá", "Panama": "Panamá",
+    "Uzbekistan": "Uzbequistão", "Uzbekistán": "Uzbequistão", "Uzbekistan": "Uzbequistão",
+    "Colombia": "Colômbia", "Colombia": "Colômbia",
+    "Suriname": "Suriname",
+    "Bolivia": "Bolívia", "Bolivia": "Bolívia",
+    "Jamaica": "Jamaica",
+    "New Caledonia": "Nova Caledônia"
+}
+
+def apply_team_translations(html: str) -> str:
+    # Sort keys by length descending to replace longer phrases first
+    import re
+    sorted_keys = sorted(TEAM_PT_BR_NAMES_REPLACE.keys(), key=len, reverse=True)
+    for k in sorted_keys:
+        val = TEAM_PT_BR_NAMES_REPLACE[k]
+        if k != val:
+            # We use regex to only match whole words so "Panama" doesnt match inside another word if available
+            html = re.sub(r'(?<![A-Za-z0-9_])' + re.escape(k) + r'(?![A-Za-z0-9_])', val, html)
+    return html
+
 def main() -> None:
     html = build_world_cup_schedule_html()
+    html = apply_team_translations(html)
     OUTPUT_FILE.write_text(html, encoding="utf-8")
     print(str(OUTPUT_FILE))
 
