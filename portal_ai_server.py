@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sys
@@ -83,7 +83,7 @@ def refresh_portal_snapshot() -> dict[str, object]:
         for competition in COMPETITIONS
     }
     html = build_index_html(competition_frames=competition_frames)
-    dashboard_path = BASE_DIR / "dashboard.html"
+    dashboard_path = BASE_DIR / "index.html"
     dashboard_path.write_text(html, encoding="utf-8")
     updated_at = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
     return {"updated_at": updated_at, "dashboard_path": str(dashboard_path), "real_stats_report": real_stats_report}
@@ -189,7 +189,7 @@ def run_ai_analysis(prompt: str, selected_date: date) -> str:
         f"DADOS DISPONIVEIS NO PORTAL PARA {selected_date.strftime('%d/%m/%Y')}:\n"
         f"{match_context}\n\n"
         "Entregue a analise final organizada, com as melhores oportunidades do dia, "
-        "sem inventar escalações, lesoes, xG externo ou movimentos de odds que nao estejam presentes na base."
+        "sem inventar escalaÃ§Ãµes, lesoes, xG externo ou movimentos de odds que nao estejam presentes na base."
     )
     return request_nvidia_completion(
         [
@@ -355,3 +355,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

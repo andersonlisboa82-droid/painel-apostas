@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from html import escape
@@ -955,7 +955,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             f"<button class=\"competition-filter-card\" type=\"button\" data-comp-filter=\"{escape(str(item['name']))}\">"
             f"<strong>{escape(str(item['name']))}</strong>"
             f"<span>{int(item['fixtures'])} jogos futuros</span>"
-            f"<small>{int(item['safe'])} seguros • {int(item['fixtures_valid'])} com odds</small>"
+            f"<small>{int(item['safe'])} seguros â€¢ {int(item['fixtures_valid'])} com odds</small>"
             "</button>"
         )
         for item in competition_stats
@@ -1970,7 +1970,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           <div id="modalDate" class="eyebrow">00/00/0000</div>
           <h2 id="modalTitle">Time A vs Time B</h2>
         </div>
-        <button class="modal-close" onclick="closeMatchDetails()">×</button>
+        <button class="modal-close" onclick="closeMatchDetails()">Ã—</button>
       </div>
       <div class="modal-body">
         <div class="modal-grid">
@@ -2099,7 +2099,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           <h2>Configurar painel</h2>
           <p class="copy">Ajuste a leitura do portal sem deixar esses controles ocupando a tela principal.</p>
         </div>
-        <button class="modal-close" type="button" onclick="closeFilterModal()">×</button>
+        <button class="modal-close" type="button" onclick="closeFilterModal()">Ã—</button>
       </div>
       <div class="modal-body">
         <div class="competition-filter-shell">
@@ -2144,7 +2144,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           <h2>Prompt institucional</h2>
           <p class="copy">Edite o briefing completo, atualize a data quando precisar e execute a leitura sem poluir a tela principal.</p>
         </div>
-        <button class="modal-close" type="button" onclick="closeAiPromptModal()">×</button>
+        <button class="modal-close" type="button" onclick="closeAiPromptModal()">Ã—</button>
       </div>
       <div class="modal-body">
         <div class="ai-module-side">
@@ -2534,7 +2534,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (data.status) modalMeta.push(data.status);
       if (data.date) modalMeta.push(data.date);
       if (data.final_score) modalMeta.push('Placar ' + data.final_score);
-      document.getElementById('modalDate').textContent = modalMeta.join(' • ');
+      document.getElementById('modalDate').textContent = modalMeta.join(' â€¢ ');
       
       const stratBox = document.getElementById('strategyBox');
       if (data.tip) {{
@@ -2870,7 +2870,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       ];
       if (team) parts.push('busca por "' + team + '"');
       if (selectedDate) parts.push('data ' + formatSelectedDate(selectedDate));
-      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' • ') + '.';
+      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' â€¢ ') + '.';
     }}
 
     function updateCompetitionNavState() {{
@@ -3187,9 +3187,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
 def main() -> None:
     html = build_index_html()
-    with open("dashboard.html", "w", encoding="utf-8") as f:
+    with open("index.html", "w", encoding="utf-8") as f:
         f.write(html)
 
 
 if __name__ == "__main__":
     main()
+
