@@ -955,7 +955,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             f"<button class=\"competition-filter-card\" type=\"button\" data-comp-filter=\"{escape(str(item['name']))}\">"
             f"<strong>{escape(str(item['name']))}</strong>"
             f"<span>{int(item['fixtures'])} jogos futuros</span>"
-            f"<small>{int(item['safe'])} seguros â€¢ {int(item['fixtures_valid'])} com odds</small>"
+            f"<small>{int(item['safe'])} seguros • {int(item['fixtures_valid'])} com odds</small>"
             "</button>"
         )
         for item in competition_stats
@@ -2534,7 +2534,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (data.status) modalMeta.push(data.status);
       if (data.date) modalMeta.push(data.date);
       if (data.final_score) modalMeta.push('Placar ' + data.final_score);
-      document.getElementById('modalDate').textContent = modalMeta.join(' â€¢ ');
+      document.getElementById('modalDate').textContent = modalMeta.join(' • ');
       
       const stratBox = document.getElementById('strategyBox');
       if (data.tip) {{
@@ -2870,7 +2870,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       ];
       if (team) parts.push('busca por "' + team + '"');
       if (selectedDate) parts.push('data ' + formatSelectedDate(selectedDate));
-      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' â€¢ ') + '.';
+      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' • ') + '.';
     }}
 
     function updateCompetitionNavState() {{
