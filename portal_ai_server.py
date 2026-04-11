@@ -189,7 +189,7 @@ def run_ai_analysis(prompt: str, selected_date: date) -> str:
         f"DADOS DISPONIVEIS NO PORTAL PARA {selected_date.strftime('%d/%m/%Y')}:\n"
         f"{match_context}\n\n"
         "Entregue a analise final organizada, com as melhores oportunidades do dia, "
-        "sem inventar escalaÃ§Ãµes, lesoes, xG externo ou movimentos de odds que nao estejam presentes na base."
+        "sem inventar escalações, lesoes, xG externo ou movimentos de odds que nao estejam presentes na base."
     )
     return request_nvidia_completion(
         [

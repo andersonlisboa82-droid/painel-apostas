@@ -25,7 +25,7 @@ from scraper import COMPETITIONS, load_competition_matches
 
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
-PORTAL_RELEASE_LABEL = "09/04/2026 | v2-modern-canvas"
+PORTAL_RELEASE_LABEL = "11/04/2026 | v2-modern-canvas"
 
 AI_PROMPT_TEMPLATE = """Atue como um analista quantitativo profissional de futebol especializado em modelagem estatistica, leitura de mercado e identificacao de value bets (+EV), com abordagem semelhante a analistas de apostas institucionais.
 
