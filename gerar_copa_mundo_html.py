@@ -1498,6 +1498,16 @@ def build_world_cup_html() -> str:
     searchInput.addEventListener('input', applyFilters);
     applyFilters();
 
+    function reloadPortalShell() {{
+      try {{
+        if (window.top && window.top !== window) {{
+          window.top.location.reload();
+          return;
+        }}
+      }} catch (error) {{}}
+      location.reload();
+    }}
+
     async function refreshCopa(btn) {{
       btn.disabled = true;
       const originalHtml = btn.innerHTML;
@@ -1508,7 +1518,7 @@ def build_world_cup_html() -> str:
         const data = await res.json();
         if (data.ok) {{
           showToast("Painel atualizado com sucesso! Recarregando...", "ok");
-          setTimeout(() => location.reload(), 1500);
+          setTimeout(() => reloadPortalShell(), 1500);
         }} else {{
           showToast("Erro: " + (data.error || "Falha ao atualizar."), "err");
           btn.disabled = false;
@@ -3241,6 +3251,16 @@ def build_world_cup_schedule_html() -> str:
   </main>
   <div id="updateToast" class="update-toast"></div>
   <script>
+    function reloadPortalShell() {{
+      try {{
+        if (window.top && window.top !== window) {{
+          window.top.location.reload();
+          return;
+        }}
+      }} catch (error) {{}}
+      location.reload();
+    }}
+
     async function refreshCopa(btn) {{
       btn.disabled = true;
       const originalHtml = btn.innerHTML;
@@ -3251,7 +3271,7 @@ def build_world_cup_schedule_html() -> str:
         const data = await res.json();
         if (data.ok) {{
           showToast("Painel atualizado com sucesso! Recarregando...", "ok");
-          setTimeout(() => location.reload(), 1500);
+          setTimeout(() => reloadPortalShell(), 1500);
         }} else {{
           showToast("Erro: " + (data.error || "Falha ao atualizar."), "err");
           btn.disabled = false;

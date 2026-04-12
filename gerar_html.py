@@ -2449,7 +2449,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
     async function loadRealMatchStats(data, requestId) {{
       const status = document.getElementById('realStatsStatus');
-      const apiHost = window.location.hostname ? window.location.hostname : '127.0.0.1';
+      const apiHost = resolvePortalHost();
       const isStreamlitCloud = apiHost.includes('streamlit.app');
       const prefetchedRealStats = data && data.prefetched_real_stats && data.prefetched_real_stats.available
         ? data.prefetched_real_stats
@@ -2936,9 +2936,32 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       }});
     }}
 
+    function resolvePortalHost() {{
+      try {{
+        if (window.location && window.location.hostname) return window.location.hostname;
+      }} catch (error) {{}}
+      try {{
+        if (window.top && window.top.location && window.top.location.hostname) return window.top.location.hostname;
+      }} catch (error) {{}}
+      try {{
+        if (window.parent && window.parent.location && window.parent.location.hostname) return window.parent.location.hostname;
+      }} catch (error) {{}}
+      return '127.0.0.1';
+    }}
+
+    function reloadPortalShell() {{
+      try {{
+        if (window.top && window.top !== window) {{
+          window.top.location.reload();
+          return;
+        }}
+      }} catch (error) {{}}
+      window.location.reload();
+    }}
+
     async function refreshPortalData() {{
       const summary = document.getElementById('resultsSummary');
-      const apiHost = window.location.hostname ? window.location.hostname : '127.0.0.1';
+      const apiHost = resolvePortalHost();
       const isStreamlitCloud = apiHost.includes('streamlit.app');
       const isStaticPortal = window.location.port === '8000' || window.location.pathname.toLowerCase().endsWith('/index.html');
 
@@ -2950,7 +2973,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         if (summary) {{
           summary.textContent = 'Recarregando o app publicado para buscar os placares mais recentes.';
         }}
-        window.location.reload();
+        reloadPortalShell();
         return;
       }}
 
@@ -2972,14 +2995,14 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             : '';
           summary.textContent = 'Placares atualizados em ' + (data.updated_at || 'agora') + '.' + statsLine + ' Recarregando o painel...';
         }}
-        window.setTimeout(() => window.location.reload(), 700);
+        window.setTimeout(() => reloadPortalShell(), 700);
       }} catch (error) {{
         const message = error && error.message ? error.message : 'falha desconhecida.';
         if (summary) {{
           summary.textContent = 'Nao foi possivel atualizar os placares: ' + message;
         }}
         if (!isStaticPortal) {{
-          window.setTimeout(() => window.location.reload(), 700);
+          window.setTimeout(() => reloadPortalShell(), 700);
         }}
       }} finally {{
         window.setTimeout(() => setRefreshButtonsLoading(false), 150);
@@ -3005,7 +3028,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const promptArea = document.getElementById('aiPromptArea');
       const status = document.getElementById('aiPromptStatus');
       const responseBox = document.getElementById('aiResponse');
-      const apiHost = window.location.hostname ? window.location.hostname : '127.0.0.1';
+      const apiHost = resolvePortalHost();
       const isStreamlitCloud = apiHost.includes('streamlit.app');
       if (!selectedDate) {{
         status.textContent = 'Selecione uma data antes de executar a leitura.';
@@ -3118,8 +3141,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     document.getElementById('refreshPortalData').addEventListener('click', refreshPortalData);
     document.getElementById('refreshPortalLauncher').addEventListener('click', refreshPortalData);
     document.getElementById('quickRefresh').addEventListener('click', refreshPortalData);
-    document.getElementById('reloadPage').addEventListener('click', () => {{ window.location.reload(); }});
-    document.getElementById('reloadPageLauncher').addEventListener('click', () => {{ window.location.reload(); }});
+    document.getElementById('reloadPage').addEventListener('click', reloadPortalShell);
+    document.getElementById('reloadPageLauncher').addEventListener('click', reloadPortalShell);
     document.getElementById('openAiPromptModal').addEventListener('click', openAiPromptModal);
     document.getElementById('modalUpdateAiPrompt').addEventListener('click', updateAiPrompt);
     document.getElementById('modalCopyAiPrompt').addEventListener('click', copyAiPrompt);

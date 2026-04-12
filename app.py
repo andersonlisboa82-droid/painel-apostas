@@ -2,7 +2,9 @@
 
 import json
 import os
+import socket
 import sys
+import threading
 import time
 from datetime import date, datetime
 from html import escape
@@ -81,6 +83,53 @@ NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
 INDEX_HTML_FILE = APP_DIR / "index.html"
 WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
+
+
+def _is_port_open(host: str, port: int, *, timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+@st.cache_resource(show_spinner=False)
+def _ensure_portal_ai_server_thread() -> bool:
+    """Starta o servidor local (8765) uma vez por processo (necessario para o HTML embutido)."""
+    if _is_port_open("127.0.0.1", 8765):
+        return True
+
+    try:
+        import portal_ai_server
+
+        thread = threading.Thread(
+            target=portal_ai_server.main,
+            daemon=True,
+            name="portal-ai-server",
+        )
+        thread.start()
+    except Exception:
+        return False
+
+    for _ in range(25):
+        if _is_port_open("127.0.0.1", 8765):
+            return True
+        time.sleep(0.08)
+
+    return False
+
+
+def ensure_portal_ai_server_running() -> None:
+    if _is_port_open("127.0.0.1", 8765):
+        return
+
+    started = _ensure_portal_ai_server_thread()
+    if not started:
+        st.warning(
+            "O Portal AI server (porta 8765) nao esta ativo. "
+            "O botao 'Atualizar placares' do portal HTML pode falhar. "
+            "Se quiser, rode `python portal_ai_server.py` em outro terminal."
+        )
 
 
 def _build_match_detail_data(row_data: pd.Series, matches_df: pd.DataFrame) -> dict[str, object]:
@@ -735,6 +784,7 @@ def render_callout_grid(items: list[dict[str, str]]) -> None:
 
 
 def render_embedded_index_portal() -> None:
+    ensure_portal_ai_server_running()
     components.html(_load_index_portal_html(), height=1200, scrolling=True)
 
 
@@ -763,6 +813,7 @@ def _load_world_cup_portal_html() -> str:
 
 
 def render_embedded_world_cup_portal() -> None:
+    ensure_portal_ai_server_running()
     components.html(_load_world_cup_portal_html(), height=1200, scrolling=True)
 
 
