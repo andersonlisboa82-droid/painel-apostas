@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import importlib
 import os
 import socket
 import sys
@@ -9,6 +10,7 @@ import time
 from datetime import date, datetime
 from html import escape
 from pathlib import Path
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -22,7 +24,6 @@ if str(APP_DIR) not in sys.path:
 
 from gerar_copa_mundo_html import build_world_cup_schedule_html
 from gerar_html import AI_PROMPT_TEMPLATE, build_index_html
-from portal_ai_server import refresh_portal_snapshot_with_progress, run_ai_analysis
 from analytics import (
     build_backtest_table,
     build_hedge_scenarios,
@@ -37,6 +38,40 @@ from analytics import (
     summarize_backtest,
 )
 from scraper import COMPETITIONS, load_competition_matches
+
+
+_PORTAL_AI_IMPORT_ERROR: Exception | None = None
+
+
+def _load_portal_ai_functions() -> tuple[Callable[..., object], Callable[..., str]]:
+    global _PORTAL_AI_IMPORT_ERROR
+    try:
+        portal_ai_server = importlib.import_module("portal_ai_server")
+    except Exception as exc:
+        _PORTAL_AI_IMPORT_ERROR = exc
+        raise RuntimeError(
+            "Nao foi possivel importar o modulo `portal_ai_server`. "
+            "Confirme se o arquivo existe no mesmo diretorio do app e sem erros de sintaxe."
+        ) from exc
+
+    refresh_fn = getattr(portal_ai_server, "refresh_portal_snapshot_with_progress", None)
+    analysis_fn = getattr(portal_ai_server, "run_ai_analysis", None)
+    if not callable(refresh_fn) or not callable(analysis_fn):
+        raise RuntimeError(
+            "O modulo `portal_ai_server` foi carregado, mas as funcoes "
+            "`refresh_portal_snapshot_with_progress` e/ou `run_ai_analysis` nao foram encontradas."
+        )
+    return refresh_fn, analysis_fn
+
+
+def refresh_portal_snapshot_with_progress(*args, **kwargs):
+    refresh_fn, _ = _load_portal_ai_functions()
+    return refresh_fn(*args, **kwargs)
+
+
+def run_ai_analysis(*args, **kwargs):
+    _, analysis_fn = _load_portal_ai_functions()
+    return analysis_fn(*args, **kwargs)
 
 st.set_page_config(page_title="Sistema Apostas Futebol", layout="wide")
 
