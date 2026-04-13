@@ -161,11 +161,10 @@ def _convert_source_datetime_to_target_parts(text: str) -> tuple[str, str | None
     relative_no_time = re.fullmatch(r"(hoje|ontem|amanha)", ascii_clean)
     if relative_no_time:
         label = relative_no_time.group(1)
-        source_now = datetime.now(SOURCE_TIMEZONE)
         offset_days = {"ontem": -1, "hoje": 0, "amanha": 1}[label]
-        source_date = source_now.date().fromordinal(source_now.date().toordinal() + offset_days)
-        source_dt = datetime.combine(source_date, dt_time(hour=12, minute=0), tzinfo=SOURCE_TIMEZONE)
-        target_dt = source_dt.astimezone(TARGET_TIMEZONE)
+        target_now = datetime.now(TARGET_TIMEZONE)
+        target_date = target_now.date().fromordinal(target_now.date().toordinal() + offset_days)
+        target_dt = datetime.combine(target_date, dt_time(hour=12, minute=0), tzinfo=TARGET_TIMEZONE)
         return _format_target_datetime(target_dt, include_time=False), target_dt.isoformat()
 
     full_match = re.fullmatch(r"(\d{2})\.(\d{2})\.\s+(\d{2}):(\d{2})", clean)

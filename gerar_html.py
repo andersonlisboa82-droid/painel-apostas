@@ -845,7 +845,7 @@ def _build_competition_section(
         </div>
       </div>
     </div>
-    <div class="table-wrap">
+    <div class="table-wrap table-wrap-match-list">
       <table>
         <thead><tr><th>Data</th><th>Mandante</th><th>Visitante</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Casas</th><th>Acao</th></tr></thead>
         <tbody>{''.join(rows_html) if rows_html else '<tr><td colspan="8">Sem jogos futuros.</td></tr>'}</tbody>
@@ -868,7 +868,7 @@ def _build_competition_section(
         </div>
       </div>
     </div>
-    <div class="table-wrap">
+    <div class="table-wrap table-wrap-match-list">
       <table>
         <thead><tr><th>Data</th><th>Mandante</th><th>Placar</th><th>Visitante</th><th>Leitura modelo</th><th>Prob. Modelo</th><th>Acerto</th><th>Odd Casa</th><th>Odd Empate</th><th>Odd Fora</th><th>Acao</th></tr></thead>
         <tbody>{''.join(finished_rows) if finished_rows else '<tr><td colspan="11">Sem jogos finalizados.</td></tr>'}</tbody>
@@ -1567,6 +1567,24 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       box-shadow: 0 0 0 4px rgba(29,78,216,.08);
     }}
     .table-wrap {{ overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: #fff; }}
+    .table-wrap-match-list {{
+      max-height: 520px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148,163,184,.9) rgba(241,245,249,.9);
+    }}
+    .table-wrap-match-list::-webkit-scrollbar {{
+      width: 10px;
+      height: 10px;
+    }}
+    .table-wrap-match-list::-webkit-scrollbar-track {{
+      background: rgba(241,245,249,.9);
+    }}
+    .table-wrap-match-list::-webkit-scrollbar-thumb {{
+      background: rgba(148,163,184,.9);
+      border-radius: 999px;
+      border: 2px solid rgba(241,245,249,.9);
+    }}
     table {{ width: 100%; min-width: 780px; border-collapse: collapse; background: #fff; }}
     th, td {{ border-bottom: 1px solid #e8edf4; padding: 11px 12px; text-align: left; font-size: 13px; line-height: 1.5; }}
     th {{ position: sticky; top: 0; background: #eff6ff; color: #14324f; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }}
@@ -1783,6 +1801,161 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     .btn-float:hover {{ transform: scale(1.1); }}
     .btn-float svg {{ width: 24px; height: 24px; fill: currentColor; }}
     .btn-float.loading svg {{ animation: spin-refresh 1s linear infinite; }}
+    .refresh-overlay {{
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(8,22,37,.58);
+      backdrop-filter: blur(8px);
+      z-index: 3500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .22s ease;
+    }}
+    .refresh-overlay.show {{
+      opacity: 1;
+      pointer-events: auto;
+    }}
+    .refresh-overlay-card {{
+      width: min(560px, 100%);
+      padding: 22px 24px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, rgba(8,22,37,.98), rgba(20,48,79,.98));
+      border: 1px solid rgba(191,219,254,.2);
+      box-shadow: 0 30px 70px rgba(8,22,37,.45);
+      color: #e2e8f0;
+      display: grid;
+      justify-items: center;
+      text-align: center;
+      gap: 12px;
+    }}
+    .refresh-spinner {{
+      width: 62px;
+      height: 62px;
+      border-radius: 50%;
+      border: 4px solid rgba(191,219,254,.28);
+      border-top-color: #93c5fd;
+      border-right-color: #6ee7b7;
+      animation: spin-refresh .95s linear infinite;
+    }}
+    .refresh-overlay-card strong {{
+      font-size: 1.05rem;
+      letter-spacing: -.02em;
+      font-family: "Space Grotesk", sans-serif;
+      color: #ffffff;
+    }}
+    .refresh-overlay-card p {{
+      margin: 0;
+      color: #bfdbfe;
+      font-size: .92rem;
+      line-height: 1.58;
+    }}
+    .refresh-progress-track {{
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(191,219,254,.22);
+      overflow: hidden;
+      border: 1px solid rgba(191,219,254,.22);
+    }}
+    .refresh-progress-track i {{
+      display: block;
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #60a5fa, #6ee7b7);
+      transition: width .28s ease;
+    }}
+    .refresh-progress-label {{
+      margin-top: -2px !important;
+      font-size: .84rem !important;
+      color: #dbeafe !important;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }}
+    .refresh-stage-wrap {{
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(191,219,254,.2);
+      background: rgba(15,32,52,.58);
+      text-align: left;
+    }}
+    .refresh-stage-head {{
+      margin: 0 0 8px;
+      font-size: .72rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #93c5fd;
+      font-weight: 700;
+    }}
+    .refresh-stage-list {{
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+    }}
+    .refresh-stage-list li {{
+      display: grid;
+      grid-template-columns: 12px 1fr;
+      align-items: center;
+      gap: 10px;
+      color: rgba(191,219,254,.86);
+      font-size: .82rem;
+      line-height: 1.3;
+      transition: color .2s ease;
+    }}
+    .refresh-stage-list li i {{
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      border: 2px solid rgba(147,197,253,.45);
+      background: transparent;
+      transition: border-color .2s ease, background-color .2s ease, box-shadow .2s ease;
+    }}
+    .refresh-stage-list li.is-pending {{
+      color: rgba(191,219,254,.72);
+    }}
+    .refresh-stage-list li.is-active {{
+      color: #e2e8f0;
+      font-weight: 700;
+    }}
+    .refresh-stage-list li.is-active i {{
+      border-color: #60a5fa;
+      background: #60a5fa;
+      box-shadow: 0 0 0 6px rgba(96,165,250,.18);
+      animation: stage-pulse 1s ease infinite;
+    }}
+    .refresh-stage-list li.is-done {{
+      color: #bbf7d0;
+    }}
+    .refresh-stage-list li.is-done i {{
+      border-color: #22c55e;
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34,197,94,.14);
+      animation: none;
+    }}
+    .refresh-stage-list li.is-error {{
+      color: #fecaca;
+      font-weight: 700;
+    }}
+    .refresh-stage-list li.is-error i {{
+      border-color: #ef4444;
+      background: #ef4444;
+      box-shadow: 0 0 0 5px rgba(239,68,68,.18);
+      animation: none;
+    }}
+    body.refresh-locked {{
+      overflow: hidden;
+    }}
+    @keyframes stage-pulse {{
+      0% {{ box-shadow: 0 0 0 0 rgba(96,165,250,.22); }}
+      70% {{ box-shadow: 0 0 0 8px rgba(96,165,250,0); }}
+      100% {{ box-shadow: 0 0 0 0 rgba(96,165,250,0); }}
+    }}
     @keyframes spin-refresh {{
       from {{ transform: rotate(0deg); }}
       to {{ transform: rotate(360deg); }}
@@ -2175,23 +2348,193 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     <button id="scrollToTop" class="btn-float" title="Voltar ao topo" style="display:none;">
       <svg viewBox="0 0 24 24"><path d="M12 4l-8 8h16l-8-8z"/></svg>
     </button>
+    <button id="scrollToBottom" class="btn-float" title="Ir para o final da pagina" style="display:none;">
+      <svg viewBox="0 0 24 24"><path d="M12 20l8-8H4l8 8z"/></svg>
+    </button>
     <button id="quickRefresh" class="btn-float" title="Atualizar placares em tempo real" type="button">
       <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
     </button>
   </div>
 
+  <div id="refreshOverlay" class="refresh-overlay" aria-live="polite" aria-busy="true">
+    <div class="refresh-overlay-card">
+      <div class="refresh-spinner" aria-hidden="true"></div>
+      <strong id="refreshOverlayTitle">Atualizando painel</strong>
+      <p id="refreshOverlayDetail">Buscando resultados...</p>
+      <div class="refresh-progress-track"><i id="refreshOverlayProgressBar"></i></div>
+      <p id="refreshOverlayProgressText" class="refresh-progress-label">0%</p>
+      <div class="refresh-stage-wrap">
+        <p class="refresh-stage-head">Detalhes da automacao</p>
+        <ul id="refreshStageList" class="refresh-stage-list">
+          <li class="is-pending" data-stage="cache"><i></i><span>Limpando cache local</span></li>
+          <li class="is-pending" data-stage="fetch_matches"><i></i><span>Buscando resultados e odds</span></li>
+          <li class="is-pending" data-stage="prefetch_real_stats"><i></i><span>Atualizando cartoes e escanteios</span></li>
+          <li class="is-pending" data-stage="prepare_frames"><i></i><span>Consolidando dados por competicao</span></li>
+          <li class="is-pending" data-stage="build_html"><i></i><span>Regenerando HTML do painel</span></li>
+          <li class="is-pending" data-stage="write_file"><i></i><span>Salvando arquivo atualizado</span></li>
+          <li class="is-pending" data-stage="done"><i></i><span>Atualizacao concluida</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <script>
-    const scrollBtn = document.getElementById('scrollToTop');
-    window.onscroll = function() {{
-      if (document.body.scrollTop > 300 || document.documentElement.scrollTop > 300) {{
-        scrollBtn.style.display = "grid";
-      }} else {{
-        scrollBtn.style.display = "none";
+    const scrollTopBtn = document.getElementById('scrollToTop');
+    const scrollBottomBtn = document.getElementById('scrollToBottom');
+    const refreshOverlay = document.getElementById('refreshOverlay');
+    const refreshOverlayTitle = document.getElementById('refreshOverlayTitle');
+    const refreshOverlayDetail = document.getElementById('refreshOverlayDetail');
+    const refreshOverlayProgressBar = document.getElementById('refreshOverlayProgressBar');
+    const refreshOverlayProgressText = document.getElementById('refreshOverlayProgressText');
+    const refreshStageList = document.getElementById('refreshStageList');
+    const refreshStageOrder = ['cache', 'fetch_matches', 'prefetch_real_stats', 'prepare_frames', 'build_html', 'write_file', 'done'];
+    const refreshAutomationSteps = [
+      'Buscando resultados e odds mais recentes...',
+      'Consolidando partidas e estatisticas por competicao...',
+      'Atualizando cache de cartoes e escanteios...',
+      'Regenerando o HTML do painel...',
+      'Preparando recarga da tela com os novos dados...'
+    ];
+    let refreshAutomationTicker = null;
+    let refreshAutomationIndex = 0;
+
+    function getDocumentScrollHeight() {{
+      return Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight,
+        document.body.offsetHeight,
+        document.documentElement.offsetHeight,
+        document.body.clientHeight,
+        document.documentElement.clientHeight
+      );
+    }}
+
+    function updateScrollIndicators() {{
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      const docHeight = getDocumentScrollHeight();
+      const nearTop = scrollTop <= 240;
+      const nearBottom = scrollTop + viewportHeight >= docHeight - 240;
+
+      if (scrollTopBtn) {{
+        scrollTopBtn.style.display = nearTop ? 'none' : 'grid';
       }}
-    }};
-    scrollBtn.onclick = function() {{
-      window.scrollTo({{ top: 0, behavior: 'smooth' }});
-    }};
+      if (scrollBottomBtn) {{
+        scrollBottomBtn.style.display = nearBottom ? 'none' : 'grid';
+      }}
+    }}
+
+    window.addEventListener('scroll', updateScrollIndicators, {{ passive: true }});
+    window.addEventListener('resize', updateScrollIndicators);
+
+    if (scrollTopBtn) {{
+      scrollTopBtn.onclick = function() {{
+        window.scrollTo({{ top: 0, behavior: 'smooth' }});
+      }};
+    }}
+
+    if (scrollBottomBtn) {{
+      scrollBottomBtn.onclick = function() {{
+        window.scrollTo({{ top: getDocumentScrollHeight(), behavior: 'smooth' }});
+      }};
+    }}
+
+    updateScrollIndicators();
+
+    function stopRefreshAutomationTicker() {{
+      if (!refreshAutomationTicker) return;
+      window.clearInterval(refreshAutomationTicker);
+      refreshAutomationTicker = null;
+    }}
+
+    function setRefreshOverlayMessage(title, detail) {{
+      if (refreshOverlayTitle && title) refreshOverlayTitle.textContent = title;
+      if (refreshOverlayDetail && detail) refreshOverlayDetail.textContent = detail;
+    }}
+
+    function setRefreshOverlayProgress(percent) {{
+      const bounded = Math.max(0, Math.min(100, Number(percent) || 0));
+      if (refreshOverlayProgressBar) {{
+        refreshOverlayProgressBar.style.width = bounded.toFixed(0) + '%';
+      }}
+      if (refreshOverlayProgressText) {{
+        refreshOverlayProgressText.textContent = bounded.toFixed(0) + '%';
+      }}
+    }}
+
+    function setRefreshStageClass(stageElement, className) {{
+      if (!stageElement) return;
+      stageElement.classList.remove('is-pending', 'is-active', 'is-done', 'is-error');
+      stageElement.classList.add(className);
+    }}
+
+    function resetRefreshStageChecklist() {{
+      if (!refreshStageList) return;
+      refreshStageOrder.forEach((stageKey) => {{
+        const stageElement = refreshStageList.querySelector('[data-stage=\"' + stageKey + '\"]');
+        setRefreshStageClass(stageElement, 'is-pending');
+      }});
+    }}
+
+    function updateRefreshStageChecklist(stage, hasError) {{
+      if (!refreshStageList) return;
+      const stageKey = String(stage || '').trim();
+      const activeIndex = refreshStageOrder.indexOf(stageKey);
+      refreshStageOrder.forEach((key, index) => {{
+        const stageElement = refreshStageList.querySelector('[data-stage=\"' + key + '\"]');
+        if (!stageElement) return;
+        if (hasError) {{
+          if (activeIndex >= 0 && index < activeIndex) {{
+            setRefreshStageClass(stageElement, 'is-done');
+          }} else if (activeIndex >= 0 && index === activeIndex) {{
+            setRefreshStageClass(stageElement, 'is-error');
+          }} else {{
+            setRefreshStageClass(stageElement, 'is-pending');
+          }}
+          return;
+        }}
+        if (activeIndex < 0) {{
+          setRefreshStageClass(stageElement, 'is-pending');
+        }} else if (index < activeIndex) {{
+          setRefreshStageClass(stageElement, 'is-done');
+        }} else if (index === activeIndex) {{
+          setRefreshStageClass(stageElement, stageKey === 'done' ? 'is-done' : 'is-active');
+        }} else {{
+          setRefreshStageClass(stageElement, 'is-pending');
+        }}
+      }});
+    }}
+
+    function startRefreshAutomationTicker() {{
+      stopRefreshAutomationTicker();
+      refreshAutomationIndex = 0;
+      setRefreshOverlayMessage('Atualizacao em andamento', refreshAutomationSteps[refreshAutomationIndex]);
+      setRefreshOverlayProgress(8);
+      refreshAutomationTicker = window.setInterval(() => {{
+        refreshAutomationIndex = (refreshAutomationIndex + 1) % refreshAutomationSteps.length;
+        setRefreshOverlayMessage('Atualizacao em andamento', refreshAutomationSteps[refreshAutomationIndex]);
+        setRefreshOverlayProgress(8 + (refreshAutomationIndex * 12));
+      }}, 1400);
+    }}
+
+    function setRefreshOverlayVisible(isVisible, title, detail, autoCycle) {{
+      if (!refreshOverlay) return;
+      if (isVisible) {{
+        refreshOverlay.classList.add('show');
+        document.body.classList.add('refresh-locked');
+        if (title || detail) {{
+          setRefreshOverlayMessage(title || 'Atualizacao em andamento', detail || refreshAutomationSteps[0]);
+        }}
+        setRefreshOverlayProgress(0);
+        resetRefreshStageChecklist();
+        updateRefreshStageChecklist('cache', false);
+        if (autoCycle) startRefreshAutomationTicker();
+        return;
+      }}
+      stopRefreshAutomationTicker();
+      refreshOverlay.classList.remove('show');
+      document.body.classList.remove('refresh-locked');
+    }}
 
     const riskPresets = {{
       "Baixo risco": {{ oddMin: 1.20, oddMax: 1.95, probMin: 0.62, evMin: 0.03, booksMin: 10 }},
@@ -2959,53 +3302,140 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       window.location.reload();
     }}
 
+    function requestStreamlitPortalRefresh() {{
+      let targetWindow = window;
+      try {{
+        if (window.top && window.top.location) {{
+          targetWindow = window.top;
+        }}
+      }} catch (error) {{}}
+      const targetUrl = new URL(targetWindow.location.href);
+      targetUrl.searchParams.set('view', 'portal');
+      targetUrl.searchParams.set('refresh_portal', '1');
+      targetUrl.searchParams.set('refresh_nonce', String(Date.now()));
+      targetWindow.location.assign(targetUrl.toString());
+    }}
+
+    function waitMs(ms) {{
+      return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }}
+
+    async function startPortalRefreshJob(apiHost) {{
+      const response = await fetch('http://' + apiHost + ':8765/api/refresh-portal/start', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ source: 'portal-ui' }})
+      }});
+      const data = await response.json();
+      if (!response.ok || !data.ok || !data.job_id) {{
+        throw new Error(data.error || 'Nao foi possivel iniciar o job de atualizacao.');
+      }}
+      return String(data.job_id);
+    }}
+
+    async function fetchPortalRefreshStatus(apiHost, jobId) {{
+      const response = await fetch('http://' + apiHost + ':8765/api/refresh-portal/status?job_id=' + encodeURIComponent(jobId));
+      const data = await response.json();
+      if (!response.ok || !data.ok || !data.job) {{
+        throw new Error(data.error || 'Nao foi possivel consultar o status da atualizacao.');
+      }}
+      return data.job;
+    }}
+
     async function refreshPortalData() {{
       const summary = document.getElementById('resultsSummary');
       const apiHost = resolvePortalHost();
       const isStreamlitCloud = apiHost.includes('streamlit.app');
       const isStaticPortal = window.location.port === '8000' || window.location.pathname.toLowerCase().endsWith('/index.html');
+      let keepOverlayVisible = false;
+      let lastKnownStage = 'cache';
 
       if (summary) {{
         summary.textContent = 'Atualizando placares e reprocessando o portal...';
       }}
+      setRefreshOverlayVisible(true, 'Atualizacao em andamento', 'Buscando resultados...', true);
 
       if (isStreamlitCloud) {{
+        keepOverlayVisible = true;
+        setRefreshOverlayMessage('Atualizacao em andamento', 'Solicitando atualizacao no backend do Streamlit...');
         if (summary) {{
-          summary.textContent = 'Recarregando o app publicado para buscar os placares mais recentes.';
+          summary.textContent = 'Solicitando atualizacao no backend do Streamlit e recarregando o portal...';
         }}
-        reloadPortalShell();
+        setRefreshButtonsLoading(true);
+        requestStreamlitPortalRefresh();
         return;
       }}
 
       setRefreshButtonsLoading(true);
       try {{
-        const response = await fetch('http://' + apiHost + ':8765/api/refresh-portal', {{
-          method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{ source: 'portal-ui' }})
-        }});
-        const data = await response.json();
-        if (!response.ok || !data.ok) {{
-          throw new Error(data.error || 'Falha ao atualizar os placares.');
+        const jobId = await startPortalRefreshJob(apiHost);
+        stopRefreshAutomationTicker();
+        setRefreshOverlayMessage('Atualizacao em andamento', 'Buscando resultados e odds mais recentes...');
+        setRefreshOverlayProgress(6);
+        updateRefreshStageChecklist('cache', false);
+
+        const monitorStart = Date.now();
+        let finalJob = null;
+        while (Date.now() - monitorStart <= 300000) {{
+          const job = await fetchPortalRefreshStatus(apiHost, jobId);
+          finalJob = job;
+          if (job.stage) {{
+            lastKnownStage = String(job.stage);
+            updateRefreshStageChecklist(lastKnownStage, false);
+          }}
+          if (typeof job.progress === 'number') {{
+            setRefreshOverlayProgress(job.progress);
+          }}
+          if (job.message) {{
+            setRefreshOverlayMessage('Atualizacao em andamento', String(job.message));
+          }}
+          if (job.done) {{
+            break;
+          }}
+          await waitMs(900);
         }}
+
+        if (!finalJob) {{
+          throw new Error('Nao foi possivel acompanhar o status da atualizacao.');
+        }}
+        if (!finalJob.done) {{
+          throw new Error('Tempo limite ao atualizar o painel.');
+        }}
+        if (!finalJob.ok) {{
+          throw new Error(finalJob.error || finalJob.message || 'Falha ao atualizar os placares.');
+        }}
+
+        const result = finalJob.result || {{}};
+        updateRefreshStageChecklist('done', false);
         if (summary) {{
-          const report = data.real_stats_report || null;
+          const report = result.real_stats_report || null;
           const statsLine = report
             ? ' Cartoes/escanteios historicos: ' + (report.available_total || 0) + ' jogos salvos, ' + (report.saved_now || 0) + ' novos nesta atualizacao.'
             : '';
-          summary.textContent = 'Placares atualizados em ' + (data.updated_at || 'agora') + '.' + statsLine + ' Recarregando o painel...';
+          summary.textContent = 'Placares atualizados em ' + (result.updated_at || 'agora') + '.' + statsLine + ' Recarregando o painel...';
+          setRefreshOverlayProgress(100);
+          setRefreshOverlayMessage('Atualizacao concluida', 'Placares atualizados em ' + (result.updated_at || 'agora') + '.' + statsLine + ' Recarregando o painel...');
         }}
+        keepOverlayVisible = true;
         window.setTimeout(() => reloadPortalShell(), 700);
       }} catch (error) {{
+        stopRefreshAutomationTicker();
         const message = error && error.message ? error.message : 'falha desconhecida.';
         if (summary) {{
           summary.textContent = 'Nao foi possivel atualizar os placares: ' + message;
         }}
+        updateRefreshStageChecklist(lastKnownStage || 'fetch_matches', true);
+        setRefreshOverlayProgress(100);
+        setRefreshOverlayMessage('Falha na atualizacao', 'A automacao encontrou um erro: ' + message);
         if (!isStaticPortal) {{
+          keepOverlayVisible = true;
           window.setTimeout(() => reloadPortalShell(), 700);
         }}
       }} finally {{
         window.setTimeout(() => setRefreshButtonsLoading(false), 150);
+        if (!keepOverlayVisible) {{
+          window.setTimeout(() => setRefreshOverlayVisible(false), 1400);
+        }}
       }}
     }}
 
@@ -3191,6 +3621,24 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             window.scrollTo({{ top: 0, behavior: 'smooth' }});
           }}
         }}
+      }});
+    }});
+
+    Array.from(document.querySelectorAll('.competition-card[data-comp]')).forEach((card) => {{
+      card.addEventListener('click', (event) => {{
+        const target = event.target;
+        if (!target || typeof target.closest !== 'function') return;
+        if (target.closest('button, a, input, select, textarea, .btn, .btn-mini, .btn-link, .modal-close')) return;
+
+        const competitionField = document.getElementById('fcomp');
+        if (!competitionField) return;
+        const cardCompetition = (card.getAttribute('data-comp') || '').trim();
+        if (!cardCompetition) return;
+        if ((competitionField.value || '').trim() === cardCompetition) return;
+
+        competitionField.value = cardCompetition;
+        applyFilters();
+        window.scrollTo({{ top: 0, behavior: 'smooth' }});
       }});
     }});
 

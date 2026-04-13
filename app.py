@@ -22,7 +22,7 @@ if str(APP_DIR) not in sys.path:
 
 from gerar_copa_mundo_html import build_world_cup_schedule_html
 from gerar_html import AI_PROMPT_TEMPLATE, build_index_html
-from portal_ai_server import run_ai_analysis
+from portal_ai_server import refresh_portal_snapshot_with_progress, run_ai_analysis
 from analytics import (
     build_backtest_table,
     build_hedge_scenarios,
@@ -958,13 +958,88 @@ def render_public_back_button() -> None:
     )
 
 
-public_home_view = str(st.query_params.get("view", "landing"))
+def _query_param_str(name: str, default: str = "") -> str:
+    value = st.query_params.get(name, default)
+    if isinstance(value, list):
+        return str(value[0]) if value else str(default)
+    return str(value)
+
+
+def _set_public_query_params(params: dict[str, str]) -> None:
+    try:
+        st.query_params.clear()
+        for key, value in params.items():
+            st.query_params[key] = value
+        return
+    except Exception:
+        pass
+
+    try:
+        st.experimental_set_query_params(**params)
+    except Exception:
+        pass
+
+
+def _query_flag_enabled(name: str) -> bool:
+    return _query_param_str(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _run_public_portal_refresh_if_requested() -> bool:
+    if not _query_flag_enabled("refresh_portal"):
+        return False
+
+    refresh_nonce = _query_param_str("refresh_nonce", "").strip() or f"nonce-{int(time.time() * 1000)}"
+    last_nonce = str(st.session_state.get("_public_portal_refresh_nonce", ""))
+    if refresh_nonce == last_nonce:
+        return False
+
+    try:
+        status_box = st.empty()
+        progress_box = st.empty()
+        status_box.info("Atualizando portal no servidor do Streamlit...")
+        progress_widget = progress_box.progress(0)
+
+        def on_progress(progress: int, message: str, _stage: str) -> None:
+            bounded = max(0, min(100, int(progress)))
+            try:
+                progress_widget.progress(bounded, text=message)
+            except TypeError:
+                progress_widget.progress(bounded)
+                status_box.info(message)
+
+        payload = refresh_portal_snapshot_with_progress(progress_callback=on_progress)
+        try:
+            progress_widget.progress(100, text="Atualizacao concluida.")
+        except TypeError:
+            progress_widget.progress(100)
+            status_box.success("Atualizacao concluida.")
+        updated_at = str(payload.get("updated_at", "agora"))
+        st.session_state["_public_portal_refresh_feedback"] = f"Portal atualizado com sucesso em {updated_at}."
+    except Exception as exc:
+        st.session_state["_public_portal_refresh_feedback"] = f"Falha ao atualizar o portal: {exc}"
+    finally:
+        st.session_state["_public_portal_refresh_nonce"] = refresh_nonce
+
+    _set_public_query_params({"view": "portal"})
+    st.rerun()
+    return True
+
+
+public_home_view = _query_param_str("view", "landing")
 if public_home_view == "landing":
     render_public_landing()
     st.stop()
 if public_home_view == "portal":
+    if _run_public_portal_refresh_if_requested():
+        st.stop()
     set_public_portal_shell()
     render_public_back_button()
+    feedback = st.session_state.pop("_public_portal_refresh_feedback", "")
+    if feedback:
+        if feedback.lower().startswith("falha"):
+            st.error(feedback)
+        else:
+            st.success(feedback)
     render_embedded_index_portal()
     st.stop()
 if public_home_view == "copa":

@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
+from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -44,6 +47,9 @@ class CachedMatches:
 
 _cache_lock = threading.Lock()
 _matches_cache: CachedMatches | None = None
+_refresh_jobs_lock = threading.Lock()
+_refresh_jobs: dict[str, dict[str, object]] = {}
+REFRESH_JOB_TTL_SECONDS = 3600
 
 
 def market_label(market: str, home_team: str, away_team: str) -> str:
@@ -65,12 +71,144 @@ def get_cached_matches() -> pd.DataFrame:
         return frame
 
 
+def _emit_refresh_progress(
+    callback: Callable[[int, str, str], None] | None,
+    progress: int,
+    message: str,
+    stage: str,
+) -> None:
+    if callback is None:
+        return
+    try:
+        callback(int(progress), str(message), str(stage))
+    except Exception:
+        return
+
+
+def _now_iso() -> str:
+    return datetime.now(APP_TIMEZONE).isoformat()
+
+
+def _cleanup_refresh_jobs_locked(now_ts: float) -> None:
+    stale_ids = [
+        job_id
+        for job_id, payload in _refresh_jobs.items()
+        if now_ts - float(payload.get("_updated_at_ts", now_ts)) > REFRESH_JOB_TTL_SECONDS
+    ]
+    for job_id in stale_ids:
+        _refresh_jobs.pop(job_id, None)
+
+
+def _create_refresh_job(kind: str) -> str:
+    job_id = uuid4().hex
+    now_ts = time.time()
+    now_iso = _now_iso()
+    with _refresh_jobs_lock:
+        _cleanup_refresh_jobs_locked(now_ts)
+        _refresh_jobs[job_id] = {
+            "job_id": job_id,
+            "kind": kind,
+            "status": "queued",
+            "stage": "queued",
+            "progress": 0,
+            "message": "Aguardando inicio da automacao...",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "_updated_at_ts": now_ts,
+            "done": False,
+            "ok": False,
+        }
+    return job_id
+
+
+def _update_refresh_job(job_id: str, **fields: object) -> None:
+    now_ts = time.time()
+    now_iso = _now_iso()
+    with _refresh_jobs_lock:
+        payload = _refresh_jobs.get(job_id)
+        if payload is None:
+            return
+        payload.update(fields)
+        payload["updated_at"] = now_iso
+        payload["_updated_at_ts"] = now_ts
+
+
+def _get_refresh_job(job_id: str) -> dict[str, object] | None:
+    with _refresh_jobs_lock:
+        payload = _refresh_jobs.get(job_id)
+        if payload is None:
+            return None
+        public_payload = {k: v for k, v in payload.items() if not str(k).startswith("_")}
+        return public_payload
+
+
+def start_refresh_portal_job() -> str:
+    job_id = _create_refresh_job("portal")
+
+    def worker() -> None:
+        _update_refresh_job(
+            job_id,
+            status="running",
+            stage="init",
+            progress=2,
+            message="Inicializando automacao de atualizacao...",
+        )
+
+        def progress_callback(progress: int, message: str, stage: str) -> None:
+            bounded_progress = max(0, min(100, int(progress)))
+            _update_refresh_job(
+                job_id,
+                status="running",
+                stage=stage,
+                progress=bounded_progress,
+                message=message,
+            )
+
+        try:
+            payload = refresh_portal_snapshot_with_progress(progress_callback=progress_callback)
+            _update_refresh_job(
+                job_id,
+                status="completed",
+                stage="done",
+                progress=100,
+                message="Atualizacao concluida.",
+                done=True,
+                ok=True,
+                result=payload,
+                finished_at=_now_iso(),
+            )
+        except Exception as exc:
+            _update_refresh_job(
+                job_id,
+                status="failed",
+                stage="error",
+                progress=100,
+                message=f"Falha na automacao: {exc}",
+                done=True,
+                ok=False,
+                error=str(exc),
+                finished_at=_now_iso(),
+            )
+
+    threading.Thread(target=worker, daemon=True, name=f"refresh-portal-{job_id[:8]}").start()
+    return job_id
+
+
 def refresh_portal_snapshot() -> dict[str, object]:
+    return refresh_portal_snapshot_with_progress(progress_callback=None)
+
+
+def refresh_portal_snapshot_with_progress(
+    progress_callback: Callable[[int, str, str], None] | None = None,
+) -> dict[str, object]:
     global _matches_cache
+    _emit_refresh_progress(progress_callback, 5, "Limpando cache local de partidas...", "cache")
     with _cache_lock:
         _matches_cache = None
 
+    _emit_refresh_progress(progress_callback, 18, "Buscando resultados e odds mais recentes...", "fetch_matches")
     matches_frame = get_cached_matches()
+    _emit_refresh_progress(progress_callback, 38, "Atualizando historico de cartoes e escanteios...", "prefetch_real_stats")
     real_stats_report = prefetch_finished_match_stats(
         matches_frame,
         competitions=list(COMPETITIONS.keys()),
@@ -78,14 +216,18 @@ def refresh_portal_snapshot() -> dict[str, object]:
         max_workers=6,
         force_refresh=False,
     )
+    _emit_refresh_progress(progress_callback, 62, "Consolidando dados por competicao...", "prepare_frames")
     competition_frames = {
         competition: matches_frame[matches_frame["competition"] == competition].copy()
         for competition in COMPETITIONS
     }
+    _emit_refresh_progress(progress_callback, 82, "Regenerando o HTML do painel...", "build_html")
     html = build_index_html(competition_frames=competition_frames)
     dashboard_path = BASE_DIR / "index.html"
+    _emit_refresh_progress(progress_callback, 94, "Salvando arquivo atualizado do painel...", "write_file")
     dashboard_path.write_text(html, encoding="utf-8")
     updated_at = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
+    _emit_refresh_progress(progress_callback, 100, "Atualizacao concluida.", "done")
     return {"updated_at": updated_at, "dashboard_path": str(dashboard_path), "real_stats_report": real_stats_report}
 
 
@@ -220,13 +362,36 @@ class PortalAIHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True})
 
     def do_GET(self) -> None:
-        if self.path == "/health":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        if path == "/health":
             self._send_json({"ok": True, "service": "portal-ai", "port": PORT})
+            return
+        if path == "/api/refresh-portal/status":
+            job_id = str((query.get("job_id") or [""])[0]).strip()
+            if not job_id:
+                self._send_json({"ok": False, "error": "Informe o job_id."}, status_code=400)
+                return
+            payload = _get_refresh_job(job_id)
+            if payload is None:
+                self._send_json({"ok": False, "error": "Job nao encontrado."}, status_code=404)
+                return
+            self._send_json({"ok": True, "job": payload})
             return
         self._send_json({"ok": False, "error": "Rota nao encontrada."}, status_code=404)
 
     def do_POST(self) -> None:
-        if self.path == "/api/refresh-portal":
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/refresh-portal/start":
+            job_id = start_refresh_portal_job()
+            self._send_json({"ok": True, "job_id": job_id})
+            return
+
+        if path == "/api/refresh-portal":
             try:
                 payload = refresh_portal_snapshot()
             except Exception as exc:
@@ -235,7 +400,7 @@ class PortalAIHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, **payload})
             return
 
-        if self.path == "/api/refresh-copa":
+        if path == "/api/refresh-copa":
             try:
                 payload = refresh_copa_snapshot()
             except Exception as exc:
@@ -244,7 +409,7 @@ class PortalAIHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, **payload})
             return
 
-        if self.path == "/api/refresh-match-stats":
+        if path == "/api/refresh-match-stats":
             try:
                 matches_frame = get_cached_matches()
                 payload = prefetch_finished_match_stats(
@@ -260,7 +425,7 @@ class PortalAIHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, **payload})
             return
 
-        if self.path == "/api/match-stats":
+        if path == "/api/match-stats":
             content_length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(content_length)
             try:
@@ -308,7 +473,7 @@ class PortalAIHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, **stats_payload, "team_projection": projection_payload})
             return
 
-        if self.path != "/api/ai-analysis":
+        if path != "/api/ai-analysis":
             self._send_json({"ok": False, "error": "Rota nao encontrada."}, status_code=404)
             return
 
