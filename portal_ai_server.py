@@ -20,7 +20,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from analytics import calculate_match_probabilities, get_team_context, suggest_bet_strategy
-from gerar_copa_mundo_html import build_world_cup_schedule_html
+from gerar_copa_mundo_html import build_world_cup_schedule_html, update_world_cup_model_adjustments
 from gerar_html import build_index_html
 from nvidia_client import request_nvidia_completion
 from real_match_stats import (
@@ -402,7 +402,29 @@ class PortalAIHandler(BaseHTTPRequestHandler):
 
         if path == "/api/refresh-copa":
             try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                raw_body = self.rfile.read(content_length) if content_length > 0 else b""
+                payload_data: dict[str, object] = {}
+                if raw_body:
+                    try:
+                        parsed_body = json.loads(raw_body.decode("utf-8"))
+                        if isinstance(parsed_body, dict):
+                            payload_data = parsed_body
+                    except Exception:
+                        payload_data = {}
+
+                reset_adjustments = bool(payload_data.get("reset_model_adjustments", False))
+                model_adjustments_payload = payload_data.get("model_adjustments")
+                applied_adjustments = None
+                if reset_adjustments or isinstance(model_adjustments_payload, dict):
+                    applied_adjustments = update_world_cup_model_adjustments(
+                        model_adjustments_payload if isinstance(model_adjustments_payload, dict) else None,
+                        reset=reset_adjustments,
+                    )
+
                 payload = refresh_copa_snapshot()
+                if applied_adjustments is not None:
+                    payload["model_adjustments"] = applied_adjustments
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc)}, status_code=500)
                 return
