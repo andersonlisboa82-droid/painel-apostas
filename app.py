@@ -29,7 +29,9 @@ from analytics import (
     build_probability_buckets,
     build_safe_bets_table,
     calculate_match_probabilities,
+    default_model_config,
     get_team_context,
+    normalize_model_config,
     pick_highest_probability_market,
     suggest_bet_strategy,
     summarize_backtest,
@@ -83,6 +85,45 @@ NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
 INDEX_HTML_FILE = APP_DIR / "index.html"
 WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
+MODEL_CONFIG_SESSION_KEY = "runtime_model_config"
+MODEL_CONFIG_FEEDBACK_KEY = "_runtime_model_feedback"
+
+
+def _get_runtime_model_config() -> dict[str, object]:
+    config = normalize_model_config(st.session_state.get(MODEL_CONFIG_SESSION_KEY))
+    st.session_state[MODEL_CONFIG_SESSION_KEY] = config
+    return config
+
+
+def _model_config_bins_to_text(config: dict[str, object]) -> str:
+    calibration_cfg = config.get("calibration", {})
+    if not isinstance(calibration_cfg, dict):
+        return "0, 0.20, 0.35, 0.50, 0.65, 1.01"
+    bins = calibration_cfg.get("bins", [])
+    if not isinstance(bins, list) or not bins:
+        return "0, 0.20, 0.35, 0.50, 0.65, 1.01"
+    return ", ".join(f"{float(item):.2f}" for item in bins)
+
+
+def _parse_bins_text(raw_bins: str) -> list[float] | None:
+    cleaned = str(raw_bins or "").replace(";", ",").strip()
+    if not cleaned:
+        return None
+    items = [chunk.strip() for chunk in cleaned.split(",") if chunk.strip()]
+    parsed: list[float] = []
+    for item in items:
+        try:
+            parsed.append(float(item))
+        except ValueError:
+            return None
+    parsed = sorted(set(parsed))
+    if len(parsed) < 2:
+        return None
+    if parsed[0] > 0.0:
+        parsed = [0.0] + parsed
+    if parsed[-1] <= 1.0:
+        parsed.append(1.01)
+    return parsed
 
 
 def _is_port_open(host: str, port: int, *, timeout: float = 0.25) -> bool:
@@ -132,8 +173,18 @@ def ensure_portal_ai_server_running() -> None:
         )
 
 
-def _build_match_detail_data(row_data: pd.Series, matches_df: pd.DataFrame) -> dict[str, object]:
-    probs = calculate_match_probabilities(matches_df, row_data["home_team"], row_data["away_team"])
+def _build_match_detail_data(
+    row_data: pd.Series,
+    matches_df: pd.DataFrame,
+    *,
+    model_config: dict[str, object] | None = None,
+) -> dict[str, object]:
+    probs = calculate_match_probabilities(
+        matches_df,
+        row_data["home_team"],
+        row_data["away_team"],
+        model_config=model_config,
+    )
     home_ctx = get_team_context(matches_df, str(row_data["home_team"]))
     away_ctx = get_team_context(matches_df, str(row_data["away_team"]))
     display_date = format_match_datetime(
@@ -154,7 +205,7 @@ def _build_match_detail_data(row_data: pd.Series, matches_df: pd.DataFrame) -> d
         odd_draw=odd_d,
         odd_away=odd_a,
         bankroll=1000.0,
-        kelly_fractional=0.25,
+        model_config=model_config,
     )
 
     data = {
@@ -1304,20 +1355,30 @@ def find_fixture_row(
     return matches.iloc[0]
 
 
-def build_ai_analysis_for_fixture(matches_df: pd.DataFrame, fixture_row: pd.Series) -> dict[str, object]:
+def build_ai_analysis_for_fixture(
+    matches_df: pd.DataFrame,
+    fixture_row: pd.Series,
+    *,
+    model_config: dict[str, object] | None = None,
+) -> dict[str, object]:
     display_date = format_match_datetime(
         fixture_row.get("date_text"),
         fixture_row.get("event_timestamp"),
         str(fixture_row.get("status", "Agendado")),
     )
-    probs = calculate_match_probabilities(matches_df, fixture_row["home_team"], fixture_row["away_team"])
+    probs = calculate_match_probabilities(
+        matches_df,
+        fixture_row["home_team"],
+        fixture_row["away_team"],
+        model_config=model_config,
+    )
     tip = suggest_bet_strategy(
         probs,
         odd_home=float(fixture_row["odds_home"]),
         odd_draw=float(fixture_row["odds_draw"]),
         odd_away=float(fixture_row["odds_away"]),
         bankroll=1000.0,
-        kelly_fractional=0.25,
+        model_config=model_config,
     )
     probable_market, probable_probability = max(
         [
@@ -2523,6 +2584,265 @@ with st.sidebar:
             f"EV >= {min_ev:.2f} | Odd <= {max_odd:.2f} | Casas >= {min_books}"
         )
 
+    runtime_model_config = _get_runtime_model_config()
+    poisson_cfg = runtime_model_config["poisson"] if isinstance(runtime_model_config.get("poisson"), dict) else {}
+    calibration_cfg = runtime_model_config["calibration"] if isinstance(runtime_model_config.get("calibration"), dict) else {}
+    betting_cfg = runtime_model_config["betting"] if isinstance(runtime_model_config.get("betting"), dict) else {}
+    safe_cfg = runtime_model_config["safe_score"] if isinstance(runtime_model_config.get("safe_score"), dict) else {}
+
+    with st.expander("Calibragem Avancada do Modelo", expanded=False):
+        st.caption("Edite os criterios tecnicos do motor e clique em recalibrar para reprocessar sem alterar codigo.")
+
+        max_goals_input = st.slider(
+            "Poisson - maximo de gols simulados",
+            min_value=3,
+            max_value=10,
+            value=int(poisson_cfg.get("max_goals", 5)),
+            step=1,
+            key="model_cfg_max_goals",
+        )
+        col_poisson_a, col_poisson_b = st.columns(2)
+        with col_poisson_a:
+            league_home_default_input = st.number_input(
+                "Media liga casa (padrao)",
+                min_value=0.40,
+                max_value=4.00,
+                value=float(poisson_cfg.get("league_home_default", 1.35)),
+                step=0.01,
+                key="model_cfg_league_home_default",
+            )
+            min_expected_home_input = st.number_input(
+                "Min xG mandante",
+                min_value=0.01,
+                max_value=2.50,
+                value=float(poisson_cfg.get("min_expected_home", 0.15)),
+                step=0.01,
+                key="model_cfg_min_expected_home",
+            )
+        with col_poisson_b:
+            league_away_default_input = st.number_input(
+                "Media liga fora (padrao)",
+                min_value=0.30,
+                max_value=4.00,
+                value=float(poisson_cfg.get("league_away_default", 1.10)),
+                step=0.01,
+                key="model_cfg_league_away_default",
+            )
+            min_expected_away_input = st.number_input(
+                "Min xG visitante",
+                min_value=0.01,
+                max_value=2.50,
+                value=float(poisson_cfg.get("min_expected_away", 0.10)),
+                step=0.01,
+                key="model_cfg_min_expected_away",
+            )
+
+        st.markdown("**Calibracao de Probabilidade**")
+        calibration_enabled_input = st.checkbox(
+            "Ativar calibracao automatica por historico",
+            value=bool(calibration_cfg.get("enabled", True)),
+            key="model_cfg_calibration_enabled",
+        )
+        bins_text_input = st.text_input(
+            "Faixas de calibracao (bins, separados por virgula)",
+            value=_model_config_bins_to_text(runtime_model_config),
+            key="model_cfg_bins",
+        )
+        col_calib_a, col_calib_b = st.columns(2)
+        with col_calib_a:
+            min_history_input = st.number_input(
+                "Min. jogos historicos p/ calibrar",
+                min_value=10,
+                max_value=2000,
+                value=int(calibration_cfg.get("min_history_matches", 40)),
+                step=1,
+                key="model_cfg_min_history",
+            )
+            baseline_weight_input = st.slider(
+                "Peso baseline da calibracao",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(calibration_cfg.get("baseline_weight", 0.20)),
+                step=0.01,
+                key="model_cfg_baseline_weight",
+            )
+        with col_calib_b:
+            min_bucket_input = st.number_input(
+                "Min. amostras por bucket",
+                min_value=1,
+                max_value=200,
+                value=int(calibration_cfg.get("min_bucket_matches", 8)),
+                step=1,
+                key="model_cfg_min_bucket",
+            )
+            max_adjust_weight_input = st.slider(
+                "Peso maximo do ajuste",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(calibration_cfg.get("max_adjustment_weight", 0.70)),
+                step=0.01,
+                key="model_cfg_max_adjust_weight",
+            )
+        weight_sample_size_input = st.number_input(
+            "Amostras para peso maximo do ajuste",
+            min_value=1.0,
+            max_value=500.0,
+            value=float(calibration_cfg.get("weight_sample_size", 30.0)),
+            step=1.0,
+            key="model_cfg_weight_sample_size",
+        )
+
+        st.markdown("**Gestao de Entrada e Score de Seguranca**")
+        kelly_fractional_input = st.slider(
+            "Kelly fracionado",
+            min_value=0.00,
+            max_value=1.00,
+            value=float(betting_cfg.get("kelly_fractional", 0.25)),
+            step=0.01,
+            key="model_cfg_kelly_fractional",
+        )
+        col_safe_a, col_safe_b = st.columns(2)
+        with col_safe_a:
+            safe_prob_weight_input = st.number_input(
+                "Peso probabilidade",
+                min_value=0.0,
+                max_value=5.0,
+                value=float(safe_cfg.get("prob_weight", 0.55)),
+                step=0.01,
+                key="model_cfg_safe_prob_weight",
+            )
+            safe_ev_weight_input = st.number_input(
+                "Peso EV",
+                min_value=0.0,
+                max_value=10.0,
+                value=float(safe_cfg.get("ev_weight", 2.5)),
+                step=0.05,
+                key="model_cfg_safe_ev_weight",
+            )
+            safe_ev_cap_input = st.number_input(
+                "Teto EV no score",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(safe_cfg.get("ev_cap", 0.10)),
+                step=0.01,
+                key="model_cfg_safe_ev_cap",
+            )
+            safe_bookmakers_weight_input = st.number_input(
+                "Peso bookmakers",
+                min_value=0.0,
+                max_value=5.0,
+                value=float(safe_cfg.get("bookmakers_weight", 0.20)),
+                step=0.01,
+                key="model_cfg_safe_books_weight",
+            )
+        with col_safe_b:
+            safe_bookmakers_cap_input = st.number_input(
+                "Cap bookmakers no score",
+                min_value=1,
+                max_value=100,
+                value=int(safe_cfg.get("bookmakers_cap", 20)),
+                step=1,
+                key="model_cfg_safe_books_cap",
+            )
+            safe_odd_weight_input = st.number_input(
+                "Peso odd",
+                min_value=0.0,
+                max_value=5.0,
+                value=float(safe_cfg.get("odd_weight", 0.05)),
+                step=0.01,
+                key="model_cfg_safe_odd_weight",
+            )
+            safe_odd_reference_input = st.number_input(
+                "Odd referencia",
+                min_value=1.01,
+                max_value=20.0,
+                value=float(safe_cfg.get("odd_reference", 1.20)),
+                step=0.01,
+                key="model_cfg_safe_odd_ref",
+            )
+            safe_odd_span_input = st.number_input(
+                "Faixa de odd (span)",
+                min_value=0.01,
+                max_value=20.0,
+                value=float(safe_cfg.get("odd_span", 1.20)),
+                step=0.01,
+                key="model_cfg_safe_odd_span",
+            )
+
+        model_widget_keys = [
+            "model_cfg_max_goals",
+            "model_cfg_league_home_default",
+            "model_cfg_min_expected_home",
+            "model_cfg_league_away_default",
+            "model_cfg_min_expected_away",
+            "model_cfg_calibration_enabled",
+            "model_cfg_bins",
+            "model_cfg_min_history",
+            "model_cfg_baseline_weight",
+            "model_cfg_min_bucket",
+            "model_cfg_max_adjust_weight",
+            "model_cfg_weight_sample_size",
+            "model_cfg_kelly_fractional",
+            "model_cfg_safe_prob_weight",
+            "model_cfg_safe_ev_weight",
+            "model_cfg_safe_ev_cap",
+            "model_cfg_safe_books_weight",
+            "model_cfg_safe_books_cap",
+            "model_cfg_safe_odd_weight",
+            "model_cfg_safe_odd_ref",
+            "model_cfg_safe_odd_span",
+        ]
+
+        if st.button("Recalibrar Modelo Agora", type="primary", use_container_width=True, key="model_cfg_apply"):
+            parsed_bins = _parse_bins_text(bins_text_input)
+            if parsed_bins is None:
+                st.error("Formato invalido para bins. Exemplo: 0, 0.20, 0.35, 0.50, 0.65, 1.01")
+            else:
+                st.session_state[MODEL_CONFIG_SESSION_KEY] = normalize_model_config(
+                    {
+                        "poisson": {
+                            "max_goals": int(max_goals_input),
+                            "league_home_default": float(league_home_default_input),
+                            "league_away_default": float(league_away_default_input),
+                            "min_expected_home": float(min_expected_home_input),
+                            "min_expected_away": float(min_expected_away_input),
+                        },
+                        "calibration": {
+                            "enabled": bool(calibration_enabled_input),
+                            "bins": parsed_bins,
+                            "min_history_matches": int(min_history_input),
+                            "min_bucket_matches": int(min_bucket_input),
+                            "baseline_weight": float(baseline_weight_input),
+                            "max_adjustment_weight": float(max_adjust_weight_input),
+                            "weight_sample_size": float(weight_sample_size_input),
+                        },
+                        "betting": {
+                            "kelly_fractional": float(kelly_fractional_input),
+                        },
+                        "safe_score": {
+                            "prob_weight": float(safe_prob_weight_input),
+                            "ev_weight": float(safe_ev_weight_input),
+                            "ev_cap": float(safe_ev_cap_input),
+                            "bookmakers_weight": float(safe_bookmakers_weight_input),
+                            "bookmakers_cap": int(safe_bookmakers_cap_input),
+                            "odd_weight": float(safe_odd_weight_input),
+                            "odd_reference": float(safe_odd_reference_input),
+                            "odd_span": float(safe_odd_span_input),
+                        },
+                    }
+                )
+                st.cache_data.clear()
+                st.session_state[MODEL_CONFIG_FEEDBACK_KEY] = f"Modelo recalibrado em {datetime.now(APP_TIMEZONE).strftime('%d/%m/%Y %H:%M:%S')}."
+                st.rerun()
+
+        if st.button("Restaurar Criterios Padrao", use_container_width=True, key="model_cfg_reset"):
+            st.session_state[MODEL_CONFIG_SESSION_KEY] = default_model_config()
+            for widget_key in model_widget_keys:
+                st.session_state.pop(widget_key, None)
+            st.cache_data.clear()
+            st.session_state[MODEL_CONFIG_FEEDBACK_KEY] = "Criterios do modelo restaurados para o padrao."
+            st.rerun()
+
     if st.button("Atualizar agora", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
@@ -2543,6 +2863,10 @@ with st.sidebar:
     st.caption("A home inicial resume a competicao. As demais areas aprofundam os detalhes por tema.")
 
 page = {"Início": "Inicio"}.get(page, page)
+runtime_model_config = _get_runtime_model_config()
+runtime_feedback = str(st.session_state.pop(MODEL_CONFIG_FEEDBACK_KEY, "")).strip()
+if runtime_feedback:
+    st.success(runtime_feedback)
 
 try:
     competition, df, competition_load_warning = get_data_with_fallback(competition)
@@ -2557,15 +2881,22 @@ finished = df[df["status"] == "Finalizado"].copy()
 fixtures = df[df["status"] == "Agendado"].copy()
 valid = fixtures.dropna(subset=["odds_home", "odds_draw", "odds_away"]).copy()
 ai_enabled = bool((os.getenv("NVIDIA_API_KEY") or "").strip())
+runtime_betting_cfg = runtime_model_config.get("betting", {})
+runtime_kelly = (
+    float(runtime_betting_cfg.get("kelly_fractional", 0.25))
+    if isinstance(runtime_betting_cfg, dict)
+    else 0.25
+)
 
 safe_df = build_safe_bets_table(
     matches_df=df,
     bankroll=1000.0,
-    kelly_fractional=0.25,
+    kelly_fractional=runtime_kelly,
     min_model_prob=float(min_prob),
     min_expected_value=float(min_ev),
     max_odd=float(max_odd),
     min_bookmakers=int(min_books),
+    model_config=runtime_model_config,
 )
 
 if team_filter.strip():
@@ -2583,9 +2914,10 @@ analysis_candidates = pd.concat([valid, finished_with_odds], ignore_index=True, 
 backtest_df = build_backtest_table(
     matches_df=df,
     bankroll=1000.0,
-    kelly_fractional=0.25,
+    kelly_fractional=runtime_kelly,
     min_history_matches=30,
     max_evaluated_matches=120,
+    model_config=runtime_model_config,
 )
 if team_filter.strip():
     backtest_df = filter_matches_by_team(backtest_df, team_filter)
@@ -2602,11 +2934,12 @@ if safe_df.empty and risk_profile != "Personalizado":
         safe_df = build_safe_bets_table(
             matches_df=df,
             bankroll=1000.0,
-            kelly_fractional=0.25,
+            kelly_fractional=runtime_kelly,
             min_model_prob=float(rp),
             min_expected_value=float(rev),
             max_odd=float(rodd),
             min_bookmakers=int(rbooks),
+            model_config=runtime_model_config,
         )
         if team_filter.strip():
             safe_df = filter_matches_by_team(safe_df, team_filter)
@@ -2994,7 +3327,7 @@ elif page == "Jogos Seguros":
         if not checked_rows.empty:
             idx = checked_rows.index[0]
             row_data = safe_df.iloc[idx]
-            match_detail = _build_match_detail_data(row_data, df)
+            match_detail = _build_match_detail_data(row_data, df, model_config=runtime_model_config)
             render_match_details_modal(match_detail)
 
         best_safe_row = safe_df.iloc[0]
@@ -3043,7 +3376,7 @@ elif page == "Jogos Seguros":
                 with st.spinner("Consultando IA da NVIDIA para o melhor jogo seguro..."):
                     st.session_state[best_safe_key] = {
                         "match_label": f"{best_safe_display_date} | {best_safe_row['home_team']} x {best_safe_row['away_team']}",
-                        "analysis": build_ai_analysis_for_fixture(df, fixture_row),
+                        "analysis": build_ai_analysis_for_fixture(df, fixture_row, model_config=runtime_model_config),
                     }
             except Exception as exc:
                 st.error(f"Nao foi possivel gerar a analise automatica do melhor jogo seguro: {exc}")
@@ -3196,14 +3529,20 @@ elif page == "Analise de Jogo":
                 selected_status,
             )
 
-            probs = calculate_match_probabilities(df, selected["home_team"], selected["away_team"])
+            probs = calculate_match_probabilities(
+                df,
+                selected["home_team"],
+                selected["away_team"],
+                model_config=runtime_model_config,
+            )
             tip = suggest_bet_strategy(
                 probs,
                 odd_home=float(selected["odds_home"]),
                 odd_draw=float(selected["odds_draw"]),
                 odd_away=float(selected["odds_away"]),
                 bankroll=1000.0,
-                kelly_fractional=0.25,
+                kelly_fractional=runtime_kelly,
+                model_config=runtime_model_config,
             )
             model_market, probable_probability = pick_highest_probability_market(probs)
             probable_market = market_label(str(model_market), str(selected["home_team"]), str(selected["away_team"]))
@@ -3319,7 +3658,11 @@ elif page == "Analise de Jogo":
             if run_ai:
                 try:
                     with st.spinner("Consultando IA da NVIDIA..."):
-                        st.session_state[ai_state_key] = build_ai_analysis_for_fixture(df, selected)
+                        st.session_state[ai_state_key] = build_ai_analysis_for_fixture(
+                            df,
+                            selected,
+                            model_config=runtime_model_config,
+                        )
                 except Exception as exc:
                     st.error(f"Nao foi possivel gerar a analise com IA da NVIDIA: {exc}")
 

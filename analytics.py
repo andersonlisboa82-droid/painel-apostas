@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import copy
 import math
 from dataclasses import dataclass
 
@@ -31,6 +32,203 @@ class BettingSuggestion:
 
 
 PROBABILITY_CALIBRATION_BINS = [0.0, 0.20, 0.35, 0.50, 0.65, 1.01]
+DEFAULT_MODEL_CONFIG: dict[str, object] = {
+    "poisson": {
+        "max_goals": 5,
+        "league_home_default": 1.35,
+        "league_away_default": 1.10,
+        "min_expected_home": 0.15,
+        "min_expected_away": 0.10,
+    },
+    "calibration": {
+        "enabled": True,
+        "bins": PROBABILITY_CALIBRATION_BINS,
+        "min_history_matches": 40,
+        "min_bucket_matches": 8,
+        "baseline_weight": 0.20,
+        "max_adjustment_weight": 0.70,
+        "weight_sample_size": 30.0,
+    },
+    "betting": {
+        "kelly_fractional": 0.25,
+    },
+    "safe_score": {
+        "prob_weight": 0.55,
+        "ev_weight": 2.5,
+        "ev_cap": 0.10,
+        "bookmakers_weight": 0.20,
+        "bookmakers_cap": 20,
+        "odd_weight": 0.05,
+        "odd_reference": 1.20,
+        "odd_span": 1.20,
+    },
+}
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, float(value)))
+
+
+def _safe_float(value: object, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _safe_int(value: object, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def default_model_config() -> dict[str, object]:
+    return copy.deepcopy(DEFAULT_MODEL_CONFIG)
+
+
+def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, object]:
+    normalized = default_model_config()
+    if not isinstance(model_config, dict):
+        return normalized
+
+    poisson_default = DEFAULT_MODEL_CONFIG["poisson"] if isinstance(DEFAULT_MODEL_CONFIG["poisson"], dict) else {}
+    poisson_raw = model_config.get("poisson", {})
+    if isinstance(poisson_raw, dict):
+        poisson_cfg = normalized["poisson"]
+        if isinstance(poisson_cfg, dict):
+            poisson_cfg["max_goals"] = _safe_int(poisson_raw.get("max_goals"), _safe_int(poisson_default.get("max_goals"), 5))
+            poisson_cfg["max_goals"] = max(3, min(10, int(poisson_cfg["max_goals"])))
+            poisson_cfg["league_home_default"] = _clamp(
+                _safe_float(poisson_raw.get("league_home_default"), _safe_float(poisson_default.get("league_home_default"), 1.35)),
+                0.4,
+                4.0,
+            )
+            poisson_cfg["league_away_default"] = _clamp(
+                _safe_float(poisson_raw.get("league_away_default"), _safe_float(poisson_default.get("league_away_default"), 1.10)),
+                0.3,
+                4.0,
+            )
+            poisson_cfg["min_expected_home"] = _clamp(
+                _safe_float(poisson_raw.get("min_expected_home"), _safe_float(poisson_default.get("min_expected_home"), 0.15)),
+                0.01,
+                2.5,
+            )
+            poisson_cfg["min_expected_away"] = _clamp(
+                _safe_float(poisson_raw.get("min_expected_away"), _safe_float(poisson_default.get("min_expected_away"), 0.10)),
+                0.01,
+                2.5,
+            )
+
+    calibration_default = DEFAULT_MODEL_CONFIG["calibration"] if isinstance(DEFAULT_MODEL_CONFIG["calibration"], dict) else {}
+    calibration_raw = model_config.get("calibration", {})
+    if isinstance(calibration_raw, dict):
+        calibration_cfg = normalized["calibration"]
+        if isinstance(calibration_cfg, dict):
+            enabled_raw = calibration_raw.get("enabled")
+            calibration_cfg["enabled"] = bool(enabled_raw) if enabled_raw is not None else bool(calibration_default.get("enabled", True))
+            bins_raw = calibration_raw.get("bins")
+            bins_candidate = []
+            if isinstance(bins_raw, list):
+                for item in bins_raw:
+                    try:
+                        bins_candidate.append(float(item))
+                    except (TypeError, ValueError):
+                        continue
+            bins_candidate = sorted(set(bins_candidate))
+            if len(bins_candidate) < 2:
+                bins_candidate = [float(item) for item in calibration_default.get("bins", PROBABILITY_CALIBRATION_BINS)]
+            if not bins_candidate:
+                bins_candidate = PROBABILITY_CALIBRATION_BINS.copy()
+            if bins_candidate[0] > 0.0:
+                bins_candidate = [0.0] + bins_candidate
+            if bins_candidate[-1] <= 1.0:
+                bins_candidate.append(1.01)
+            calibration_cfg["bins"] = bins_candidate
+            calibration_cfg["min_history_matches"] = max(
+                10,
+                _safe_int(calibration_raw.get("min_history_matches"), _safe_int(calibration_default.get("min_history_matches"), 40)),
+            )
+            calibration_cfg["min_bucket_matches"] = max(
+                1,
+                _safe_int(calibration_raw.get("min_bucket_matches"), _safe_int(calibration_default.get("min_bucket_matches"), 8)),
+            )
+            calibration_cfg["baseline_weight"] = _clamp(
+                _safe_float(calibration_raw.get("baseline_weight"), _safe_float(calibration_default.get("baseline_weight"), 0.20)),
+                0.0,
+                1.0,
+            )
+            calibration_cfg["max_adjustment_weight"] = _clamp(
+                _safe_float(
+                    calibration_raw.get("max_adjustment_weight"),
+                    _safe_float(calibration_default.get("max_adjustment_weight"), 0.70),
+                ),
+                0.0,
+                1.0,
+            )
+            calibration_cfg["weight_sample_size"] = _clamp(
+                _safe_float(calibration_raw.get("weight_sample_size"), _safe_float(calibration_default.get("weight_sample_size"), 30.0)),
+                1.0,
+                500.0,
+            )
+
+    betting_default = DEFAULT_MODEL_CONFIG["betting"] if isinstance(DEFAULT_MODEL_CONFIG["betting"], dict) else {}
+    betting_raw = model_config.get("betting", {})
+    if isinstance(betting_raw, dict):
+        betting_cfg = normalized["betting"]
+        if isinstance(betting_cfg, dict):
+            betting_cfg["kelly_fractional"] = _clamp(
+                _safe_float(betting_raw.get("kelly_fractional"), _safe_float(betting_default.get("kelly_fractional"), 0.25)),
+                0.0,
+                1.0,
+            )
+
+    safe_default = DEFAULT_MODEL_CONFIG["safe_score"] if isinstance(DEFAULT_MODEL_CONFIG["safe_score"], dict) else {}
+    safe_raw = model_config.get("safe_score", {})
+    if isinstance(safe_raw, dict):
+        safe_cfg = normalized["safe_score"]
+        if isinstance(safe_cfg, dict):
+            safe_cfg["prob_weight"] = _clamp(
+                _safe_float(safe_raw.get("prob_weight"), _safe_float(safe_default.get("prob_weight"), 0.55)),
+                0.0,
+                5.0,
+            )
+            safe_cfg["ev_weight"] = _clamp(
+                _safe_float(safe_raw.get("ev_weight"), _safe_float(safe_default.get("ev_weight"), 2.5)),
+                0.0,
+                10.0,
+            )
+            safe_cfg["ev_cap"] = _clamp(
+                _safe_float(safe_raw.get("ev_cap"), _safe_float(safe_default.get("ev_cap"), 0.10)),
+                0.0,
+                1.0,
+            )
+            safe_cfg["bookmakers_weight"] = _clamp(
+                _safe_float(safe_raw.get("bookmakers_weight"), _safe_float(safe_default.get("bookmakers_weight"), 0.20)),
+                0.0,
+                5.0,
+            )
+            safe_cfg["bookmakers_cap"] = max(
+                1,
+                _safe_int(safe_raw.get("bookmakers_cap"), _safe_int(safe_default.get("bookmakers_cap"), 20)),
+            )
+            safe_cfg["odd_weight"] = _clamp(
+                _safe_float(safe_raw.get("odd_weight"), _safe_float(safe_default.get("odd_weight"), 0.05)),
+                0.0,
+                5.0,
+            )
+            safe_cfg["odd_reference"] = _clamp(
+                _safe_float(safe_raw.get("odd_reference"), _safe_float(safe_default.get("odd_reference"), 1.20)),
+                1.01,
+                20.0,
+            )
+            safe_cfg["odd_span"] = _clamp(
+                _safe_float(safe_raw.get("odd_span"), _safe_float(safe_default.get("odd_span"), 1.20)),
+                0.01,
+                20.0,
+            )
+
+    return normalized
 
 
 def _poisson_pmf(k: int, lam: float) -> float:
@@ -46,9 +244,22 @@ def _safe_mean(series: pd.Series, default: float) -> float:
     return float(value)
 
 
-def _expected_goals(played: pd.DataFrame, home_team: str, away_team: str) -> tuple[float, float]:
-    league_home_avg = _safe_mean(played["home_goals"], default=1.35)
-    league_away_avg = _safe_mean(played["away_goals"], default=1.10)
+def _expected_goals(
+    played: pd.DataFrame,
+    home_team: str,
+    away_team: str,
+    *,
+    model_config: dict[str, object] | None = None,
+) -> tuple[float, float]:
+    cfg = normalize_model_config(model_config)
+    poisson_cfg = cfg["poisson"] if isinstance(cfg.get("poisson"), dict) else {}
+    league_home_default = _safe_float(poisson_cfg.get("league_home_default"), 1.35)
+    league_away_default = _safe_float(poisson_cfg.get("league_away_default"), 1.10)
+    min_expected_home = _safe_float(poisson_cfg.get("min_expected_home"), 0.15)
+    min_expected_away = _safe_float(poisson_cfg.get("min_expected_away"), 0.10)
+
+    league_home_avg = _safe_mean(played["home_goals"], default=league_home_default)
+    league_away_avg = _safe_mean(played["away_goals"], default=league_away_default)
 
     home_home = played[played["home_team"] == home_team]
     away_away = played[played["away_team"] == away_team]
@@ -67,8 +278,8 @@ def _expected_goals(played: pd.DataFrame, home_team: str, away_team: str) -> tup
     attack_away = away_scored_away / max(league_away_avg, 0.01)
     defense_home = home_conceded_home / max(league_away_avg, 0.01)
 
-    expected_home = max(0.15, attack_home * defense_away * league_home_avg)
-    expected_away = max(0.10, attack_away * defense_home * league_away_avg)
+    expected_home = max(min_expected_home, attack_home * defense_away * league_home_avg)
+    expected_away = max(min_expected_away, attack_away * defense_home * league_away_avg)
 
     return expected_home, expected_away
 
@@ -77,12 +288,18 @@ def _calculate_raw_match_probabilities(
     played: pd.DataFrame,
     home_team: str,
     away_team: str,
-    max_goals: int = 5,
+    max_goals: int | None = None,
+    *,
+    model_config: dict[str, object] | None = None,
 ) -> MatchProbabilities:
-    expected_home, expected_away = _expected_goals(played, home_team, away_team)
+    cfg = normalize_model_config(model_config)
+    poisson_cfg = cfg["poisson"] if isinstance(cfg.get("poisson"), dict) else {}
+    resolved_max_goals = _safe_int(max_goals, _safe_int(poisson_cfg.get("max_goals"), 5)) if max_goals is not None else _safe_int(poisson_cfg.get("max_goals"), 5)
+    resolved_max_goals = max(3, min(10, resolved_max_goals))
+    expected_home, expected_away = _expected_goals(played, home_team, away_team, model_config=cfg)
 
-    probs_home = [_poisson_pmf(i, expected_home) for i in range(max_goals + 1)]
-    probs_away = [_poisson_pmf(i, expected_away) for i in range(max_goals + 1)]
+    probs_home = [_poisson_pmf(i, expected_home) for i in range(resolved_max_goals + 1)]
+    probs_away = [_poisson_pmf(i, expected_away) for i in range(resolved_max_goals + 1)]
 
     home_win = 0.0
     draw = 0.0
@@ -147,10 +364,34 @@ def _bucket_for_probability(probability: float, bins: list[float]) -> int:
 def build_probability_calibration(
     matches_df: pd.DataFrame,
     *,
-    min_history_matches: int = 40,
-    min_bucket_matches: int = 8,
-    max_goals: int = 5,
+    min_history_matches: int | None = None,
+    min_bucket_matches: int | None = None,
+    max_goals: int | None = None,
+    model_config: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    cfg = normalize_model_config(model_config)
+    calibration_cfg = cfg["calibration"] if isinstance(cfg.get("calibration"), dict) else {}
+    poisson_cfg = cfg["poisson"] if isinstance(cfg.get("poisson"), dict) else {}
+    resolved_min_history = (
+        max(10, _safe_int(min_history_matches, 40))
+        if min_history_matches is not None
+        else max(10, _safe_int(calibration_cfg.get("min_history_matches"), 40))
+    )
+    resolved_min_bucket = (
+        max(1, _safe_int(min_bucket_matches, 8))
+        if min_bucket_matches is not None
+        else max(1, _safe_int(calibration_cfg.get("min_bucket_matches"), 8))
+    )
+    resolved_max_goals = (
+        max(3, min(10, _safe_int(max_goals, 5)))
+        if max_goals is not None
+        else max(3, min(10, _safe_int(poisson_cfg.get("max_goals"), 5)))
+    )
+    bins = calibration_cfg.get("bins", PROBABILITY_CALIBRATION_BINS)
+    if not isinstance(bins, list):
+        bins = PROBABILITY_CALIBRATION_BINS
+    bins = [float(item) for item in bins]
+
     if "status" in matches_df.columns:
         finished = matches_df[matches_df["status"] == "Finalizado"].copy()
     else:
@@ -158,16 +399,16 @@ def build_probability_calibration(
     finished = _sort_finished_matches_for_backtest(finished)
     finished = finished.dropna(subset=["home_goals", "away_goals"])
 
-    if finished.empty or len(finished) <= min_history_matches:
+    if finished.empty or len(finished) <= resolved_min_history:
         return {
-            "bins": PROBABILITY_CALIBRATION_BINS,
-            "min_bucket_matches": min_bucket_matches,
+            "bins": bins,
+            "min_bucket_matches": resolved_min_bucket,
             "markets": {},
             "market_base": {},
         }
 
     rows: list[dict[str, object]] = []
-    for idx in range(min_history_matches, len(finished)):
+    for idx in range(resolved_min_history, len(finished)):
         row = finished.iloc[idx]
         history = finished.iloc[:idx].copy()
         try:
@@ -175,7 +416,8 @@ def build_probability_calibration(
                 history,
                 str(row["home_team"]),
                 str(row["away_team"]),
-                max_goals=max_goals,
+                max_goals=resolved_max_goals,
+                model_config=cfg,
             )
         except Exception:
             continue
@@ -185,15 +427,15 @@ def build_probability_calibration(
             rows.append(
                 {
                     "market": market,
-                    "bucket": _bucket_for_probability(float(probability), PROBABILITY_CALIBRATION_BINS),
+                    "bucket": _bucket_for_probability(float(probability), bins),
                     "hit": market == actual_market,
                 }
             )
 
     if not rows:
         return {
-            "bins": PROBABILITY_CALIBRATION_BINS,
-            "min_bucket_matches": min_bucket_matches,
+            "bins": bins,
+            "min_bucket_matches": resolved_min_bucket,
             "markets": {},
             "market_base": {},
         }
@@ -216,8 +458,8 @@ def build_probability_calibration(
         }
 
     return {
-        "bins": PROBABILITY_CALIBRATION_BINS,
-        "min_bucket_matches": min_bucket_matches,
+        "bins": bins,
+        "min_bucket_matches": resolved_min_bucket,
         "markets": markets,
         "market_base": {str(k): float(v) for k, v in market_base.items()},
     }
@@ -229,15 +471,18 @@ def _get_probability_calibration(
     min_history_matches: int,
     min_bucket_matches: int,
     max_goals: int,
+    bins: list[float],
+    model_config: dict[str, object] | None = None,
 ) -> dict[str, object]:
     cache = matches_df.attrs.setdefault("_probability_calibration_cache", {})
-    cache_key = (min_history_matches, min_bucket_matches, max_goals, len(matches_df))
+    cache_key = (min_history_matches, min_bucket_matches, max_goals, tuple(round(float(item), 6) for item in bins), len(matches_df))
     if cache_key not in cache:
         cache[cache_key] = build_probability_calibration(
             matches_df,
             min_history_matches=min_history_matches,
             min_bucket_matches=min_bucket_matches,
             max_goals=max_goals,
+            model_config=model_config,
         )
     return cache[cache_key]
 
@@ -245,12 +490,19 @@ def _get_probability_calibration(
 def _apply_probability_calibration(
     probs: MatchProbabilities,
     calibration: dict[str, object],
+    *,
+    model_config: dict[str, object] | None = None,
 ) -> MatchProbabilities:
+    cfg = normalize_model_config(model_config)
+    calibration_cfg = cfg["calibration"] if isinstance(cfg.get("calibration"), dict) else {}
     market_map = probability_map(probs)
     bins = calibration.get("bins", PROBABILITY_CALIBRATION_BINS)
     min_bucket_matches = int(calibration.get("min_bucket_matches", 0))
     calibration_markets = calibration.get("markets", {})
     market_base = calibration.get("market_base", {})
+    baseline_weight = _clamp(_safe_float(calibration_cfg.get("baseline_weight"), 0.20), 0.0, 1.0)
+    max_adjustment_weight = _clamp(_safe_float(calibration_cfg.get("max_adjustment_weight"), 0.70), 0.0, 1.0)
+    weight_sample_size = max(1.0, _safe_float(calibration_cfg.get("weight_sample_size"), 30.0))
 
     adjusted: dict[str, float] = {}
     for market, raw_probability in market_map.items():
@@ -267,8 +519,8 @@ def _apply_probability_calibration(
 
         empirical_rate = float(bucket_info.get("hit_rate", raw_probability))
         baseline_rate = float(market_base.get(market, empirical_rate))
-        stabilized_rate = empirical_rate * 0.8 + baseline_rate * 0.2
-        weight = min(0.7, (samples / 30.0) * 0.7)
+        stabilized_rate = empirical_rate * (1.0 - baseline_weight) + baseline_rate * baseline_weight
+        weight = min(max_adjustment_weight, (samples / weight_sample_size) * max_adjustment_weight)
         adjusted_probability = (float(raw_probability) * (1.0 - weight)) + (stabilized_rate * weight)
         adjusted[market] = max(0.01, adjusted_probability)
 
@@ -293,25 +545,60 @@ def calculate_match_probabilities(
     matches_df: pd.DataFrame,
     home_team: str,
     away_team: str,
-    max_goals: int = 5,
+    max_goals: int | None = None,
     *,
-    min_calibration_history: int = 40,
-    min_calibration_bucket: int = 8,
+    min_calibration_history: int | None = None,
+    min_calibration_bucket: int | None = None,
+    model_config: dict[str, object] | None = None,
 ) -> MatchProbabilities:
+    cfg = normalize_model_config(model_config)
+    poisson_cfg = cfg["poisson"] if isinstance(cfg.get("poisson"), dict) else {}
+    calibration_cfg = cfg["calibration"] if isinstance(cfg.get("calibration"), dict) else {}
+    resolved_max_goals = (
+        max(3, min(10, _safe_int(max_goals, 5)))
+        if max_goals is not None
+        else max(3, min(10, _safe_int(poisson_cfg.get("max_goals"), 5)))
+    )
+    resolved_min_history = (
+        max(10, _safe_int(min_calibration_history, 40))
+        if min_calibration_history is not None
+        else max(10, _safe_int(calibration_cfg.get("min_history_matches"), 40))
+    )
+    resolved_min_bucket = (
+        max(1, _safe_int(min_calibration_bucket, 8))
+        if min_calibration_bucket is not None
+        else max(1, _safe_int(calibration_cfg.get("min_bucket_matches"), 8))
+    )
+    bins = calibration_cfg.get("bins", PROBABILITY_CALIBRATION_BINS)
+    if not isinstance(bins, list):
+        bins = PROBABILITY_CALIBRATION_BINS
+    bins = [float(item) for item in bins]
+
     played = matches_df[matches_df["status"] == "Finalizado"].copy()
     if played.empty:
         raise ValueError("Nao ha jogos finalizados suficientes para calcular probabilidades.")
 
-    raw_probs = _calculate_raw_match_probabilities(played, home_team, away_team, max_goals=max_goals)
+    raw_probs = _calculate_raw_match_probabilities(
+        played,
+        home_team,
+        away_team,
+        max_goals=resolved_max_goals,
+        model_config=cfg,
+    )
+    if not bool(calibration_cfg.get("enabled", True)):
+        return raw_probs
+
     calibration = _get_probability_calibration(
         matches_df,
-        min_history_matches=min_calibration_history,
-        min_bucket_matches=min_calibration_bucket,
-        max_goals=max_goals,
+        min_history_matches=resolved_min_history,
+        min_bucket_matches=resolved_min_bucket,
+        max_goals=resolved_max_goals,
+        bins=bins,
+        model_config=cfg,
     )
     if not calibration.get("markets"):
         return raw_probs
-    return _apply_probability_calibration(raw_probs, calibration)
+    return _apply_probability_calibration(raw_probs, calibration, model_config=cfg)
 
 
 def get_team_context(matches_df: pd.DataFrame, team: str, recent_n: int = 5) -> dict:
@@ -385,8 +672,18 @@ def suggest_bet_strategy(
     odd_draw: float,
     odd_away: float,
     bankroll: float,
-    kelly_fractional: float = 0.25,
+    kelly_fractional: float | None = None,
+    *,
+    model_config: dict[str, object] | None = None,
 ) -> BettingSuggestion:
+    cfg = normalize_model_config(model_config)
+    betting_cfg = cfg["betting"] if isinstance(cfg.get("betting"), dict) else {}
+    resolved_kelly_fractional = (
+        _clamp(_safe_float(kelly_fractional, 0.25), 0.0, 1.0)
+        if kelly_fractional is not None
+        else _clamp(_safe_float(betting_cfg.get("kelly_fractional"), 0.25), 0.0, 1.0)
+    )
+
     markets = [
         ("Casa", probs.home_win, odd_home),
         ("Empate", probs.draw, odd_draw),
@@ -401,7 +698,7 @@ def suggest_bet_strategy(
         implied = 1.0 / odd
         ev = p_model * odd - 1.0
         kelly_full = max(0.0, (p_model * odd - 1.0) / (odd - 1.0))
-        kelly = kelly_full * kelly_fractional
+        kelly = kelly_full * resolved_kelly_fractional
         stake = bankroll * kelly
 
         candidates.append((label, odd, p_model, implied, ev, kelly, stake))
@@ -425,36 +722,56 @@ def suggest_bet_strategy(
 def build_safe_bets_table(
     matches_df: pd.DataFrame,
     bankroll: float,
-    kelly_fractional: float = 0.25,
+    kelly_fractional: float | None = None,
     min_model_prob: float = 0.55,
     min_expected_value: float = 0.02,
     max_odd: float = 2.20,
     min_bookmakers: int = 8,
+    *,
+    model_config: dict[str, object] | None = None,
 ) -> pd.DataFrame:
+    cfg = normalize_model_config(model_config)
+    betting_cfg = cfg["betting"] if isinstance(cfg.get("betting"), dict) else {}
+    safe_cfg = cfg["safe_score"] if isinstance(cfg.get("safe_score"), dict) else {}
+    resolved_kelly_fractional = (
+        _clamp(_safe_float(kelly_fractional, 0.25), 0.0, 1.0)
+        if kelly_fractional is not None
+        else _clamp(_safe_float(betting_cfg.get("kelly_fractional"), 0.25), 0.0, 1.0)
+    )
+    prob_weight = _safe_float(safe_cfg.get("prob_weight"), 0.55)
+    ev_weight = _safe_float(safe_cfg.get("ev_weight"), 2.5)
+    ev_cap = max(0.0, _safe_float(safe_cfg.get("ev_cap"), 0.10))
+    bookmakers_weight = _safe_float(safe_cfg.get("bookmakers_weight"), 0.20)
+    bookmakers_cap = max(1, _safe_int(safe_cfg.get("bookmakers_cap"), 20))
+    odd_weight = _safe_float(safe_cfg.get("odd_weight"), 0.05)
+    odd_reference = max(1.01, _safe_float(safe_cfg.get("odd_reference"), 1.20))
+    odd_span = max(0.01, _safe_float(safe_cfg.get("odd_span"), 1.20))
+
     fixtures = matches_df[matches_df["status"] == "Agendado"].copy()
     fixtures = fixtures.dropna(subset=["odds_home", "odds_draw", "odds_away"])
 
     rows: list[dict] = []
     for row in fixtures.itertuples(index=False):
         try:
-            probs = calculate_match_probabilities(matches_df, row.home_team, row.away_team)
+            probs = calculate_match_probabilities(matches_df, row.home_team, row.away_team, model_config=cfg)
             tip = suggest_bet_strategy(
                 probs=probs,
                 odd_home=float(row.odds_home),
                 odd_draw=float(row.odds_draw),
                 odd_away=float(row.odds_away),
                 bankroll=float(bankroll),
-                kelly_fractional=float(kelly_fractional),
+                kelly_fractional=resolved_kelly_fractional,
+                model_config=cfg,
             )
         except Exception:
             continue
 
         bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
         safety_score = (
-            tip.model_probability * 0.55
-            + max(0.0, min(0.10, tip.expected_value)) * 2.5
-            + max(0, min(bookmakers, 20)) / 20 * 0.20
-            + max(0.0, 1.0 - (tip.best_odd - 1.20) / 1.20) * 0.05
+            tip.model_probability * prob_weight
+            + max(0.0, min(ev_cap, tip.expected_value)) * ev_weight
+            + max(0, min(bookmakers, bookmakers_cap)) / bookmakers_cap * bookmakers_weight
+            + max(0.0, 1.0 - (tip.best_odd - odd_reference) / odd_span) * odd_weight
         )
 
         rows.append(
@@ -558,10 +875,19 @@ def build_backtest_table(
     matches_df: pd.DataFrame,
     *,
     bankroll: float = 1000.0,
-    kelly_fractional: float = 0.25,
+    kelly_fractional: float | None = None,
     min_history_matches: int = 30,
     max_evaluated_matches: int = 120,
+    model_config: dict[str, object] | None = None,
 ) -> pd.DataFrame:
+    cfg = normalize_model_config(model_config)
+    betting_cfg = cfg["betting"] if isinstance(cfg.get("betting"), dict) else {}
+    resolved_kelly_fractional = (
+        _clamp(_safe_float(kelly_fractional, 0.25), 0.0, 1.0)
+        if kelly_fractional is not None
+        else _clamp(_safe_float(betting_cfg.get("kelly_fractional"), 0.25), 0.0, 1.0)
+    )
+
     finished = _sort_finished_matches_for_backtest(matches_df)
     finished = finished.dropna(subset=["home_goals", "away_goals", "odds_home", "odds_draw", "odds_away"])
     if finished.empty or len(finished) <= min_history_matches:
@@ -577,14 +903,15 @@ def build_backtest_table(
             continue
 
         try:
-            probs = calculate_match_probabilities(history, str(row["home_team"]), str(row["away_team"]))
+            probs = calculate_match_probabilities(history, str(row["home_team"]), str(row["away_team"]), model_config=cfg)
             tip = suggest_bet_strategy(
                 probs=probs,
                 odd_home=float(row["odds_home"]),
                 odd_draw=float(row["odds_draw"]),
                 odd_away=float(row["odds_away"]),
                 bankroll=float(bankroll),
-                kelly_fractional=float(kelly_fractional),
+                kelly_fractional=resolved_kelly_fractional,
+                model_config=cfg,
             )
         except Exception:
             continue
