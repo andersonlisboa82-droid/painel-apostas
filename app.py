@@ -122,6 +122,7 @@ INDEX_HTML_FILE = APP_DIR / "index.html"
 WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
 MODEL_CONFIG_SESSION_KEY = "runtime_model_config"
 MODEL_CONFIG_FEEDBACK_KEY = "_runtime_model_feedback"
+PORTAL_REFRESH_FEEDBACK_KEY = "_portal_refresh_feedback"
 
 
 def _get_runtime_model_config() -> dict[str, object]:
@@ -2879,7 +2880,32 @@ with st.sidebar:
             st.rerun()
 
     if st.button("Atualizar agora", use_container_width=True):
-        st.cache_data.clear()
+        status_box = st.empty()
+        progress_box = st.empty()
+        status_box.info("Atualizando portal completo (scraping + reprocessamento)...")
+        progress_widget = progress_box.progress(0)
+
+        def on_refresh_progress(progress: int, message: str, _stage: str) -> None:
+            bounded = max(0, min(100, int(progress)))
+            try:
+                progress_widget.progress(bounded, text=message)
+            except TypeError:
+                progress_widget.progress(bounded)
+                status_box.info(message)
+
+        try:
+            ensure_portal_ai_server_running()
+            payload = refresh_portal_snapshot_with_progress(progress_callback=on_refresh_progress)
+            try:
+                progress_widget.progress(100, text="Atualizacao concluida.")
+            except TypeError:
+                progress_widget.progress(100)
+                status_box.success("Atualizacao concluida.")
+            st.cache_data.clear()
+            updated_at = str(payload.get("updated_at", "agora"))
+            st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Portal atualizado com sucesso em {updated_at}."
+        except Exception as exc:
+            st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Falha ao atualizar o portal: {exc}"
         st.rerun()
 
     st.markdown("---")
@@ -2902,6 +2928,12 @@ runtime_model_config = _get_runtime_model_config()
 runtime_feedback = str(st.session_state.pop(MODEL_CONFIG_FEEDBACK_KEY, "")).strip()
 if runtime_feedback:
     st.success(runtime_feedback)
+portal_refresh_feedback = str(st.session_state.pop(PORTAL_REFRESH_FEEDBACK_KEY, "")).strip()
+if portal_refresh_feedback:
+    if portal_refresh_feedback.lower().startswith("falha"):
+        st.error(portal_refresh_feedback)
+    else:
+        st.success(portal_refresh_feedback)
 
 try:
     competition, df, competition_load_warning = get_data_with_fallback(competition)
@@ -3218,7 +3250,7 @@ elif page == "Configuracoes":
             "Competicao: muda o universo de jogos analisados no portal.",
             "Filtrar por time: reduz a leitura para confrontos do clube ou selecao desejada.",
             "Perfil de risco: troca a regua de probabilidade, EV, odd maxima e casas minimas.",
-            "Atualizar agora: limpa cache e recarrega os dados da sessao.",
+            "Atualizar agora: refaz o scraping e regenera o portal completo (pode levar alguns segundos).",
         ],
         tone="neutral",
     )
