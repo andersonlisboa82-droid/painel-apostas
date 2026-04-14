@@ -4,6 +4,7 @@ import json
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,7 +31,7 @@ from real_match_stats import (
     get_real_match_stats,
     prefetch_finished_match_stats,
 )
-from scraper import COMPETITIONS, load_all_matches
+from scraper import COMPETITIONS, load_all_matches, load_competition_matches
 
 
 HOST = "0.0.0.0"
@@ -66,7 +67,7 @@ def get_cached_matches() -> pd.DataFrame:
         if _matches_cache and (time.time() - _matches_cache.loaded_at) < CACHE_TTL_SECONDS:
             return _matches_cache.frame.copy()
 
-        frame = load_all_matches()
+        frame = _load_all_matches_parallel()
         _matches_cache = CachedMatches(loaded_at=time.time(), frame=frame.copy())
         return frame
 
@@ -83,6 +84,109 @@ def _emit_refresh_progress(
         callback(int(progress), str(message), str(stage))
     except Exception:
         return
+
+
+def _load_all_matches_parallel(
+    progress_callback: Callable[[int, str, str], None] | None = None,
+) -> pd.DataFrame:
+    competitions = list(COMPETITIONS.keys())
+    total = len(competitions)
+    if total == 0:
+        return load_all_matches()
+
+    results: dict[str, pd.DataFrame] = {}
+    failures: dict[str, str] = {}
+    done = 0
+
+    _emit_refresh_progress(
+        progress_callback,
+        18,
+        "Iniciando coleta paralela de resultados e odds...",
+        "fetch_matches",
+    )
+
+    max_workers = min(6, total)
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="scrape-comp") as executor:
+        future_to_comp = {
+            executor.submit(load_competition_matches, competition): competition
+            for competition in competitions
+        }
+        for future in as_completed(future_to_comp):
+            competition = future_to_comp[future]
+            try:
+                frame = future.result()
+                results[competition] = frame
+            except Exception as exc:
+                failures[competition] = str(exc)
+            done += 1
+            bounded_progress = 18 + int((done / total) * 18)
+            _emit_refresh_progress(
+                progress_callback,
+                bounded_progress,
+                f"Coleta concluida: {done}/{total} competicoes.",
+                "fetch_matches",
+            )
+
+    if not results:
+        details = "; ".join(f"{k}: {v}" for k, v in failures.items()) or "sem detalhes"
+        raise RuntimeError(f"Falha ao coletar dados de todas as competicoes ({details}).")
+
+    ordered_frames = [results[competition] for competition in competitions if competition in results]
+    frame = pd.concat(ordered_frames, ignore_index=True)
+
+    if failures:
+        failed_list = ", ".join(sorted(failures))
+        _emit_refresh_progress(
+            progress_callback,
+            36,
+            f"Coleta parcial concluida. Competicoes com falha: {failed_list}.",
+            "fetch_matches",
+        )
+    else:
+        _emit_refresh_progress(
+            progress_callback,
+            36,
+            "Coleta de resultados e odds concluida para todas as competicoes.",
+            "fetch_matches",
+        )
+
+    return frame
+
+
+def _run_with_stage_heartbeat(
+    progress_callback: Callable[[int, str, str], None] | None,
+    *,
+    progress: int,
+    stage: str,
+    start_message: str,
+    pulse_message: str,
+    work: Callable[[], object],
+    pulse_seconds: float = 8.0,
+) -> object:
+    _emit_refresh_progress(progress_callback, progress, start_message, stage)
+    if progress_callback is None:
+        return work()
+
+    stop_event = threading.Event()
+    started_at = time.time()
+
+    def heartbeat() -> None:
+        while not stop_event.wait(pulse_seconds):
+            elapsed = int(time.time() - started_at)
+            _emit_refresh_progress(
+                progress_callback,
+                progress,
+                f"{pulse_message} ({elapsed}s decorridos)...",
+                stage,
+            )
+
+    ticker = threading.Thread(target=heartbeat, daemon=True, name=f"refresh-heartbeat-{stage}")
+    ticker.start()
+    try:
+        return work()
+    finally:
+        stop_event.set()
+        ticker.join(timeout=0.2)
 
 
 def _now_iso() -> str:
@@ -206,23 +310,36 @@ def refresh_portal_snapshot_with_progress(
     with _cache_lock:
         _matches_cache = None
 
-    _emit_refresh_progress(progress_callback, 18, "Buscando resultados e odds mais recentes...", "fetch_matches")
-    matches_frame = get_cached_matches()
-    _emit_refresh_progress(progress_callback, 38, "Atualizando historico de cartoes e escanteios...", "prefetch_real_stats")
-    real_stats_report = prefetch_finished_match_stats(
-        matches_frame,
-        competitions=list(COMPETITIONS.keys()),
-        per_competition_limit=20,
-        max_workers=6,
-        force_refresh=False,
+    matches_frame = _load_all_matches_parallel(progress_callback=progress_callback)
+    with _cache_lock:
+        _matches_cache = CachedMatches(loaded_at=time.time(), frame=matches_frame.copy())
+    real_stats_report = _run_with_stage_heartbeat(
+        progress_callback,
+        progress=38,
+        stage="prefetch_real_stats",
+        start_message="Atualizando historico de cartoes e escanteios...",
+        pulse_message="Atualizando historico de cartoes e escanteios",
+        work=lambda: prefetch_finished_match_stats(
+            matches_frame,
+            competitions=list(COMPETITIONS.keys()),
+            per_competition_limit=20,
+            max_workers=6,
+            force_refresh=False,
+        ),
     )
     _emit_refresh_progress(progress_callback, 62, "Consolidando dados por competicao...", "prepare_frames")
     competition_frames = {
         competition: matches_frame[matches_frame["competition"] == competition].copy()
         for competition in COMPETITIONS
     }
-    _emit_refresh_progress(progress_callback, 82, "Regenerando o HTML do painel...", "build_html")
-    html = build_index_html(competition_frames=competition_frames)
+    html = _run_with_stage_heartbeat(
+        progress_callback,
+        progress=82,
+        stage="build_html",
+        start_message="Regenerando o HTML do painel...",
+        pulse_message="Regenerando o HTML do painel",
+        work=lambda: build_index_html(competition_frames=competition_frames),
+    )
     dashboard_path = BASE_DIR / "index.html"
     _emit_refresh_progress(progress_callback, 94, "Salvando arquivo atualizado do painel...", "write_file")
     dashboard_path.write_text(html, encoding="utf-8")
