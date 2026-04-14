@@ -3303,17 +3303,52 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     function requestStreamlitPortalRefresh() {{
-      let targetWindow = window;
+      const candidates = [];
       try {{
-        if (window.top && window.top.location) {{
-          targetWindow = window.top;
+        if (document.referrer && /^https?:/i.test(document.referrer)) {{
+          candidates.push(document.referrer);
         }}
       }} catch (error) {{}}
-      const targetUrl = new URL(targetWindow.location.href);
+      try {{
+        if (window.top && window.top.location && /^https?:/i.test(window.top.location.href)) {{
+          candidates.push(window.top.location.href);
+        }}
+      }} catch (error) {{}}
+      try {{
+        if (window.parent && window.parent.location && /^https?:/i.test(window.parent.location.href)) {{
+          candidates.push(window.parent.location.href);
+        }}
+      }} catch (error) {{}}
+      try {{
+        if (window.location && /^https?:/i.test(window.location.href)) {{
+          candidates.push(window.location.href);
+        }}
+      }} catch (error) {{}}
+
+      let targetUrl = null;
+      for (const candidate of candidates) {{
+        try {{
+          targetUrl = new URL(candidate);
+          break;
+        }} catch (error) {{}}
+      }}
+      if (!targetUrl) {{
+        targetUrl = new URL('https://' + resolvePortalHost() + '/');
+      }}
+
       targetUrl.searchParams.set('view', 'portal');
       targetUrl.searchParams.set('refresh_portal', '1');
       targetUrl.searchParams.set('refresh_nonce', String(Date.now()));
-      targetWindow.location.assign(targetUrl.toString());
+      const finalUrl = targetUrl.toString();
+      try {{
+        window.open(finalUrl, '_top');
+        return;
+      }} catch (error) {{}}
+      try {{
+        window.location.assign(finalUrl);
+        return;
+      }} catch (error) {{}}
+      window.location.href = finalUrl;
     }}
 
     function waitMs(ms) {{
