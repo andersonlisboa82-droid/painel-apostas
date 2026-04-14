@@ -1095,7 +1095,10 @@ def _run_public_portal_refresh_if_requested() -> bool:
                 progress_widget.progress(bounded)
                 status_box.info(message)
 
-        payload = refresh_portal_snapshot_with_progress(progress_callback=on_progress)
+        payload = refresh_portal_snapshot_with_progress(
+            progress_callback=on_progress,
+            prefetch_real_stats=False,
+        )
         try:
             progress_widget.progress(100, text="Atualizacao concluida.")
         except TypeError:
@@ -2897,7 +2900,10 @@ with st.sidebar:
 
         try:
             ensure_portal_ai_server_running()
-            payload = refresh_portal_snapshot_with_progress(progress_callback=on_refresh_progress)
+            payload = refresh_portal_snapshot_with_progress(
+                progress_callback=on_refresh_progress,
+                prefetch_real_stats=False,
+            )
             try:
                 progress_widget.progress(100, text="Atualizacao concluida.")
             except TypeError:

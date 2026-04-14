@@ -304,6 +304,8 @@ def refresh_portal_snapshot() -> dict[str, object]:
 
 def refresh_portal_snapshot_with_progress(
     progress_callback: Callable[[int, str, str], None] | None = None,
+    *,
+    prefetch_real_stats: bool = True,
 ) -> dict[str, object]:
     global _matches_cache
     _emit_refresh_progress(progress_callback, 5, "Limpando cache local de partidas...", "cache")
@@ -313,20 +315,37 @@ def refresh_portal_snapshot_with_progress(
     matches_frame = _load_all_matches_parallel(progress_callback=progress_callback)
     with _cache_lock:
         _matches_cache = CachedMatches(loaded_at=time.time(), frame=matches_frame.copy())
-    real_stats_report = _run_with_stage_heartbeat(
-        progress_callback,
-        progress=38,
-        stage="prefetch_real_stats",
-        start_message="Atualizando historico de cartoes e escanteios...",
-        pulse_message="Atualizando historico de cartoes e escanteios",
-        work=lambda: prefetch_finished_match_stats(
-            matches_frame,
-            competitions=list(COMPETITIONS.keys()),
-            per_competition_limit=20,
-            max_workers=6,
-            force_refresh=False,
-        ),
-    )
+    if prefetch_real_stats:
+        real_stats_report = _run_with_stage_heartbeat(
+            progress_callback,
+            progress=38,
+            stage="prefetch_real_stats",
+            start_message="Atualizando historico de cartoes e escanteios...",
+            pulse_message="Atualizando historico de cartoes e escanteios",
+            work=lambda: prefetch_finished_match_stats(
+                matches_frame,
+                competitions=list(COMPETITIONS.keys()),
+                per_competition_limit=20,
+                max_workers=6,
+                force_refresh=False,
+            ),
+        )
+    else:
+        _emit_refresh_progress(
+            progress_callback,
+            38,
+            "Pulando pre-carga de cartoes/escanteios para acelerar atualizacao...",
+            "prefetch_real_stats",
+        )
+        real_stats_report = {
+            "ok": True,
+            "skipped": True,
+            "message": "Pre-carga de cartoes/escanteios pulada para modo rapido.",
+            "available_total": 0,
+            "saved_now": 0,
+            "missing_total": 0,
+            "errors_total": 0,
+        }
     _emit_refresh_progress(progress_callback, 62, "Consolidando dados por competicao...", "prepare_frames")
     competition_frames = {
         competition: matches_frame[matches_frame["competition"] == competition].copy()
