@@ -123,6 +123,7 @@ WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
 MODEL_CONFIG_SESSION_KEY = "runtime_model_config"
 MODEL_CONFIG_FEEDBACK_KEY = "_runtime_model_feedback"
 PORTAL_REFRESH_FEEDBACK_KEY = "_portal_refresh_feedback"
+APP_RELEASE_LABEL = "2026-04-13 22:45 | 29fa34a"
 
 
 def _get_runtime_model_config() -> dict[str, object]:
@@ -2560,6 +2561,7 @@ with st.sidebar:
         st.session_state["page_menu_v4"] = st.session_state.pop("pending_page_menu_v4")
 
     st.markdown("### Football Data Desk")
+    st.caption(f"Release app: {APP_RELEASE_LABEL}")
     page = st.radio(
         "Menus",
         options=[
