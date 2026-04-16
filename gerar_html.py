@@ -1778,12 +1778,18 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     
     .floating-actions {{
       position: fixed;
-      bottom: 24px;
-      right: 24px;
+      top: 14px;
+      right: 18px;
       display: flex;
-      flex-direction: column;
-      gap: 12px;
+      flex-direction: row;
+      gap: 10px;
       z-index: 1000;
+      padding: 8px;
+      border-radius: 999px;
+      background: rgba(8,22,37,.72);
+      border: 1px solid rgba(191,219,254,.22);
+      box-shadow: 0 12px 28px rgba(8,22,37,.30);
+      backdrop-filter: blur(8px);
     }}
     .btn-float {{
       width: 52px;
@@ -1973,6 +1979,9 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: 1fr; }}
       .topbar, .brand-block, .topbar-meta {{ flex-direction: column; align-items: flex-start; }}
       .btn, .btn-link {{ width: 100%; }}
+      .floating-actions {{ top: 10px; right: 10px; gap: 8px; padding: 6px; }}
+      .btn-float {{ width: 44px; height: 44px; }}
+      .btn-float svg {{ width: 20px; height: 20px; }}
       .analysis-selector-row {{ grid-template-columns: 1fr; }}
       table {{ min-width: 640px; }}
     }}
@@ -2345,10 +2354,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
   </div>
 
   <div class="floating-actions">
-    <button id="scrollToTop" class="btn-float" title="Voltar ao topo" style="display:none;">
+    <button id="scrollToTop" class="btn-float" title="Voltar ao topo">
       <svg viewBox="0 0 24 24"><path d="M12 4l-8 8h16l-8-8z"/></svg>
     </button>
-    <button id="scrollToBottom" class="btn-float" title="Ir para o final da pagina" style="display:none;">
+    <button id="scrollToBottom" class="btn-float" title="Ir para o final da pagina">
       <svg viewBox="0 0 24 24"><path d="M12 20l8-8H4l8 8z"/></svg>
     </button>
     <button id="quickRefresh" class="btn-float" title="Atualizar placares em tempo real" type="button">
@@ -2417,10 +2426,12 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const nearBottom = scrollTop + viewportHeight >= docHeight - 240;
 
       if (scrollTopBtn) {{
-        scrollTopBtn.style.display = nearTop ? 'none' : 'grid';
+        scrollTopBtn.disabled = nearTop;
+        scrollTopBtn.setAttribute('aria-disabled', nearTop ? 'true' : 'false');
       }}
       if (scrollBottomBtn) {{
-        scrollBottomBtn.style.display = nearBottom ? 'none' : 'grid';
+        scrollBottomBtn.disabled = nearBottom;
+        scrollBottomBtn.setAttribute('aria-disabled', nearBottom ? 'true' : 'false');
       }}
     }}
 
