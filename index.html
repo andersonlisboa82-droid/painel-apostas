@@ -987,7 +987,7 @@
         </div>
       </div>
       <div class="topbar-meta">
-        <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> 13/04/2026 23:02:35</div>
+        <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> <span id="portalUpdatedAt">13/04/2026 23:02:35</span></div>
         <div class="meta-pill"><strong>Release</strong> 11/04/2026 | v2-modern-canvas</div>
         <div class="meta-pill"><strong>6</strong> competicoes no radar</div>
         <div class="meta-pill"><strong>22%</strong> cobertura de odds</div>
@@ -2411,6 +2411,40 @@ Se nao houver apostas com valor estatistico claro, informe explicitamente.</text
     let refreshAutomationTicker = null;
     let refreshAutomationIndex = 0;
 
+    function extractUpdatedAtFromUrl(rawUrl) {
+      try {
+        if (!rawUrl || !/^https?:/i.test(rawUrl)) return '';
+        const parsed = new URL(rawUrl);
+        return (parsed.searchParams.get('updated_at') || '').trim();
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function syncUpdatedBadgeWithParentQuery() {
+      const target = document.getElementById('portalUpdatedAt');
+      if (!target) return;
+
+      const candidates = [];
+      try {
+        candidates.push(document.referrer || '');
+      } catch (error) {}
+      try {
+        candidates.push(window.top && window.top.location && window.top.location.href ? window.top.location.href : '');
+      } catch (error) {}
+      try {
+        candidates.push(window.parent && window.parent.location && window.parent.location.href ? window.parent.location.href : '');
+      } catch (error) {}
+
+      for (const candidate of candidates) {
+        const extracted = extractUpdatedAtFromUrl(candidate);
+        if (extracted) {
+          target.textContent = extracted;
+          return;
+        }
+      }
+    }
+
     function getDocumentScrollHeight() {
       return Math.max(
         document.body.scrollHeight,
@@ -2455,6 +2489,7 @@ Se nao houver apostas com valor estatistico claro, informe explicitamente.</text
     }
 
     updateScrollIndicators();
+    syncUpdatedBadgeWithParentQuery();
 
     function stopRefreshAutomationTicker() {
       if (!refreshAutomationTicker) return;

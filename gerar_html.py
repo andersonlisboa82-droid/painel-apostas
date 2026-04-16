@@ -1998,7 +1998,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         </div>
       </div>
       <div class="topbar-meta">
-        <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> {_current_app_timestamp()}</div>
+        <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> <span id="portalUpdatedAt">{_current_app_timestamp()}</span></div>
         <div class="meta-pill"><strong>Release</strong> {PORTAL_RELEASE_LABEL}</div>
         <div class="meta-pill"><strong>{competition_count}</strong> competicoes no radar</div>
         <div class="meta-pill"><strong>{odds_coverage}%</strong> cobertura de odds</div>
@@ -2407,6 +2407,40 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     let refreshAutomationTicker = null;
     let refreshAutomationIndex = 0;
 
+    function extractUpdatedAtFromUrl(rawUrl) {{
+      try {{
+        if (!rawUrl || !/^https?:/i.test(rawUrl)) return '';
+        const parsed = new URL(rawUrl);
+        return (parsed.searchParams.get('updated_at') || '').trim();
+      }} catch (error) {{
+        return '';
+      }}
+    }}
+
+    function syncUpdatedBadgeWithParentQuery() {{
+      const target = document.getElementById('portalUpdatedAt');
+      if (!target) return;
+
+      const candidates = [];
+      try {{
+        candidates.push(document.referrer || '');
+      }} catch (error) {{}}
+      try {{
+        candidates.push(window.top && window.top.location && window.top.location.href ? window.top.location.href : '');
+      }} catch (error) {{}}
+      try {{
+        candidates.push(window.parent && window.parent.location && window.parent.location.href ? window.parent.location.href : '');
+      }} catch (error) {{}}
+
+      for (const candidate of candidates) {{
+        const extracted = extractUpdatedAtFromUrl(candidate);
+        if (extracted) {{
+          target.textContent = extracted;
+          return;
+        }}
+      }}
+    }}
+
     function getDocumentScrollHeight() {{
       return Math.max(
         document.body.scrollHeight,
@@ -2451,6 +2485,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     updateScrollIndicators();
+    syncUpdatedBadgeWithParentQuery();
 
     function stopRefreshAutomationTicker() {{
       if (!refreshAutomationTicker) return;

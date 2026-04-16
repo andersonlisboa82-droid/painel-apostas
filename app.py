@@ -1081,6 +1081,7 @@ def _run_public_portal_refresh_if_requested() -> bool:
     if refresh_nonce == last_nonce:
         return False
 
+    refreshed_updated_at = ""
     try:
         status_box = st.empty()
         progress_box = st.empty()
@@ -1105,13 +1106,17 @@ def _run_public_portal_refresh_if_requested() -> bool:
             progress_widget.progress(100)
             status_box.success("Atualizacao concluida.")
         updated_at = str(payload.get("updated_at", "agora"))
+        refreshed_updated_at = updated_at
         st.session_state["_public_portal_refresh_feedback"] = f"Portal atualizado com sucesso em {updated_at}."
     except Exception as exc:
         st.session_state["_public_portal_refresh_feedback"] = f"Falha ao atualizar o portal: {exc}"
     finally:
         st.session_state["_public_portal_refresh_nonce"] = refresh_nonce
 
-    _set_public_query_params({"view": "portal"})
+    next_params = {"view": "portal"}
+    if refreshed_updated_at:
+        next_params["updated_at"] = refreshed_updated_at
+    _set_public_query_params(next_params)
     st.rerun()
     return True
 
