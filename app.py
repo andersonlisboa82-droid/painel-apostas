@@ -667,7 +667,7 @@ def _safe_percent(numerator: int | float, denominator: int | float) -> int:
     return round((float(numerator) / float(denominator)) * 100)
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_data(competition: str) -> pd.DataFrame:
     return load_competition_matches(competition)
 
