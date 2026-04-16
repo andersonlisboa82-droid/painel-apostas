@@ -3442,6 +3442,16 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       targetUrl.searchParams.set('refresh_nonce', String(Date.now()));
       const finalUrl = targetUrl.toString();
       try {{
+        const directLink = document.createElement('a');
+        directLink.href = finalUrl;
+        directLink.target = '_top';
+        directLink.rel = 'noopener';
+        directLink.style.display = 'none';
+        document.body.appendChild(directLink);
+        directLink.click();
+        window.setTimeout(() => directLink.remove(), 250);
+      }} catch (error) {{}}
+      try {{
         if (window.parent) {{
           window.parent.postMessage({{ type: 'fd-portal-refresh', url: finalUrl }}, '*');
         }}

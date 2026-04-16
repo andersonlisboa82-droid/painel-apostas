@@ -3,6 +3,7 @@
 import json
 import importlib
 import os
+import re
 import socket
 import sys
 import threading
@@ -871,9 +872,40 @@ def render_callout_grid(items: list[dict[str, str]]) -> None:
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
-def render_embedded_index_portal() -> None:
+def _inject_portal_updated_badge(html: str, updated_at_value: str) -> str:
+    stamp = str(updated_at_value or "").strip()
+    if not stamp:
+        return html
+    safe_stamp = escape(stamp)
+    return re.sub(
+        r'(<span id="portalUpdatedAt">)(.*?)(</span>)',
+        rf"\1{safe_stamp}\3",
+        html,
+        count=1,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+
+def render_embedded_index_portal(updated_at_override: str = "") -> None:
     ensure_portal_ai_server_running()
-    components.html(_load_index_portal_html(), height=1200, scrolling=True)
+    html = _load_index_portal_html()
+    html = _inject_portal_updated_badge(html, updated_at_override)
+    components.html(html, height=1200, scrolling=True)
+
+
+def render_public_portal_refresh_button() -> None:
+    refresh_href = f"?view=portal&refresh_portal=1&refresh_nonce={int(time.time() * 1000)}"
+    st.markdown(
+        f"""
+<div style="position:fixed;top:18px;right:18px;z-index:2100;">
+  <a href="{escape(refresh_href)}" target="_self"
+     style="display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:999px;
+            background:#1d4ed8;color:#fff;text-decoration:none;font:900 1.35rem/1 'Space Grotesk',sans-serif;
+            box-shadow:0 12px 24px rgba(29,78,216,.34);border:1px solid rgba(191,219,254,.36);">↻</a>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 @st.cache_data(show_spinner=False)
@@ -1106,6 +1138,7 @@ def _run_public_portal_refresh_if_requested() -> bool:
             progress_widget.progress(100)
             status_box.success("Atualizacao concluida.")
         updated_at = str(payload.get("updated_at", "agora"))
+        st.session_state["_public_portal_last_updated_at"] = updated_at
         refreshed_updated_at = updated_at
         st.session_state["_public_portal_refresh_feedback"] = f"Portal atualizado com sucesso em {updated_at}."
     except Exception as exc:
@@ -1129,6 +1162,7 @@ if public_home_view == "portal":
     if _run_public_portal_refresh_if_requested():
         st.stop()
     set_public_portal_shell()
+    render_public_portal_refresh_button()
     render_public_back_button()
     feedback = st.session_state.pop("_public_portal_refresh_feedback", "")
     if feedback:
@@ -1136,7 +1170,10 @@ if public_home_view == "portal":
             st.error(feedback)
         else:
             st.success(feedback)
-    render_embedded_index_portal()
+    updated_at_override = _query_param_str("updated_at", "").strip()
+    if not updated_at_override:
+        updated_at_override = str(st.session_state.get("_public_portal_last_updated_at", "")).strip()
+    render_embedded_index_portal(updated_at_override=updated_at_override)
     st.stop()
 if public_home_view == "copa":
     set_public_portal_shell()
