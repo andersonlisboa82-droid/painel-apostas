@@ -2484,6 +2484,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       }};
     }}
 
+    installParentRefreshBridge();
     updateScrollIndicators();
     syncUpdatedBadgeWithParentQuery();
 
@@ -3349,6 +3350,26 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       return '127.0.0.1';
     }}
 
+    function installParentRefreshBridge() {{
+      try {{
+        const parentWindow = window.parent;
+        if (!parentWindow || parentWindow === window) return;
+        if (parentWindow.__fdPortalRefreshBridgeInstalled) return;
+        parentWindow.__fdPortalRefreshBridgeInstalled = true;
+        parentWindow.addEventListener('message', (event) => {{
+          const payload = event && event.data ? event.data : null;
+          if (!payload || payload.type !== 'fd-portal-refresh') return;
+          const targetUrl = String(payload.url || '').trim();
+          if (!/^https?:\\/\\//i.test(targetUrl)) return;
+          try {{
+            parentWindow.location.assign(targetUrl);
+          }} catch (error) {{
+            parentWindow.location.href = targetUrl;
+          }}
+        }});
+      }} catch (error) {{}}
+    }}
+
     function isStreamlitCloudRuntime(apiHost) {{
       const host = String(apiHost || '').toLowerCase();
       if (host.includes('streamlit.app')) return true;
@@ -3420,6 +3441,17 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       targetUrl.searchParams.set('refresh_portal', '1');
       targetUrl.searchParams.set('refresh_nonce', String(Date.now()));
       const finalUrl = targetUrl.toString();
+      try {{
+        if (window.parent) {{
+          window.parent.postMessage({{ type: 'fd-portal-refresh', url: finalUrl }}, '*');
+        }}
+      }} catch (error) {{}}
+      try {{
+        if (window.parent && window.parent !== window) {{
+          window.parent.location.assign(finalUrl);
+          return;
+        }}
+      }} catch (error) {{}}
       try {{
         window.open(finalUrl, '_top');
         return;
