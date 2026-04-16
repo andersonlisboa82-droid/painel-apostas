@@ -908,6 +908,31 @@ def render_public_portal_refresh_button() -> None:
     )
 
 
+def render_public_model_criteria_help() -> None:
+    cfg = _get_runtime_model_config()
+    poisson_cfg = cfg.get("poisson", {}) if isinstance(cfg, dict) else {}
+    calibration_cfg = cfg.get("calibration", {}) if isinstance(cfg, dict) else {}
+    betting_cfg = cfg.get("betting", {}) if isinstance(cfg, dict) else {}
+    safe_cfg = cfg.get("safe_score", {}) if isinstance(cfg, dict) else {}
+    poisson_cfg = poisson_cfg if isinstance(poisson_cfg, dict) else {}
+    calibration_cfg = calibration_cfg if isinstance(calibration_cfg, dict) else {}
+    betting_cfg = betting_cfg if isinstance(betting_cfg, dict) else {}
+    safe_cfg = safe_cfg if isinstance(safe_cfg, dict) else {}
+
+    with st.expander("Criterios do modelo e recalibracao", expanded=False):
+        st.markdown(
+            f"""
+- Poisson: `max_goals={int(poisson_cfg.get('max_goals', 5))}` | `home_default={float(poisson_cfg.get('league_home_default', 1.35)):.2f}` | `away_default={float(poisson_cfg.get('league_away_default', 1.10)):.2f}`.
+- Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}` | `min_history={int(calibration_cfg.get('min_history_matches', 40))}` | `min_bucket={int(calibration_cfg.get('min_bucket_matches', 8))}`.
+- Stake: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`.
+- Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}` | `ev_weight={float(safe_cfg.get('ev_weight', 2.5)):.2f}` | `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`.
+"""
+        )
+        st.caption(
+            "Para ajustar com autonomia: abra o modulo `Configuracoes` no app principal, altere a calibragem e clique em `Recalibrar Modelo Agora`."
+        )
+
+
 @st.cache_data(show_spinner=False)
 def _read_cached_html_snapshot(path_str: str, modified_at: float) -> str:
     del modified_at
@@ -1104,15 +1129,7 @@ def _query_flag_enabled(name: str) -> bool:
     return _query_param_str(name, "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _run_public_portal_refresh_if_requested() -> bool:
-    if not _query_flag_enabled("refresh_portal"):
-        return False
-
-    refresh_nonce = _query_param_str("refresh_nonce", "").strip() or f"nonce-{int(time.time() * 1000)}"
-    last_nonce = str(st.session_state.get("_public_portal_refresh_nonce", ""))
-    if refresh_nonce == last_nonce:
-        return False
-
+def _execute_public_portal_refresh(*, refresh_nonce: str) -> str:
     refreshed_updated_at = ""
     try:
         status_box = st.empty()
@@ -1146,6 +1163,20 @@ def _run_public_portal_refresh_if_requested() -> bool:
     finally:
         st.session_state["_public_portal_refresh_nonce"] = refresh_nonce
 
+    return refreshed_updated_at
+
+
+def _run_public_portal_refresh_if_requested() -> bool:
+    if not _query_flag_enabled("refresh_portal"):
+        return False
+
+    refresh_nonce = _query_param_str("refresh_nonce", "").strip() or f"nonce-{int(time.time() * 1000)}"
+    last_nonce = str(st.session_state.get("_public_portal_refresh_nonce", ""))
+    if refresh_nonce == last_nonce:
+        return False
+
+    refreshed_updated_at = _execute_public_portal_refresh(refresh_nonce=refresh_nonce)
+
     next_params = {"view": "portal"}
     if refreshed_updated_at:
         next_params["updated_at"] = refreshed_updated_at
@@ -1162,6 +1193,17 @@ if public_home_view == "portal":
     if _run_public_portal_refresh_if_requested():
         st.stop()
     set_public_portal_shell()
+    manual_refresh = st.button("Atualizar Dados (Streamlit)", use_container_width=False, key="public_portal_streamlit_refresh")
+    if manual_refresh:
+        refreshed_updated_at = _execute_public_portal_refresh(
+            refresh_nonce=f"manual-{int(time.time() * 1000)}"
+        )
+        next_params = {"view": "portal"}
+        if refreshed_updated_at:
+            next_params["updated_at"] = refreshed_updated_at
+        _set_public_query_params(next_params)
+        st.rerun()
+    render_public_model_criteria_help()
     render_public_portal_refresh_button()
     render_public_back_button()
     feedback = st.session_state.pop("_public_portal_refresh_feedback", "")
@@ -2673,6 +2715,42 @@ with st.sidebar:
     betting_cfg = runtime_model_config["betting"] if isinstance(runtime_model_config.get("betting"), dict) else {}
     safe_cfg = runtime_model_config["safe_score"] if isinstance(runtime_model_config.get("safe_score"), dict) else {}
 
+    with st.expander("Criterios do Modelo (Resumo Claro)", expanded=False):
+        st.markdown("**Filtro operacional atual**")
+        st.caption(
+            f"Perfil `{risk_profile}` | Prob >= `{min_prob:.2f}` | EV >= `{min_ev:.3f}` | "
+            f"Odd <= `{max_odd:.2f}` | Casas >= `{int(min_books)}`"
+        )
+        st.markdown("**Parametros tecnicos em uso**")
+        st.markdown(
+            f"""
+- Poisson: `max_goals={int(poisson_cfg.get('max_goals', 5))}`, `league_home_default={float(poisson_cfg.get('league_home_default', 1.35)):.2f}`, `league_away_default={float(poisson_cfg.get('league_away_default', 1.10)):.2f}`.
+- Minimos de gols esperados: `home={float(poisson_cfg.get('min_expected_home', 0.15)):.2f}`, `away={float(poisson_cfg.get('min_expected_away', 0.10)):.2f}`.
+- Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}`, `min_history={int(calibration_cfg.get('min_history_matches', 40))}`, `min_bucket={int(calibration_cfg.get('min_bucket_matches', 8))}`.
+- Ajuste da calibracao: `baseline_weight={float(calibration_cfg.get('baseline_weight', 0.20)):.2f}`, `max_adjustment_weight={float(calibration_cfg.get('max_adjustment_weight', 0.70)):.2f}`, `weight_sample_size={float(calibration_cfg.get('weight_sample_size', 30.0)):.1f}`.
+- Gestao de stake: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`.
+- Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}`, `ev_weight={float(safe_cfg.get('ev_weight', 2.5)):.2f}`, `ev_cap={float(safe_cfg.get('ev_cap', 0.10)):.2f}`, `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`, `bookmakers_cap={int(safe_cfg.get('bookmakers_cap', 20))}`, `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
+"""
+        )
+        st.markdown("**Como recalibrar com autonomia**")
+        st.markdown(
+            """
+1. Ajuste os campos em `Calibragem Avancada do Modelo`.
+2. Clique em `Recalibrar Modelo Agora` para aplicar sem editar codigo.
+3. Clique em `Atualizar agora` para reprocessar o portal com os novos criterios.
+4. Se precisar voltar ao ponto inicial, use `Restaurar Criterios Padrao`.
+"""
+        )
+        runtime_model_json = json.dumps(runtime_model_config, indent=2, ensure_ascii=False)
+        st.download_button(
+            "Baixar criterios atuais (JSON)",
+            data=runtime_model_json,
+            file_name="model_config_runtime.json",
+            mime="application/json",
+            use_container_width=True,
+            key="download_runtime_model_config",
+        )
+
     with st.expander("Calibragem Avancada do Modelo", expanded=False):
         st.caption("Edite os criterios tecnicos do motor e clique em recalibrar para reprocessar sem alterar codigo.")
 
@@ -3301,6 +3379,35 @@ elif page == "Configuracoes":
             "Filtrar por time: reduz a leitura para confrontos do clube ou selecao desejada.",
             "Perfil de risco: troca a regua de probabilidade, EV, odd maxima e casas minimas.",
             "Atualizar agora: refaz o scraping e regenera o portal completo (pode levar alguns segundos).",
+        ],
+        tone="neutral",
+    )
+    config_poisson = runtime_model_config.get("poisson", {}) if isinstance(runtime_model_config, dict) else {}
+    config_calib = runtime_model_config.get("calibration", {}) if isinstance(runtime_model_config, dict) else {}
+    config_betting = runtime_model_config.get("betting", {}) if isinstance(runtime_model_config, dict) else {}
+    config_safe = runtime_model_config.get("safe_score", {}) if isinstance(runtime_model_config, dict) else {}
+    config_poisson = config_poisson if isinstance(config_poisson, dict) else {}
+    config_calib = config_calib if isinstance(config_calib, dict) else {}
+    config_betting = config_betting if isinstance(config_betting, dict) else {}
+    config_safe = config_safe if isinstance(config_safe, dict) else {}
+    render_split_highlight(
+        title="Criterios em uso agora",
+        copy="Estes sao os valores ativos do modelo neste momento para previsao, calibracao e score de seguranca.",
+        items=[
+            f"Filtro operacional: Perfil {risk_profile} | Prob >= {min_prob:.2f} | EV >= {min_ev:.3f} | Odd <= {max_odd:.2f} | Casas >= {int(min_books)}.",
+            f"Poisson: max_goals={int(config_poisson.get('max_goals', 5))}, home_default={float(config_poisson.get('league_home_default', 1.35)):.2f}, away_default={float(config_poisson.get('league_away_default', 1.10)):.2f}.",
+            f"Calibracao: enabled={bool(config_calib.get('enabled', True))}, min_history={int(config_calib.get('min_history_matches', 40))}, min_bucket={int(config_calib.get('min_bucket_matches', 8))}.",
+            f"Stake (Kelly): {float(config_betting.get('kelly_fractional', 0.25)):.2f} | Safe score prob={float(config_safe.get('prob_weight', 0.55)):.2f}, ev={float(config_safe.get('ev_weight', 2.5)):.2f}.",
+        ],
+        tone="neutral",
+    )
+    render_split_highlight(
+        title="Recalibracao em 3 passos",
+        copy="Fluxo recomendado para autonomia total sem editar o codigo do projeto.",
+        items=[
+            "1) Abra 'Calibragem Avancada do Modelo' no menu lateral e ajuste os parametros desejados.",
+            "2) Clique em 'Recalibrar Modelo Agora' para aplicar os criterios na sessao atual.",
+            "3) Clique em 'Atualizar agora' para reprocessar scraping + portal e validar o impacto com os novos filtros.",
         ],
         tone="neutral",
     )
