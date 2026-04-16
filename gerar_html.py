@@ -2793,7 +2793,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     async function loadRealMatchStats(data, requestId) {{
       const status = document.getElementById('realStatsStatus');
       const apiHost = resolvePortalHost();
-      const isStreamlitCloud = apiHost.includes('streamlit.app');
+      const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
       const prefetchedRealStats = data && data.prefetched_real_stats && data.prefetched_real_stats.available
         ? data.prefetched_real_stats
         : null;
@@ -3280,16 +3280,50 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     function resolvePortalHost() {{
+      const candidates = [];
       try {{
-        if (window.location && window.location.hostname) return window.location.hostname;
+        if (window.location && window.location.hostname) candidates.push(window.location.hostname);
       }} catch (error) {{}}
       try {{
-        if (window.top && window.top.location && window.top.location.hostname) return window.top.location.hostname;
+        if (window.top && window.top.location && window.top.location.hostname) candidates.push(window.top.location.hostname);
       }} catch (error) {{}}
       try {{
-        if (window.parent && window.parent.location && window.parent.location.hostname) return window.parent.location.hostname;
+        if (window.parent && window.parent.location && window.parent.location.hostname) candidates.push(window.parent.location.hostname);
       }} catch (error) {{}}
+      try {{
+        if (document.referrer && /^https?:/i.test(document.referrer)) {{
+          const refUrl = new URL(document.referrer);
+          if (refUrl.hostname) candidates.push(refUrl.hostname);
+        }}
+      }} catch (error) {{}}
+      for (const host of candidates) {{
+        const cleanHost = String(host || '').trim();
+        if (cleanHost && cleanHost !== 'about:srcdoc') return cleanHost;
+      }}
       return '127.0.0.1';
+    }}
+
+    function isStreamlitCloudRuntime(apiHost) {{
+      const host = String(apiHost || '').toLowerCase();
+      if (host.includes('streamlit.app')) return true;
+
+      const probes = [];
+      try {{
+        probes.push(document.referrer || '');
+      }} catch (error) {{}}
+      try {{
+        probes.push(window.location && window.location.href ? window.location.href : '');
+      }} catch (error) {{}}
+      try {{
+        probes.push(window.top && window.top.location && window.top.location.href ? window.top.location.href : '');
+      }} catch (error) {{}}
+
+      for (const probe of probes) {{
+        if (String(probe || '').toLowerCase().includes('streamlit.app')) {{
+          return true;
+        }}
+      }}
+      return false;
     }}
 
     function reloadPortalShell() {{
@@ -3380,7 +3414,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     async function refreshPortalData() {{
       const summary = document.getElementById('resultsSummary');
       const apiHost = resolvePortalHost();
-      const isStreamlitCloud = apiHost.includes('streamlit.app');
+      const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
       const isStaticPortal = window.location.port === '8000' || window.location.pathname.toLowerCase().endsWith('/index.html');
       let keepOverlayVisible = false;
       let lastKnownStage = 'cache';
@@ -3398,6 +3432,16 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         }}
         setRefreshButtonsLoading(true);
         requestStreamlitPortalRefresh();
+        window.setTimeout(() => {{
+          if (document.visibilityState !== 'hidden') {{
+            stopRefreshAutomationTicker();
+            setRefreshOverlayVisible(false);
+            setRefreshButtonsLoading(false);
+            if (summary) {{
+              summary.textContent = 'Atualizacao solicitada. Se a tela nao recarregar em alguns segundos, atualize o navegador (F5).';
+            }}
+          }}
+        }}, 6000);
         return;
       }}
 
@@ -3494,7 +3538,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const status = document.getElementById('aiPromptStatus');
       const responseBox = document.getElementById('aiResponse');
       const apiHost = resolvePortalHost();
-      const isStreamlitCloud = apiHost.includes('streamlit.app');
+      const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
       if (!selectedDate) {{
         status.textContent = 'Selecione uma data antes de executar a leitura.';
         return;
