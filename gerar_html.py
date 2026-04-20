@@ -1014,7 +1014,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Football Data Desk | Index Inicial</title>
+  <title>Departamento de Dados de Futebol | Index Inicial</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
@@ -1140,11 +1140,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       margin-top: 18px;
     }}
     .side-rail {{
-      position: static;
-      display: grid;
-      grid-template-columns: minmax(280px, 0.3fr) minmax(400px, 1fr);
-      gap: 14px;
-      align-items: start;
+      display: none;
     }}
     .rail-card {{
       padding: 18px;
@@ -1993,7 +1989,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       <div class="brand-block">
         <div class="brand-mark">FD</div>
         <div class="brand-copy">
-          <strong>Football Data Desk</strong>
+          <strong>Departamento de Dados de Futebol</strong>
           <span>Painel executivo para leitura rapida de oportunidades por competicao.</span>
         </div>
       </div>

@@ -12,10 +12,10 @@ if /I not "%AI_SERVER_UP%"=="True" (
   start "Portal AI" /min cmd /c "cd /d %~dp0 && python portal_ai_server.py"
   timeout /t 2 /nobreak >nul
 )
-for /f %%i in ('powershell -NoProfile -Command "(Test-NetConnection -ComputerName 127.0.0.1 -Port 8000 -WarningAction SilentlyContinue).TcpTestSucceeded"') do set INDEX_SERVER_UP=%%i
-if /I not "%INDEX_SERVER_UP%"=="True" (
-  start "Portal Index" /min cmd /c "cd /d %~dp0 && python -m http.server 8000 --bind 0.0.0.0"
+for /f %%i in ('powershell -NoProfile -Command "(Test-NetConnection -ComputerName 127.0.0.1 -Port 8503 -WarningAction SilentlyContinue).TcpTestSucceeded"') do set APP_SERVER_UP=%%i
+if /I not "%APP_SERVER_UP%"=="True" (
+  start "Portal App" /min cmd /c "cd /d %~dp0 && streamlit run app.py --server.port 8503 --server.headless true"
   timeout /t 2 /nobreak >nul
 )
-start "" "http://127.0.0.1:8000/index.html"
+start "" "http://127.0.0.1:8503/?view=app"
 exit /b 0

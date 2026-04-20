@@ -673,6 +673,60 @@ def get_data(competition: str) -> pd.DataFrame:
     return load_competition_matches(competition)
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _build_safe_bets_cached(
+    matches_df: pd.DataFrame,
+    *,
+    bankroll: float,
+    kelly_fractional: float,
+    min_model_prob: float,
+    min_expected_value: float,
+    max_odd: float,
+    min_bookmakers: int,
+    model_config: dict[str, object],
+) -> pd.DataFrame:
+    return build_safe_bets_table(
+        matches_df=matches_df,
+        bankroll=bankroll,
+        kelly_fractional=kelly_fractional,
+        min_model_prob=min_model_prob,
+        min_expected_value=min_expected_value,
+        max_odd=max_odd,
+        min_bookmakers=min_bookmakers,
+        model_config=model_config,
+    )
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _build_backtest_cached(
+    matches_df: pd.DataFrame,
+    *,
+    bankroll: float,
+    kelly_fractional: float,
+    min_history_matches: int,
+    max_evaluated_matches: int,
+    model_config: dict[str, object],
+) -> pd.DataFrame:
+    return build_backtest_table(
+        matches_df=matches_df,
+        bankroll=bankroll,
+        kelly_fractional=kelly_fractional,
+        min_history_matches=min_history_matches,
+        max_evaluated_matches=max_evaluated_matches,
+        model_config=model_config,
+    )
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _summarize_backtest_cached(backtest_df: pd.DataFrame) -> dict[str, object]:
+    return summarize_backtest(backtest_df)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _build_probability_buckets_cached(backtest_df: pd.DataFrame) -> pd.DataFrame:
+    return build_probability_buckets(backtest_df)
+
+
 def get_data_with_fallback(preferred_competition: str) -> tuple[str, pd.DataFrame, str]:
     ordered_competitions = [preferred_competition] + [
         name for name in COMPETITIONS.keys() if name != preferred_competition
@@ -877,9 +931,11 @@ def _inject_portal_updated_badge(html: str, updated_at_value: str) -> str:
     if not stamp:
         return html
     safe_stamp = escape(stamp)
+    def _replace_badge(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{safe_stamp}{match.group(3)}"
     return re.sub(
         r'(<span id="portalUpdatedAt">)(.*?)(</span>)',
-        rf"\1{safe_stamp}\3",
+        _replace_badge,
         html,
         count=1,
         flags=re.IGNORECASE | re.DOTALL,
@@ -965,6 +1021,28 @@ def render_embedded_world_cup_portal() -> None:
 def queue_page_navigation(page_name: str) -> None:
     st.session_state["pending_page_menu_v4"] = page_name
     st.rerun()
+
+
+def render_quick_module_nav(current_page: str) -> None:
+    pages = [
+        "Inicio",
+        "Configuracoes",
+        "Jogos Seguros",
+        "Painel do Modelo",
+        "Analise de Jogo",
+        "Resultados",
+    ]
+    st.caption("Acesso rapido entre modulos")
+    cols = st.columns(len(pages))
+    for idx, page_name in enumerate(pages):
+        with cols[idx]:
+            if st.button(
+                page_name,
+                key=f"quick_nav_btn_{idx}",
+                use_container_width=True,
+                disabled=page_name == current_page,
+            ):
+                queue_page_navigation(page_name)
 
 
 def set_public_portal_shell() -> None:
@@ -1185,7 +1263,7 @@ def _run_public_portal_refresh_if_requested() -> bool:
     return True
 
 
-public_home_view = _query_param_str("view", "landing")
+public_home_view = _query_param_str("view", "app")
 if public_home_view == "landing":
     render_public_landing()
     st.stop()
@@ -2641,13 +2719,25 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown(
+    """
+<style>
+[data-testid="stSidebar"],
+[data-testid="stSidebarCollapsedControl"] {
+  display: none !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 with st.sidebar:
     if "page_menu_v4" not in st.session_state:
         st.session_state["page_menu_v4"] = "Inicio"
     if "pending_page_menu_v4" in st.session_state:
         st.session_state["page_menu_v4"] = st.session_state.pop("pending_page_menu_v4")
 
-    st.markdown("### Football Data Desk")
+    st.markdown("### Departamento de Dados de Futebol")
     st.caption(f"Release app: {APP_RELEASE_LABEL}")
     page = st.radio(
         "Menus",
@@ -3082,23 +3172,11 @@ runtime_kelly = (
     if isinstance(runtime_betting_cfg, dict)
     else 0.25
 )
-
-safe_df = build_safe_bets_table(
-    matches_df=df,
-    bankroll=1000.0,
-    kelly_fractional=runtime_kelly,
-    min_model_prob=float(min_prob),
-    min_expected_value=float(min_ev),
-    max_odd=float(max_odd),
-    min_bookmakers=int(min_books),
-    model_config=runtime_model_config,
-)
-
-if team_filter.strip():
-    finished = filter_matches_by_team(finished, team_filter)
-    fixtures = filter_matches_by_team(fixtures, team_filter)
-    valid = filter_matches_by_team(valid, team_filter)
-    safe_df = filter_matches_by_team(safe_df, team_filter)
+team_filter_clean = team_filter.strip()
+if team_filter_clean:
+    finished = filter_matches_by_team(finished, team_filter_clean)
+    fixtures = filter_matches_by_team(fixtures, team_filter_clean)
+    valid = filter_matches_by_team(valid, team_filter_clean)
 
 finished = sort_matches_for_display(finished, ascending=False)
 fixtures = sort_matches_for_display(fixtures, ascending=True)
@@ -3106,47 +3184,69 @@ valid = sort_matches_for_display(valid, ascending=True)
 finished_with_odds = finished.dropna(subset=["odds_home", "odds_draw", "odds_away"]).copy()
 analysis_candidates = pd.concat([valid, finished_with_odds], ignore_index=True, sort=False)
 
-backtest_df = build_backtest_table(
-    matches_df=df,
-    bankroll=1000.0,
-    kelly_fractional=runtime_kelly,
-    min_history_matches=30,
-    max_evaluated_matches=120,
-    model_config=runtime_model_config,
-)
-if team_filter.strip():
-    backtest_df = filter_matches_by_team(backtest_df, team_filter)
-backtest_summary = summarize_backtest(backtest_df)
-probability_buckets = build_probability_buckets(backtest_df)
+needs_safe_data = page in {"Inicio", "Jogos Seguros"}
+needs_backtest_data = page in {"Inicio", "Painel do Modelo", "Resultados"}
 
+safe_df = pd.DataFrame()
 relaxed_note = ""
-if safe_df.empty and risk_profile != "Personalizado":
-    relax_steps = [
-        (max(min_prob - 0.05, 0.35), max(min_ev - 0.01, -0.02), max_odd + 0.30, max(min_books - 1, 1)),
-        (max(min_prob - 0.10, 0.30), max(min_ev - 0.02, -0.05), max_odd + 0.70, 1),
-    ]
-    for rp, rev, rodd, rbooks in relax_steps:
-        safe_df = build_safe_bets_table(
-            matches_df=df,
-            bankroll=1000.0,
-            kelly_fractional=runtime_kelly,
-            min_model_prob=float(rp),
-            min_expected_value=float(rev),
-            max_odd=float(rodd),
-            min_bookmakers=int(rbooks),
-            model_config=runtime_model_config,
-        )
-        if team_filter.strip():
-            safe_df = filter_matches_by_team(safe_df, team_filter)
-        if not safe_df.empty:
-            relaxed_note = (
-                f"Filtro do perfil foi relaxado automaticamente para exibir opcoes: "
-                f"Prob >= {rp:.2f} | EV >= {rev:.2f} | Odd <= {rodd:.2f} | Casas >= {rbooks}."
+if needs_safe_data:
+    safe_df = _build_safe_bets_cached(
+        matches_df=df,
+        bankroll=1000.0,
+        kelly_fractional=runtime_kelly,
+        min_model_prob=float(min_prob),
+        min_expected_value=float(min_ev),
+        max_odd=float(max_odd),
+        min_bookmakers=int(min_books),
+        model_config=runtime_model_config,
+    )
+    if team_filter_clean:
+        safe_df = filter_matches_by_team(safe_df, team_filter_clean)
+
+    if safe_df.empty and risk_profile != "Personalizado":
+        relax_steps = [
+            (max(min_prob - 0.05, 0.35), max(min_ev - 0.01, -0.02), max_odd + 0.30, max(min_books - 1, 1)),
+            (max(min_prob - 0.10, 0.30), max(min_ev - 0.02, -0.05), max_odd + 0.70, 1),
+        ]
+        for rp, rev, rodd, rbooks in relax_steps:
+            safe_df = _build_safe_bets_cached(
+                matches_df=df,
+                bankroll=1000.0,
+                kelly_fractional=runtime_kelly,
+                min_model_prob=float(rp),
+                min_expected_value=float(rev),
+                max_odd=float(rodd),
+                min_bookmakers=int(rbooks),
+                model_config=runtime_model_config,
             )
-            break
+            if team_filter_clean:
+                safe_df = filter_matches_by_team(safe_df, team_filter_clean)
+            if not safe_df.empty:
+                relaxed_note = (
+                    f"Filtro do perfil foi relaxado automaticamente para exibir opcoes: "
+                    f"Prob >= {rp:.2f} | EV >= {rev:.2f} | Odd <= {rodd:.2f} | Casas >= {rbooks}."
+                )
+                break
+
+backtest_df = pd.DataFrame()
+backtest_summary: dict[str, object] = {"total_matches": len(finished)}
+probability_buckets = pd.DataFrame()
+if needs_backtest_data:
+    backtest_df = _build_backtest_cached(
+        matches_df=df,
+        bankroll=1000.0,
+        kelly_fractional=runtime_kelly,
+        min_history_matches=30,
+        max_evaluated_matches=120,
+        model_config=runtime_model_config,
+    )
+    if team_filter_clean:
+        backtest_df = filter_matches_by_team(backtest_df, team_filter_clean)
+    backtest_summary = _summarize_backtest_cached(backtest_df)
+    probability_buckets = _build_probability_buckets_cached(backtest_df)
 
 competition_name = str(competition)
-team_filter_display = escape(team_filter.strip())
+team_filter_display = escape(team_filter_clean)
 finished_count = len(finished)
 fixtures_count = len(fixtures)
 odds_count = len(valid)
@@ -3180,7 +3280,7 @@ if page != "Inicio":
   <div class="brand-block">
     <div class="brand-mark">FD</div>
     <div class="brand-copy">
-      <strong>Football Data Desk</strong>
+      <strong>Departamento de Dados de Futebol</strong>
       <span>Painel executivo no Streamlit com a mesma linguagem visual do portal principal.</span>
     </div>
   </div>
@@ -3198,6 +3298,7 @@ if page != "Inicio":
 if page == "Inicio":
     pass
 else:
+    render_quick_module_nav(page)
     clear_embedded_index_portal()
     render_module_hero(
         title=page,
@@ -3295,7 +3396,7 @@ section[data-testid="stSidebar"] {
     st.markdown(
         """
 <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 40px 20px; text-align: center; color: white; border-radius: 0 0 30px 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
-    <h1 style='font-family: "Space Grotesk", sans-serif; font-size: 3rem; margin: 0; color: #4cc9f0;'>Football Data Desk</h1>
+    <h1 style='font-family: "Space Grotesk", sans-serif; font-size: 3rem; margin: 0; color: #4cc9f0;'>Departamento de Dados de Futebol</h1>
     <p style='opacity: 0.9; font-size: 1.1rem; margin-top: 10px;'>Painel de Inteligência e Análise Quantitativa para Apostas</p>
 </div>
 """,

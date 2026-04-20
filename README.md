@@ -28,8 +28,9 @@ Para Streamlit Cloud, o projeto fixa o runtime em `python-3.11`.
 
 ## Execucao
 ```bash
-streamlit run app.py
+streamlit run app.py --server.port 8503
 ```
+Depois, acesse: `http://127.0.0.1:8503/?view=app`
 
 ## Estrutura
 - `app.py`: painel Streamlit
