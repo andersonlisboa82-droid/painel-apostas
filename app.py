@@ -1023,6 +1023,47 @@ def queue_page_navigation(page_name: str) -> None:
     st.rerun()
 
 
+def render_portal_refresh_action_button(
+    *,
+    key: str,
+    label: str = "Atualizar agora",
+    use_container_width: bool = False,
+) -> None:
+    if not st.button(label, use_container_width=use_container_width, key=key):
+        return
+
+    status_box = st.empty()
+    progress_box = st.empty()
+    status_box.info("Atualizando portal completo (scraping + reprocessamento)...")
+    progress_widget = progress_box.progress(0)
+
+    def on_refresh_progress(progress: int, message: str, _stage: str) -> None:
+        bounded = max(0, min(100, int(progress)))
+        try:
+            progress_widget.progress(bounded, text=message)
+        except TypeError:
+            progress_widget.progress(bounded)
+            status_box.info(message)
+
+    try:
+        ensure_portal_ai_server_running()
+        payload = refresh_portal_snapshot_with_progress(
+            progress_callback=on_refresh_progress,
+            prefetch_real_stats=False,
+        )
+        try:
+            progress_widget.progress(100, text="Atualizacao concluida.")
+        except TypeError:
+            progress_widget.progress(100)
+            status_box.success("Atualizacao concluida.")
+        st.cache_data.clear()
+        updated_at = str(payload.get("updated_at", "agora"))
+        st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Portal atualizado com sucesso em {updated_at}."
+    except Exception as exc:
+        st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Falha ao atualizar o portal: {exc}"
+    st.rerun()
+
+
 def render_quick_module_nav(current_page: str) -> None:
     pages = [
         "Inicio",
@@ -3094,37 +3135,11 @@ with st.sidebar:
             st.session_state[MODEL_CONFIG_FEEDBACK_KEY] = "Criterios do modelo restaurados para o padrao."
             st.rerun()
 
-    if st.button("Atualizar agora", use_container_width=True):
-        status_box = st.empty()
-        progress_box = st.empty()
-        status_box.info("Atualizando portal completo (scraping + reprocessamento)...")
-        progress_widget = progress_box.progress(0)
-
-        def on_refresh_progress(progress: int, message: str, _stage: str) -> None:
-            bounded = max(0, min(100, int(progress)))
-            try:
-                progress_widget.progress(bounded, text=message)
-            except TypeError:
-                progress_widget.progress(bounded)
-                status_box.info(message)
-
-        try:
-            ensure_portal_ai_server_running()
-            payload = refresh_portal_snapshot_with_progress(
-                progress_callback=on_refresh_progress,
-                prefetch_real_stats=False,
-            )
-            try:
-                progress_widget.progress(100, text="Atualizacao concluida.")
-            except TypeError:
-                progress_widget.progress(100)
-                status_box.success("Atualizacao concluida.")
-            st.cache_data.clear()
-            updated_at = str(payload.get("updated_at", "agora"))
-            st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Portal atualizado com sucesso em {updated_at}."
-        except Exception as exc:
-            st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Falha ao atualizar o portal: {exc}"
-        st.rerun()
+    render_portal_refresh_action_button(
+        key="sidebar_refresh_now",
+        label="Atualizar agora",
+        use_container_width=True,
+    )
 
     st.markdown("---")
     ai_enabled = bool((os.getenv("NVIDIA_API_KEY") or "").strip())
@@ -3152,6 +3167,16 @@ if portal_refresh_feedback:
         st.error(portal_refresh_feedback)
     else:
         st.success(portal_refresh_feedback)
+
+refresh_col, refresh_info_col = st.columns([1.2, 4.8])
+with refresh_col:
+    render_portal_refresh_action_button(
+        key="main_refresh_now",
+        label="Atualizar agora",
+        use_container_width=True,
+    )
+with refresh_info_col:
+    st.caption("Atualiza scraping, recalcula o portal e recarrega os dados da sessao.")
 
 try:
     competition, df, competition_load_warning = get_data_with_fallback(competition)
