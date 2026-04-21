@@ -777,6 +777,7 @@ def build_safe_bets_table(
         rows.append(
             {
                 "date_text": row.date_text,
+                "event_timestamp": getattr(row, "event_timestamp", None),
                 "home_team": row.home_team,
                 "away_team": row.away_team,
                 "market": tip.best_market,

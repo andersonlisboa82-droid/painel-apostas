@@ -480,6 +480,219 @@ def run_ai_analysis(prompt: str, selected_date: date) -> str:
     )
 
 
+def _safe_float(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(number):
+        return None
+    return number
+
+
+def _normalize_percent(value: object) -> float | None:
+    number = _safe_float(value)
+    if number is None:
+        return None
+    if 0.0 <= number <= 1.0:
+        return number * 100.0
+    return number
+
+
+def _resolve_outcome_key(value: object) -> str | None:
+    raw = str(value or "").strip().casefold()
+    if not raw:
+        return None
+    if raw in {"casa", "home", "mandante", "1"}:
+        return "Casa"
+    if raw in {"empate", "draw", "x"}:
+        return "Empate"
+    if raw in {"fora", "away", "visitante", "2"}:
+        return "Fora"
+    return None
+
+
+def _market_implied_prob_percent(odd: float | None) -> float | None:
+    if odd is None or odd <= 1.0:
+        return None
+    return 100.0 / odd
+
+
+def run_multi_match_analysis(
+    selected_matches: list[dict[str, object]],
+    *,
+    user_focus: str = "",
+) -> tuple[str, int]:
+    normalized_blocks: list[str] = []
+    selected_probs: list[float] = []
+    selected_odds: list[float] = []
+    valid_count = 0
+
+    for idx, raw_item in enumerate(selected_matches, start=1):
+        if not isinstance(raw_item, dict):
+            continue
+
+        competition = str(raw_item.get("competition") or "Competicao nao informada").strip()
+        home_team = str(raw_item.get("home_team") or raw_item.get("home") or "").strip()
+        away_team = str(raw_item.get("away_team") or raw_item.get("away") or "").strip()
+        date_label = str(raw_item.get("date_label") or raw_item.get("date") or "").strip()
+        status_label = str(raw_item.get("status") or "").strip()
+        model_risk_stage = str(raw_item.get("model_risk_stage") or "").strip()
+        outcome_key = _resolve_outcome_key(raw_item.get("outcome_key") or raw_item.get("selected_outcome"))
+        if not home_team or not away_team or outcome_key is None:
+            continue
+
+        probabilities = raw_item.get("probabilities")
+        probs = probabilities if isinstance(probabilities, dict) else {}
+        odds_payload = raw_item.get("odds")
+        odds = odds_payload if isinstance(odds_payload, dict) else {}
+
+        home_prob = _normalize_percent(probs.get("home"))
+        draw_prob = _normalize_percent(probs.get("draw"))
+        away_prob = _normalize_percent(probs.get("away"))
+        btts_prob = _normalize_percent(probs.get("btts"))
+        over25_prob = _normalize_percent(probs.get("over25"))
+        under25_prob = _normalize_percent(probs.get("under25"))
+
+        odd_home = _safe_float(odds.get("home"))
+        odd_draw = _safe_float(odds.get("draw"))
+        odd_away = _safe_float(odds.get("away"))
+
+        selected_prob = None
+        selected_odd = None
+        if outcome_key == "Casa":
+            selected_prob = home_prob
+            selected_odd = odd_home
+        elif outcome_key == "Empate":
+            selected_prob = draw_prob
+            selected_odd = odd_draw
+        elif outcome_key == "Fora":
+            selected_prob = away_prob
+            selected_odd = odd_away
+
+        outcome_label = str(raw_item.get("outcome_label") or "").strip()
+        if not outcome_label:
+            outcome_label = market_label(outcome_key, home_team, away_team)
+
+        implied_prob = _market_implied_prob_percent(selected_odd)
+        edge_pp = None
+        if selected_prob is not None and implied_prob is not None:
+            edge_pp = selected_prob - implied_prob
+
+        block_lines = [
+            f"Selecao {idx}: {competition} | {status_label or 'Status nao informado'}",
+            f"Jogo: {home_team} x {away_team}",
+            f"Data exibida: {date_label or '-'}",
+            f"Resultado escolhido: {outcome_label}",
+            (
+                "Probabilidade do resultado escolhido: "
+                + (f"{selected_prob:.1f}%" if selected_prob is not None else "nao disponivel")
+            ),
+            (
+                "Odd do resultado escolhido: "
+                + (f"{selected_odd:.2f}" if selected_odd is not None else "nao disponivel")
+            ),
+            (
+                "Prob. implicita da odd: "
+                + (f"{implied_prob:.1f}%" if implied_prob is not None else "nao disponivel")
+            ),
+            (
+                "Edge modelo vs mercado: "
+                + (f"{edge_pp:+.1f} p.p." if edge_pp is not None else "nao disponivel")
+            ),
+            (
+                f"Probabilidades 1X2 do modelo: casa {home_prob:.1f}% | empate {draw_prob:.1f}% | fora {away_prob:.1f}%"
+                if home_prob is not None and draw_prob is not None and away_prob is not None
+                else "Probabilidades 1X2 do modelo: nao disponiveis"
+            ),
+            (
+                f"BTTS {btts_prob:.1f}% | Over 2.5 {over25_prob:.1f}% | Under 2.5 {under25_prob:.1f}%"
+                if btts_prob is not None and over25_prob is not None and under25_prob is not None
+                else "BTTS/Over/Under: nao disponivel nesta base"
+            ),
+        ]
+        if model_risk_stage:
+            block_lines.append(f"Faixa de risco no portal: {model_risk_stage}")
+
+        normalized_blocks.append("\n".join(block_lines))
+        if selected_prob is not None:
+            selected_probs.append(max(0.0, min(100.0, selected_prob)))
+        if selected_odd is not None and selected_odd > 1.0:
+            selected_odds.append(selected_odd)
+        valid_count += 1
+
+    if valid_count == 0:
+        raise ValueError("Nenhuma selecao valida foi enviada para analise.")
+
+    average_prob = sum(selected_probs) / len(selected_probs) if selected_probs else None
+    combined_hit_prob = 1.0
+    if selected_probs:
+        for prob in selected_probs:
+            combined_hit_prob *= max(0.0, min(1.0, prob / 100.0))
+        combined_hit_prob *= 100.0
+    else:
+        combined_hit_prob = None
+
+    combined_odd = 1.0
+    if selected_odds:
+        for odd in selected_odds:
+            combined_odd *= odd
+    else:
+        combined_odd = None
+
+    summary_lines = [
+        f"Total de selecoes analisadas: {valid_count}",
+        (
+            f"Probabilidade media das selecoes escolhidas: {average_prob:.1f}%"
+            if average_prob is not None
+            else "Probabilidade media: nao disponivel"
+        ),
+        (
+            f"Probabilidade conjunta aproximada (independencia): {combined_hit_prob:.2f}%"
+            if combined_hit_prob is not None
+            else "Probabilidade conjunta aproximada: nao disponivel"
+        ),
+        (
+            f"Odd acumulada aproximada: {combined_odd:.2f}"
+            if combined_odd is not None
+            else "Odd acumulada aproximada: nao disponivel"
+        ),
+    ]
+
+    focus_text = user_focus.strip()
+    if not focus_text:
+        focus_text = "Sem foco extra informado; priorize controle de risco e transparencia estatistica."
+
+    system_prompt = (
+        "Voce e um analista quantitativo de apostas em futebol, objetivo e institucional. "
+        "Use apenas os dados enviados. Nao invente informacoes externas. "
+        "Explique riscos, consistencia estatistica e limite de confianca com clareza."
+    )
+    selections_context = "\n\n---\n\n".join(normalized_blocks)
+    user_prompt = (
+        "Analise as selecoes escolhidas pelo usuario e avalie a probabilidade dos resultados selecionados.\n\n"
+        f"FOCO DO USUARIO:\n{focus_text}\n\n"
+        f"RESUMO GERAL:\n{chr(10).join(summary_lines)}\n\n"
+        f"SELECOES:\n{selections_context}\n\n"
+        "Entregue:\n"
+        "1) Tabela textual curta com cada selecao, probabilidade escolhida, odd, edge e classificacao de risco (baixo/medio/alto).\n"
+        "2) Leitura consolidada da combinacao (coerencia das escolhas, pontos fortes, fragilidades e cenarios de quebra).\n"
+        "3) Conclusao objetiva: manter, ajustar ou descartar parte das selecoes.\n"
+        "4) Sugestao de gestao de banca em 3 faixas (conservadora, equilibrada, agressiva).\n"
+        "Se faltar dado em alguma selecao, sinalize explicitamente como 'nao disponivel nesta base'."
+    )
+    analysis = request_nvidia_completion(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.25,
+        top_p=0.9,
+        max_tokens=1600,
+    )
+    return analysis, valid_count
+
+
 class PortalAIHandler(BaseHTTPRequestHandler):
     server_version = "PortalAIServer/1.0"
 
@@ -612,10 +825,19 @@ class PortalAIHandler(BaseHTTPRequestHandler):
                     date_text=date_text,
                     event_timestamp=event_timestamp,
                 )
-                if home_history is not None and away_history is not None:
+                use_local_history = bool(home_history) and bool(away_history)
+                if use_local_history:
                     home_profile = build_team_stat_profile(pd.DataFrame(home_history), home_team, event_timestamp=None)
                     away_profile = build_team_stat_profile(pd.DataFrame(away_history), away_team, event_timestamp=None)
                     projection_payload = build_projection_payload(home_profile, away_profile)
+                    if projection_payload.get("available") is not True:
+                        matches_frame = get_cached_matches()
+                        projection_payload = build_team_stat_projection(
+                            matches_df=matches_frame,
+                            home_team=home_team,
+                            away_team=away_team,
+                            event_timestamp=event_timestamp,
+                        )
                 else:
                     matches_frame = get_cached_matches()
                     projection_payload = build_team_stat_projection(
@@ -629,6 +851,37 @@ class PortalAIHandler(BaseHTTPRequestHandler):
                 return
 
             self._send_json({"ok": True, **stats_payload, "team_projection": projection_payload})
+            return
+
+        if path == "/api/multi-match-analysis":
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            try:
+                payload = json.loads(raw_body.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._send_json({"ok": False, "error": "JSON invalido."}, status_code=400)
+                return
+
+            selected_matches_raw = payload.get("selected_matches")
+            selected_matches = selected_matches_raw if isinstance(selected_matches_raw, list) else []
+            if not selected_matches:
+                self._send_json({"ok": False, "error": "Selecione pelo menos um jogo para a analise."}, status_code=400)
+                return
+            if len(selected_matches) > 20:
+                self._send_json(
+                    {"ok": False, "error": "Limite maximo de 20 jogos por analise. Reduza a selecao e tente novamente."},
+                    status_code=400,
+                )
+                return
+
+            user_focus = str(payload.get("user_focus") or "").strip()
+            try:
+                analysis, processed_count = run_multi_match_analysis(selected_matches, user_focus=user_focus)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, status_code=500)
+                return
+
+            self._send_json({"ok": True, "analysis": analysis, "processed_matches": processed_count})
             return
 
         if path != "/api/ai-analysis":

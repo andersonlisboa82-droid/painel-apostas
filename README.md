@@ -2,6 +2,7 @@
 
 Projeto em Python para acompanhar jogos e odds de:
 - Brasileirao
+- Copa do Brasil
 - La Liga
 - Premier League
 - Copa do Mundo (rota 2026)

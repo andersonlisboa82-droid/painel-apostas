@@ -22,6 +22,7 @@ TARGET_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 COMPETITIONS = {
     "Brasileirao": "https://www.betexplorer.com/br/football/brazil/serie-a-betano/",
+    "Copa do Brasil": "https://www.betexplorer.com/br/football/brazil/copa-betano-do-brasil/",
     "La Liga": "https://www.betexplorer.com/br/football/spain/laliga/",
     "Premier League": "https://www.betexplorer.com/br/football/england/premier-league/",
     "Copa Sul-Americana": "https://www.betexplorer.com/br/football/south-america/copa-sudamericana/",

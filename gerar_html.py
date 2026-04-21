@@ -887,7 +887,7 @@ def _build_risk_block(title: str, stage: str, description: str, meta: list[str],
     ordered_entries = sorted(entries, key=lambda item: (-float(item["probability"]), -float(item["ev"]), str(item["competition"]), str(item["matchup"])))[:12]
     for entry in ordered_entries:
         rows.append(
-            f"<tr data-filter-scope='model' data-date='{escape(str(entry.get('filter_date', '')))}' data-odd='{float(entry['odd']):.2f}' data-prob='{float(entry['probability']):.4f}' data-ev='{float(entry['ev']):.4f}' data-books='{int(entry['bookmakers'])}'>"
+            f"<tr data-filter-scope='model' data-comp='{escape(str(entry.get('competition', '')))}' data-date='{escape(str(entry.get('filter_date', '')))}' data-odd='{float(entry['odd']):.2f}' data-prob='{float(entry['probability']):.4f}' data-ev='{float(entry['ev']):.4f}' data-books='{int(entry['bookmakers'])}'>"
             f"<td>{escape(str(entry['competition']))}</td>"
             f"<td>{escape(str(entry['date_text']))}</td>"
             f"<td>{escape(str(entry['matchup']))}</td>"
@@ -1140,7 +1140,9 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       margin-top: 18px;
     }}
     .side-rail {{
-      display: none;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
     }}
     .rail-card {{
       padding: 18px;
@@ -1465,6 +1467,96 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     .ai-prompt-preview {{ min-height: 180px; padding: 16px; border-radius: 16px; border: 1px solid rgba(191,219,254,.16); background: rgba(8,22,37,.62); color: #dbeafe; white-space: pre-wrap; line-height: 1.7; }}
     .ai-status {{ margin-top: 10px; color: #bbf7d0; font-size: .85rem; min-height: 1.2em; }}
     .ai-response {{ margin-top: 14px; padding: 16px; border-radius: 16px; background: rgba(8,22,37,.72); border: 1px solid rgba(191,219,254,.16); min-height: 140px; color: #e2e8f0; white-space: pre-wrap; line-height: 1.7; }}
+    .multi-modal-card {{ max-width: 1240px; }}
+    .multi-modal-card .modal-body {{
+      display: grid;
+      grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+      gap: 16px;
+    }}
+    .multi-focus-area {{
+      width: 100%;
+      min-height: 120px;
+      resize: vertical;
+      border-radius: 14px;
+      border: 1px solid rgba(191,219,254,.22);
+      padding: 12px;
+      font: inherit;
+      color: #e2e8f0;
+      background: rgba(255,255,255,.08);
+      outline: none;
+    }}
+    .multi-focus-area:focus {{
+      border-color: rgba(191,219,254,.48);
+      box-shadow: 0 0 0 4px rgba(29,78,216,.12);
+    }}
+    .multi-pick-list {{
+      display: grid;
+      gap: 12px;
+      max-height: 560px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }}
+    .multi-pick-item {{
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid rgba(191,219,254,.18);
+      background: rgba(8,22,37,.62);
+    }}
+    .multi-pick-top {{
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      cursor: pointer;
+    }}
+    .multi-pick-top input {{
+      margin-top: 3px;
+      width: 16px;
+      height: 16px;
+      accent-color: #60a5fa;
+    }}
+    .multi-pick-top strong {{
+      display: block;
+      font-size: .98rem;
+      font-family: "Space Grotesk", sans-serif;
+      letter-spacing: -.02em;
+      color: #f8fafc;
+    }}
+    .multi-pick-top span {{
+      display: block;
+      margin-top: 4px;
+      color: rgba(191,219,254,.86);
+      font-size: .82rem;
+      line-height: 1.45;
+    }}
+    .multi-pick-controls {{
+      display: grid;
+      grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+    }}
+    .multi-pick-outcome {{
+      width: 100%;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid rgba(191,219,254,.22);
+      padding: 0 10px;
+      font: inherit;
+      color: #f8fafc;
+      background: rgba(255,255,255,.08);
+      outline: none;
+    }}
+    .multi-pick-outcome:focus {{
+      border-color: rgba(191,219,254,.48);
+      box-shadow: 0 0 0 4px rgba(29,78,216,.12);
+    }}
+    .multi-pick-meta {{
+      color: rgba(226,232,240,.9);
+      font-size: .82rem;
+      line-height: 1.45;
+    }}
     .legend {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }}
     .pill {{ display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.82); font-size: .84rem; }}
     .pill::before {{ content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: .78; }}
@@ -1774,10 +1866,11 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     
     .floating-actions {{
       position: fixed;
-      top: 14px;
+      top: 50%;
       right: 18px;
+      transform: translateY(-50%);
       display: flex;
-      flex-direction: row;
+      flex-direction: column;
       gap: 10px;
       z-index: 1000;
       padding: 8px;
@@ -1966,6 +2059,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     @media (max-width: 1180px) {{
       .side-rail {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .card-head {{ grid-template-columns: 1fr; }}
+      .multi-modal-card .modal-body {{ grid-template-columns: 1fr; }}
     }}
     @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
     @media (max-width: 760px) {{
@@ -1975,10 +2069,19 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: 1fr; }}
       .topbar, .brand-block, .topbar-meta {{ flex-direction: column; align-items: flex-start; }}
       .btn, .btn-link {{ width: 100%; }}
-      .floating-actions {{ top: 10px; right: 10px; gap: 8px; padding: 6px; }}
+      .floating-actions {{
+        top: auto;
+        right: 10px;
+        bottom: 10px;
+        transform: none;
+        flex-direction: row;
+        gap: 8px;
+        padding: 6px;
+      }}
       .btn-float {{ width: 44px; height: 44px; }}
       .btn-float svg {{ width: 20px; height: 20px; }}
       .analysis-selector-row {{ grid-template-columns: 1fr; }}
+      .multi-pick-controls {{ grid-template-columns: 1fr; }}
       table {{ min-width: 640px; }}
     }}
   </style>
@@ -2073,6 +2176,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             <div id="resultsSummary" class="summary-box">Mostrando todas as competicoes e tabelas disponiveis.</div>
           </div>
           <div class="risk-grid">{risk_blocks_html}</div>
+          <p id="riskStripEmpty" class="empty-state" hidden>Nenhum jogo atende aos filtros atuais no bloco por risco.</p>
         </section>
 
         <div class="legend">
@@ -2122,6 +2226,11 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
               <strong>Modulo de IA</strong>
               <span>Abra o prompt institucional em modal para atualizar a data, copiar o briefing e executar a leitura quantitativa.</span>
               <button id="openAiPromptModal" class="btn secondary" type="button">Abrir modulo</button>
+            </article>
+            <article class="launcher-item">
+              <strong>Analise multipla IA</strong>
+              <span>Monte uma lista com varios jogos, escolha o resultado de cada um e receba uma leitura consolidada de probabilidade e risco.</span>
+              <button id="openMultiAnalysisModal" class="btn secondary" type="button">Montar selecoes</button>
             </article>
             <article class="launcher-item">
               <strong>Atualizar placares</strong>
@@ -2295,7 +2404,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         </div>
         <div class="filters">
           <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para as tabelas do modelo, sem esconder os resultados finalizados.</div></div>
-          <!-- O filtro de data foi movido para a barra lateral a pedido do usuario -->
+          <div class="field"><label for="fdateModal">Data dos jogos</label><input id="fdateModal" type="date" /><div class="hint">Filtra todos os cards e tabelas para a data escolhida.</div></div>
           <div class="field"><label for="fteam">Time</label><input id="fteam" type="text" placeholder="Ex: Flamengo" /><div class="hint">Busca o nome do time em qualquer tabela visivel.</div></div>
           <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers nas tabelas do modelo.</div></div>
           <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd nas leituras recomendadas.</div></div>
@@ -2345,6 +2454,42 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         </div>
         <div id="aiPromptStatus" class="ai-status"></div>
         <div id="aiResponse" class="ai-response">A resposta da IA vai aparecer aqui depois da execucao.</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="multiAnalysisModal" class="modal-overlay">
+    <div class="modal-card ai-modal-card multi-modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Analise multipla</div>
+          <h2>Selecione varios jogos e resultados</h2>
+          <p class="copy">Escolha os confrontos, defina o resultado esperado de cada um e receba uma leitura consolidada de probabilidade, risco e gestao de banca.</p>
+        </div>
+        <button class="modal-close" type="button" onclick="closeMultiAnalysisModal()">Ã—</button>
+      </div>
+      <div class="modal-body">
+        <div class="ai-module-side">
+          <div class="ai-mini-card">
+            <label for="multiPickSearch">Buscar jogo</label>
+            <input id="multiPickSearch" type="text" placeholder="Ex: Flamengo x Palmeiras" />
+          </div>
+          <div class="ai-mini-card">
+            <label for="multiAnalysisFocus">Foco da leitura (opcional)</label>
+            <textarea id="multiAnalysisFocus" class="multi-focus-area" placeholder="Ex: priorizar selecoes conservadoras e evitar jogos com volatilidade alta."></textarea>
+          </div>
+          <div id="multiPickSummary" class="ai-status">Nenhuma selecao marcada ainda.</div>
+          <div class="ai-prompt-actions">
+            <button id="runMultiMatchAi" class="btn primary" type="button">Analisar selecoes com IA</button>
+            <button id="clearMultiSelection" class="btn secondary" type="button">Limpar selecoes</button>
+            <button class="btn secondary" type="button" onclick="closeMultiAnalysisModal()">Fechar</button>
+          </div>
+          <div id="multiMatchAiStatus" class="ai-status"></div>
+        </div>
+        <div>
+          <div id="multiPickList" class="multi-pick-list"></div>
+          <div id="multiMatchAiResponse" class="ai-response">A leitura consolidada da IA aparecera aqui apos a analise das selecoes.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -2589,6 +2734,92 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     let activeMatchStatsRequest = 0;
     const matchDetailsStore = {json.dumps(detail_registry, ensure_ascii=False)};
     const dateMatchCatalog = {match_catalog_json};
+    const multiMatchOptions = (() => {{
+      const uniqueMap = new Map();
+      dateMatchCatalog.forEach((item) => {{
+        if (!item || !item.detail_key) return;
+        const detail = matchDetailsStore[item.detail_key];
+        if (!detail || detail.status !== 'Agendado' || !detail.probs) return;
+        const dedupeKey = [
+          detail.competition || item.competition || '',
+          detail.home || item.home || '',
+          detail.away || item.away || '',
+          detail.event_timestamp || detail.date_text_raw || item.filter_date || ''
+        ].join('|').toLowerCase();
+        if (uniqueMap.has(dedupeKey)) return;
+        uniqueMap.set(dedupeKey, {{
+          detail_key: item.detail_key,
+          competition: String(detail.competition || item.competition || ''),
+          home: String(detail.home || item.home || ''),
+          away: String(detail.away || item.away || ''),
+          status: String(detail.status || item.status || 'Agendado'),
+          date_label: String(detail.date || item.date_label || ''),
+          filter_date: String(item.filter_date || ''),
+          event_timestamp: String(detail.event_timestamp || '')
+        }});
+      }});
+      return Array.from(uniqueMap.values()).sort((a, b) => getEventSortValue(a) - getEventSortValue(b));
+    }})();
+
+    function guessFavoriteOutcomeKey(detail) {{
+      const probs = detail && detail.probs ? detail.probs : {{}};
+      const candidates = [
+        {{ key: 'Casa', prob: Number(probs.home) }},
+        {{ key: 'Empate', prob: Number(probs.draw) }},
+        {{ key: 'Fora', prob: Number(probs.away) }},
+      ].filter((item) => Number.isFinite(item.prob));
+      if (!candidates.length) return 'Casa';
+      candidates.sort((a, b) => b.prob - a.prob);
+      return candidates[0].key;
+    }}
+
+    function outcomeLabelForKey(detail, outcomeKey) {{
+      const home = detail && detail.home ? detail.home : 'Mandante';
+      const away = detail && detail.away ? detail.away : 'Visitante';
+      if (outcomeKey === 'Casa') return 'Vitoria ' + home;
+      if (outcomeKey === 'Fora') return 'Vitoria ' + away;
+      return 'Empate';
+    }}
+
+    function outcomeProbabilityForKey(detail, outcomeKey) {{
+      const probs = detail && detail.probs ? detail.probs : null;
+      if (!probs) return null;
+      if (outcomeKey === 'Casa') return Number(probs.home);
+      if (outcomeKey === 'Empate') return Number(probs.draw);
+      if (outcomeKey === 'Fora') return Number(probs.away);
+      return null;
+    }}
+
+    function outcomeOddForKey(detail, outcomeKey) {{
+      const odds = detail && detail.odds ? detail.odds : null;
+      if (!odds) return null;
+      if (outcomeKey === 'Casa') return Number(odds.home);
+      if (outcomeKey === 'Empate') return Number(odds.draw);
+      if (outcomeKey === 'Fora') return Number(odds.away);
+      return null;
+    }}
+
+    function formatPercentValue(value, digits = 1) {{
+      if (!Number.isFinite(Number(value))) return 'n/d';
+      return Number(value).toFixed(digits) + '%';
+    }}
+
+    function formatOddValue(value) {{
+      if (!Number.isFinite(Number(value)) || Number(value) <= 1.0) return 'n/d';
+      return Number(value).toFixed(2);
+    }}
+
+    function buildSelectedOutcomeMeta(detail, outcomeKey) {{
+      const probability = outcomeProbabilityForKey(detail, outcomeKey);
+      const odd = outcomeOddForKey(detail, outcomeKey);
+      const implied = Number.isFinite(odd) && odd > 1.0 ? (100 / odd) : null;
+      const edge = Number.isFinite(probability) && Number.isFinite(implied) ? (probability - implied) : null;
+      return [
+        'Prob. modelo: ' + formatPercentValue(probability),
+        'Odd: ' + formatOddValue(odd),
+        'Edge: ' + (Number.isFinite(edge) ? (edge >= 0 ? '+' : '') + edge.toFixed(1) + ' p.p.' : 'n/d')
+      ].join(' | ');
+    }}
 
     function setRealStatsCardValue(elementId, value) {{
       const element = document.getElementById(elementId);
@@ -2837,6 +3068,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const status = document.getElementById('realStatsStatus');
       const apiHost = resolvePortalHost();
       const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
+      const homeHistory = buildRecentTeamHistory(data.home, data);
+      const awayHistory = buildRecentTeamHistory(data.away, data);
       const prefetchedRealStats = data && data.prefetched_real_stats && data.prefetched_real_stats.available
         ? data.prefetched_real_stats
         : null;
@@ -2874,8 +3107,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             status: data.status,
             date_text: data.date_text_raw || data.date || '',
             event_timestamp: data.event_timestamp || '',
-            home_history: buildRecentTeamHistory(data.home, data),
-            away_history: buildRecentTeamHistory(data.away, data)
+            home_history: homeHistory.length ? homeHistory : undefined,
+            away_history: awayHistory.length ? awayHistory : undefined
           }})
         }});
         const payload = await response.json();
@@ -2982,6 +3215,11 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     function openFilterModal() {{
+      const mainDateField = document.getElementById('fdate');
+      const modalDateField = document.getElementById('fdateModal');
+      if (mainDateField && modalDateField) {{
+        modalDateField.value = mainDateField.value || '';
+      }}
       const modal = document.getElementById('filterModal');
       modal.style.display = 'block';
       positionVisibleModal('filterModal');
@@ -3012,6 +3250,22 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
     function closeAiPromptModal() {{
       document.getElementById('aiPromptModal').style.display = 'none';
+    }}
+
+    function openMultiAnalysisModal() {{
+      const modal = document.getElementById('multiAnalysisModal');
+      if (!modal) return;
+      renderMultiPickList();
+      const status = document.getElementById('multiMatchAiStatus');
+      if (status) status.textContent = '';
+      modal.style.display = 'block';
+      positionVisibleModal('multiAnalysisModal');
+    }}
+
+    function closeMultiAnalysisModal() {{
+      const modal = document.getElementById('multiAnalysisModal');
+      if (!modal) return;
+      modal.style.display = 'none';
     }}
 
     function getVisibleModalOffset() {{
@@ -3144,6 +3398,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       document.getElementById('fcomp').value = '';
       document.getElementById('frisk').value = 'Baixo risco';
       document.getElementById('fdate').value = '';
+      document.getElementById('fdateModal').value = '';
       document.getElementById('fteam').value = '';
       document.getElementById('foddmin').value = '';
       document.getElementById('foddmax').value = '';
@@ -3309,6 +3564,238 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (!promptArea || !preview) return;
       const lines = promptArea.value.split(/\\r?\\n/).map(line => line.trim()).filter(Boolean);
       preview.textContent = lines.length ? lines.slice(0, 8).join('\\n') : 'Nenhum prompt carregado.';
+    }}
+
+    function updateMultiPickCardMeta(card) {{
+      if (!card) return;
+      const detailKey = card.getAttribute('data-detail-key') || '';
+      const detail = matchDetailsStore[detailKey];
+      const outcomeField = card.querySelector('.multi-pick-outcome');
+      const meta = card.querySelector('.multi-pick-meta');
+      if (!detail || !outcomeField || !meta) return;
+      const selectedOutcome = outcomeField.value || guessFavoriteOutcomeKey(detail);
+      meta.textContent = buildSelectedOutcomeMeta(detail, selectedOutcome);
+    }}
+
+    function updateMultiPickSummary() {{
+      const summary = document.getElementById('multiPickSummary');
+      if (!summary) return;
+      const cards = Array.from(document.querySelectorAll('#multiPickList .multi-pick-item'));
+      if (!cards.length) {{
+        summary.textContent = 'Nenhum jogo disponivel para montar selecoes com os filtros atuais.';
+        return;
+      }}
+      let selectedCount = 0;
+      let combinedProb = 1.0;
+      let hasProb = true;
+      let combinedOdd = 1.0;
+      let oddCount = 0;
+
+      cards.forEach((card) => {{
+        const toggle = card.querySelector('.multi-pick-toggle');
+        const outcomeField = card.querySelector('.multi-pick-outcome');
+        if (!toggle || !outcomeField || !toggle.checked) return;
+        selectedCount += 1;
+        const detailKey = card.getAttribute('data-detail-key') || '';
+        const detail = matchDetailsStore[detailKey];
+        if (!detail) return;
+        const selectedOutcome = outcomeField.value || guessFavoriteOutcomeKey(detail);
+        const probability = outcomeProbabilityForKey(detail, selectedOutcome);
+        const odd = outcomeOddForKey(detail, selectedOutcome);
+        if (Number.isFinite(Number(probability))) {{
+          combinedProb *= Math.max(0, Math.min(1, Number(probability) / 100));
+        }} else {{
+          hasProb = false;
+        }}
+        if (Number.isFinite(Number(odd)) && Number(odd) > 1.0) {{
+          combinedOdd *= Number(odd);
+          oddCount += 1;
+        }}
+      }});
+
+      if (!selectedCount) {{
+        summary.textContent = cards.length + ' jogos disponiveis. Marque ao menos um para enviar a analise.';
+        return;
+      }}
+
+      const probLabel = hasProb ? (combinedProb * 100).toFixed(2) + '%' : 'n/d';
+      const oddLabel = oddCount ? combinedOdd.toFixed(2) : 'n/d';
+      summary.textContent =
+        selectedCount +
+        ' selecao(oes) prontas | Prob. conjunta aprox.: ' +
+        probLabel +
+        ' | Odd acumulada aprox.: ' +
+        oddLabel +
+        '.';
+    }}
+
+    function renderMultiPickList() {{
+      const list = document.getElementById('multiPickList');
+      if (!list) return;
+      const compFilter = (document.getElementById('fcomp').value || '').trim().toLowerCase();
+      const dateFilter = (document.getElementById('fdate').value || '').trim();
+      const teamFilter = (document.getElementById('fteam').value || '').trim().toLowerCase();
+      const searchFilter = (document.getElementById('multiPickSearch').value || '').trim().toLowerCase();
+
+      const filteredOptions = multiMatchOptions.filter((item) => {{
+        const compName = String(item.competition || '').trim().toLowerCase();
+        const matchupText = `${{item.home || ''}} x ${{item.away || ''}}`.toLowerCase();
+        const teamOk = !teamFilter || matchupText.includes(teamFilter);
+        const compOk = !compFilter || compName === compFilter;
+        const dateOk = !dateFilter || String(item.filter_date || '').trim() === dateFilter;
+        const searchOk =
+          !searchFilter ||
+          String(item.home || '').toLowerCase().includes(searchFilter) ||
+          String(item.away || '').toLowerCase().includes(searchFilter) ||
+          String(item.competition || '').toLowerCase().includes(searchFilter);
+        return teamOk && compOk && dateOk && searchOk;
+      }});
+
+      if (!filteredOptions.length) {{
+        list.innerHTML = '<div class="empty-state">Nenhum jogo agendado combina com os filtros atuais. Ajuste data, competicao ou busca por time.</div>';
+        updateMultiPickSummary();
+        return;
+      }}
+
+      list.innerHTML = filteredOptions
+        .map((item) => {{
+          const detail = matchDetailsStore[item.detail_key];
+          if (!detail) return '';
+          const defaultOutcome = guessFavoriteOutcomeKey(detail);
+          return `
+            <article class="multi-pick-item" data-detail-key="${{item.detail_key}}">
+              <label class="multi-pick-top">
+                <input class="multi-pick-toggle" type="checkbox" value="${{item.detail_key}}" />
+                <div>
+                  <strong>${{item.home}} x ${{item.away}}</strong>
+                  <span>${{item.competition}} • ${{item.date_label || 'Data nao informada'}}</span>
+                </div>
+              </label>
+              <div class="multi-pick-controls">
+                <select class="multi-pick-outcome" data-default-outcome="${{defaultOutcome}}">
+                  <option value="Casa" ${{defaultOutcome === 'Casa' ? 'selected' : ''}}>Casa | ${{item.home}}</option>
+                  <option value="Empate" ${{defaultOutcome === 'Empate' ? 'selected' : ''}}>Empate</option>
+                  <option value="Fora" ${{defaultOutcome === 'Fora' ? 'selected' : ''}}>Fora | ${{item.away}}</option>
+                </select>
+                <div class="multi-pick-meta">${{buildSelectedOutcomeMeta(detail, defaultOutcome)}}</div>
+              </div>
+            </article>
+          `;
+        }})
+        .join('');
+
+      list.querySelectorAll('.multi-pick-toggle').forEach((toggle) => {{
+        toggle.addEventListener('change', updateMultiPickSummary);
+      }});
+      list.querySelectorAll('.multi-pick-outcome').forEach((field) => {{
+        field.addEventListener('change', (event) => {{
+          updateMultiPickCardMeta(event.target.closest('.multi-pick-item'));
+          updateMultiPickSummary();
+        }});
+      }});
+      updateMultiPickSummary();
+    }}
+
+    function clearMultiSelection() {{
+      document.querySelectorAll('#multiPickList .multi-pick-item').forEach((card) => {{
+        const toggle = card.querySelector('.multi-pick-toggle');
+        const outcomeField = card.querySelector('.multi-pick-outcome');
+        if (toggle) toggle.checked = false;
+        if (outcomeField) {{
+          const defaultOutcome = outcomeField.getAttribute('data-default-outcome') || 'Casa';
+          outcomeField.value = defaultOutcome;
+        }}
+        updateMultiPickCardMeta(card);
+      }});
+      updateMultiPickSummary();
+    }}
+
+    function buildMultiMatchPayload() {{
+      const payload = [];
+      document.querySelectorAll('#multiPickList .multi-pick-item').forEach((card) => {{
+        const toggle = card.querySelector('.multi-pick-toggle');
+        const outcomeField = card.querySelector('.multi-pick-outcome');
+        if (!toggle || !outcomeField || !toggle.checked) return;
+        const detailKey = card.getAttribute('data-detail-key') || '';
+        const detail = matchDetailsStore[detailKey];
+        if (!detail) return;
+        const outcomeKey = outcomeField.value || guessFavoriteOutcomeKey(detail);
+        payload.push({{
+          detail_key: detailKey,
+          competition: detail.competition || '',
+          status: detail.status || '',
+          date_label: detail.date || '',
+          home_team: detail.home || '',
+          away_team: detail.away || '',
+          outcome_key: outcomeKey,
+          outcome_label: outcomeLabelForKey(detail, outcomeKey),
+          model_risk_stage: detail.model_risk_stage || '',
+          probabilities: {{
+            home: Number(detail.probs && detail.probs.home),
+            draw: Number(detail.probs && detail.probs.draw),
+            away: Number(detail.probs && detail.probs.away),
+            btts: Number(detail.probs && detail.probs.btts),
+            over25: Number(detail.probs && detail.probs.over25),
+            under25: Number(detail.probs && detail.probs.under25)
+          }},
+          odds: {{
+            home: Number(detail.odds && detail.odds.home),
+            draw: Number(detail.odds && detail.odds.draw),
+            away: Number(detail.odds && detail.odds.away)
+          }}
+        }});
+      }});
+      return payload;
+    }}
+
+    async function runMultiMatchAiAnalysis() {{
+      const status = document.getElementById('multiMatchAiStatus');
+      const responseBox = document.getElementById('multiMatchAiResponse');
+      const focusField = document.getElementById('multiAnalysisFocus');
+      const runButton = document.getElementById('runMultiMatchAi');
+      const selectedMatches = buildMultiMatchPayload();
+
+      if (!selectedMatches.length) {{
+        if (status) status.textContent = 'Selecione pelo menos um jogo antes de consultar a IA.';
+        return;
+      }}
+
+      const apiHost = resolvePortalHost();
+      const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
+      if (isStreamlitCloud) {{
+        if (responseBox) responseBox.textContent = 'No deploy web, use o modulo IA Institucional do proprio portal Streamlit.';
+        if (status) status.textContent = 'A API local da IA nao fica exposta na Streamlit Cloud.';
+        return;
+      }}
+
+      if (runButton) runButton.disabled = true;
+      if (status) status.textContent = 'Consultando IA para as selecoes escolhidas...';
+      if (responseBox) responseBox.textContent = 'Processando probabilidades e risco da sua lista de jogos...';
+
+      try {{
+        const response = await fetch('http://' + apiHost + ':8765/api/multi-match-analysis', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            selected_matches: selectedMatches,
+            user_focus: focusField ? String(focusField.value || '').trim() : ''
+          }})
+        }});
+        const data = await response.json();
+        if (!response.ok || !data.ok) {{
+          throw new Error(data.error || 'Falha ao consultar a analise multipla.');
+        }}
+        if (responseBox) responseBox.textContent = data.analysis || 'A IA nao retornou texto.';
+        if (status) {{
+          const processed = Number(data.processed_matches || selectedMatches.length);
+          status.textContent = 'Leitura concluida com sucesso para ' + processed + ' jogo(s).';
+        }}
+      }} catch (error) {{
+        if (responseBox) responseBox.textContent = 'Nao foi possivel gerar a leitura multipla agora.';
+        if (status) status.textContent = 'Erro: ' + (error && error.message ? error.message : 'falha desconhecida.');
+      }} finally {{
+        if (runButton) runButton.disabled = false;
+      }}
     }}
 
     function setRefreshButtonsLoading(isLoading) {{
@@ -3657,7 +4144,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     function applyFilters() {{
-      const comp = (document.getElementById('fcomp').value || '').toLowerCase();
+      const comp = (document.getElementById('fcomp').value || '').trim().toLowerCase();
       const selectedDate = document.getElementById('fdate').value || '';
       const team = (document.getElementById('fteam').value || '').toLowerCase().trim();
       const oddMinRaw = document.getElementById('foddmin').value;
@@ -3675,7 +4162,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       let visibleRows = 0;
 
       cards.forEach(card => {{
-        const cardComp = (card.getAttribute('data-comp') || '').toLowerCase();
+        const cardComp = (card.getAttribute('data-comp') || '').trim().toLowerCase();
         const showCard = !comp || cardComp === comp;
         const emptyState = card.querySelector('.empty-state');
         card.style.display = showCard ? '' : 'none';
@@ -3715,10 +4202,60 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         visibleRows += cardVisibleRows;
       }});
 
+      const riskCards = Array.from(document.querySelectorAll('.risk-card'));
+      const riskStripEmpty = document.getElementById('riskStripEmpty');
+      let visibleRiskRows = 0;
+
+      riskCards.forEach((riskCard) => {{
+        const rows = Array.from(riskCard.querySelectorAll('tbody tr[data-filter-scope]'));
+        if (!rows.length) {{
+          riskCard.style.display = comp ? 'none' : '';
+          return;
+        }}
+
+        rows.forEach((row) => {{
+          const txt = (row.textContent || '').toLowerCase();
+          const rowDate = row.getAttribute('data-date') || '';
+          const rowComp = (row.getAttribute('data-comp') || '').trim().toLowerCase();
+          const teamOk = !team || txt.includes(team);
+          const dateOk = !selectedDate || rowDate === selectedDate;
+          const compOk = !comp || rowComp === comp;
+          let oddOk = true;
+          const filterScope = row.getAttribute('data-filter-scope') || 'general';
+          const oneOdd = row.getAttribute('data-odd');
+          if (filterScope === 'model' && oneOdd) {{
+            const value = parseFloat(oneOdd);
+            if (!Number.isNaN(value)) {{
+              if (oddMin !== null && value < oddMin) oddOk = false;
+              if (oddMax !== null && value > oddMax) oddOk = false;
+            }}
+            const rowProb = parseFloat(row.getAttribute('data-prob') || '');
+            const rowEv = parseFloat(row.getAttribute('data-ev') || '');
+            const rowBooks = parseInt(row.getAttribute('data-books') || '', 10);
+            if (probMin !== null && !Number.isNaN(rowProb) && rowProb < probMin) oddOk = false;
+            if (evMin !== null && !Number.isNaN(rowEv) && rowEv < evMin) oddOk = false;
+            if (booksMin !== null && !Number.isNaN(rowBooks) && rowBooks < booksMin) oddOk = false;
+          }}
+          row.style.display = teamOk && oddOk && dateOk && compOk ? '' : 'none';
+        }});
+
+        const riskVisibleRows = rows.filter((row) => row.style.display !== 'none').length;
+        riskCard.style.display = riskVisibleRows ? '' : 'none';
+        visibleRiskRows += riskVisibleRows;
+      }});
+
+      if (riskStripEmpty) {{
+        riskStripEmpty.hidden = visibleRiskRows !== 0;
+      }}
+
       classifyRowsByRisk();
       renderDateFocusMatches();
       updateResultsSummary(shownCards, visibleRows);
       updateCompetitionNavState();
+      const multiModal = document.getElementById('multiAnalysisModal');
+      if (multiModal && multiModal.style.display !== 'none') {{
+        renderMultiPickList();
+      }}
     }}
 
     document.getElementById('openFilterModal').addEventListener('click', openFilterModal);
@@ -3726,7 +4263,22 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     document.querySelectorAll('.competition-filter-card[data-comp-filter]').forEach((card) => {{
       card.addEventListener('click', () => toggleCompetitionFilter(card.getAttribute('data-comp-filter') || ''));
     }});
-    document.getElementById('fdate').addEventListener('change', applyFilters);
+    document.getElementById('fdate').addEventListener('change', () => {{
+      const mainDate = document.getElementById('fdate').value || '';
+      const modalDateField = document.getElementById('fdateModal');
+      if (modalDateField && modalDateField.value !== mainDate) {{
+        modalDateField.value = mainDate;
+      }}
+      applyFilters();
+    }});
+    document.getElementById('fdateModal').addEventListener('change', () => {{
+      const modalDate = document.getElementById('fdateModal').value || '';
+      const mainDateField = document.getElementById('fdate');
+      if (mainDateField && mainDateField.value !== modalDate) {{
+        mainDateField.value = modalDate;
+      }}
+      applyFilters();
+    }});
     document.getElementById('fteam').addEventListener('input', applyFilters);
     document.getElementById('frisk').addEventListener('change', () => {{ applyRiskPreset(); applyFilters(); }});
     document.getElementById('clearFilter').addEventListener('click', resetPortalFilters);
@@ -3737,6 +4289,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     document.getElementById('reloadPage').addEventListener('click', reloadPortalShell);
     document.getElementById('reloadPageLauncher').addEventListener('click', reloadPortalShell);
     document.getElementById('openAiPromptModal').addEventListener('click', openAiPromptModal);
+    document.getElementById('openMultiAnalysisModal').addEventListener('click', openMultiAnalysisModal);
+    document.getElementById('runMultiMatchAi').addEventListener('click', runMultiMatchAiAnalysis);
+    document.getElementById('clearMultiSelection').addEventListener('click', clearMultiSelection);
+    document.getElementById('multiPickSearch').addEventListener('input', renderMultiPickList);
     document.getElementById('modalUpdateAiPrompt').addEventListener('click', updateAiPrompt);
     document.getElementById('modalCopyAiPrompt').addEventListener('click', copyAiPrompt);
     document.getElementById('modalRunAiPrompt').addEventListener('click', runAiPrompt);
@@ -3750,6 +4306,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (event.target.id === 'aiPromptModal') closeAiPromptModal();
     }});
 
+    document.getElementById('multiAnalysisModal').addEventListener('click', (event) => {{
+      if (event.target.id === 'multiAnalysisModal') closeMultiAnalysisModal();
+    }});
+
     window.addEventListener('click', (event) => {{
       if (event.target.id === 'matchModal') closeMatchDetails();
     }});
@@ -3759,11 +4319,12 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         closeMatchDetails();
         closeFilterModal();
         closeAiPromptModal();
+        closeMultiAnalysisModal();
       }}
     }});
 
     window.addEventListener('resize', () => {{
-      ['matchModal', 'filterModal', 'aiPromptModal'].forEach((modalId) => {{
+      ['matchModal', 'filterModal', 'aiPromptModal', 'multiAnalysisModal'].forEach((modalId) => {{
         const modal = document.getElementById(modalId);
         if (modal && modal.style.display !== 'none') {{
           positionVisibleModal(modalId);

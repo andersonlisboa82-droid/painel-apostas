@@ -832,6 +832,39 @@ def filter_matches_by_team(frame: pd.DataFrame, team_query: str) -> pd.DataFrame
     return frame.loc[mask].copy()
 
 
+def filter_matches_by_date(
+    frame: pd.DataFrame,
+    start_date: date | None,
+    end_date: date | None,
+) -> pd.DataFrame:
+    if frame.empty or (start_date is None and end_date is None):
+        return frame.copy()
+
+    out = frame.copy()
+    parsed_local = pd.Series(pd.NaT, index=out.index, dtype="datetime64[ns]")
+
+    if "event_timestamp" in out.columns:
+        event_series = pd.to_datetime(out["event_timestamp"], errors="coerce", utc=True)
+        if event_series.notna().any():
+            parsed_local = event_series.dt.tz_convert(APP_TIMEZONE).dt.tz_localize(None)
+
+    if "date_text" in out.columns:
+        unresolved = parsed_local.isna()
+        if unresolved.any():
+            date_text_series = out.loc[unresolved, "date_text"].fillna("").astype(str).str.strip()
+            normalized_dates = date_text_series.str.replace(r"\s+\d{2}:\d{2}$", "", regex=True)
+            parsed_text = pd.to_datetime(normalized_dates, errors="coerce", dayfirst=True)
+            parsed_local.loc[unresolved] = parsed_text
+
+    match_dates = parsed_local.dt.date
+    mask = pd.Series(True, index=out.index)
+    if start_date is not None:
+        mask &= match_dates >= start_date
+    if end_date is not None:
+        mask &= match_dates <= end_date
+    return out.loc[mask.fillna(False)].copy()
+
+
 def sort_matches_for_display(frame: pd.DataFrame, *, ascending: bool) -> pd.DataFrame:
     if frame.empty:
         return frame.copy()
@@ -2803,6 +2836,17 @@ with st.sidebar:
     st.markdown("### Configuracoes")
     competition = st.selectbox("Competicao", options=list(COMPETITIONS.keys()))
     team_filter = st.text_input("Filtrar por time", placeholder="Ex: Flamengo")
+    date_filter_enabled = st.checkbox("Filtrar jogos por data", value=False, key="match_date_filter_enabled")
+    date_filter_start: date | None = None
+    date_filter_end: date | None = None
+    if date_filter_enabled:
+        date_col_start, date_col_end = st.columns(2)
+        with date_col_start:
+            date_filter_start = st.date_input("Data inicial", value=date.today(), key="match_date_filter_start")
+        with date_col_end:
+            date_filter_end = st.date_input("Data final", value=date.today(), key="match_date_filter_end")
+        if date_filter_start and date_filter_end and date_filter_end < date_filter_start:
+            st.warning("A data final esta anterior a data inicial. O intervalo sera ajustado automaticamente.")
     risk_profile = st.selectbox(
         "Perfil de risco",
         options=["Baixo risco", "Medio risco", "Alto risco", "Personalizado"],
@@ -2817,6 +2861,7 @@ with st.sidebar:
 
     competition_min_books = {
         "Brasileirao": {"Baixo risco": 2, "Medio risco": 2, "Alto risco": 1},
+        "Copa do Brasil": {"Baixo risco": 4, "Medio risco": 3, "Alto risco": 2},
         "Premier League": {"Baixo risco": 5, "Medio risco": 4, "Alto risco": 3},
         "La Liga": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
         "Copa Sul-Americana": {"Baixo risco": 6, "Medio risco": 5, "Alto risco": 3},
@@ -3197,11 +3242,17 @@ runtime_kelly = (
     if isinstance(runtime_betting_cfg, dict)
     else 0.25
 )
+if date_filter_enabled and date_filter_start and date_filter_end and date_filter_end < date_filter_start:
+    date_filter_start, date_filter_end = date_filter_end, date_filter_start
 team_filter_clean = team_filter.strip()
 if team_filter_clean:
     finished = filter_matches_by_team(finished, team_filter_clean)
     fixtures = filter_matches_by_team(fixtures, team_filter_clean)
     valid = filter_matches_by_team(valid, team_filter_clean)
+if date_filter_enabled:
+    finished = filter_matches_by_date(finished, date_filter_start, date_filter_end)
+    fixtures = filter_matches_by_date(fixtures, date_filter_start, date_filter_end)
+    valid = filter_matches_by_date(valid, date_filter_start, date_filter_end)
 
 finished = sort_matches_for_display(finished, ascending=False)
 fixtures = sort_matches_for_display(fixtures, ascending=True)
@@ -3227,6 +3278,8 @@ if needs_safe_data:
     )
     if team_filter_clean:
         safe_df = filter_matches_by_team(safe_df, team_filter_clean)
+    if date_filter_enabled:
+        safe_df = filter_matches_by_date(safe_df, date_filter_start, date_filter_end)
 
     if safe_df.empty and risk_profile != "Personalizado":
         relax_steps = [
@@ -3246,6 +3299,8 @@ if needs_safe_data:
             )
             if team_filter_clean:
                 safe_df = filter_matches_by_team(safe_df, team_filter_clean)
+            if date_filter_enabled:
+                safe_df = filter_matches_by_date(safe_df, date_filter_start, date_filter_end)
             if not safe_df.empty:
                 relaxed_note = (
                     f"Filtro do perfil foi relaxado automaticamente para exibir opcoes: "
@@ -3267,11 +3322,22 @@ if needs_backtest_data:
     )
     if team_filter_clean:
         backtest_df = filter_matches_by_team(backtest_df, team_filter_clean)
+    if date_filter_enabled:
+        backtest_df = filter_matches_by_date(backtest_df, date_filter_start, date_filter_end)
     backtest_summary = _summarize_backtest_cached(backtest_df)
     probability_buckets = _build_probability_buckets_cached(backtest_df)
 
 competition_name = str(competition)
 team_filter_display = escape(team_filter_clean)
+date_filter_label = ""
+if date_filter_enabled and date_filter_start and date_filter_end:
+    if date_filter_start == date_filter_end:
+        date_filter_label = date_filter_start.strftime("%d/%m/%Y")
+    else:
+        date_filter_label = (
+            f"{date_filter_start.strftime('%d/%m/%Y')} a {date_filter_end.strftime('%d/%m/%Y')}"
+        )
+date_filter_display = escape(date_filter_label)
 finished_count = len(finished)
 fixtures_count = len(fixtures)
 odds_count = len(valid)
@@ -3314,6 +3380,7 @@ if page != "Inicio":
     <div class="meta-pill"><strong>{competition_name}</strong> em foco</div>
     <div class="meta-pill"><strong>{odds_coverage}%</strong> cobertura de odds</div>
     {"<div class='meta-pill'><strong>Filtro</strong> " + team_filter_display + "</div>" if team_filter.strip() else ""}
+    {"<div class='meta-pill'><strong>Periodo</strong> " + date_filter_display + "</div>" if date_filter_label else ""}
   </div>
 </section>
 """,
