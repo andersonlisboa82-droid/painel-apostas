@@ -3104,13 +3104,14 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const status = document.getElementById('realStatsStatus');
       const apiHost = resolvePortalHost();
       const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
+      const hasRemoteApi = Boolean(getConfiguredApiBase());
       const homeHistory = buildRecentTeamHistory(data.home, data);
       const awayHistory = buildRecentTeamHistory(data.away, data);
       const prefetchedRealStats = data && data.prefetched_real_stats && data.prefetched_real_stats.available
         ? data.prefetched_real_stats
         : null;
 
-      if (isStreamlitCloud) {{
+      if (isStreamlitCloud && !hasRemoteApi) {{
         resetRealStatsBlock('Estatisticas reais sob demanda ficam disponiveis apenas no ambiente local do portal.');
         resetProjectionBlock(
           'Medias e projecoes por time ficam disponiveis apenas no ambiente local do portal.',
@@ -3134,7 +3135,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       );
 
       try {{
-        const response = await fetch('http://' + apiHost + ':8765/api/match-stats', {{
+        const response = await fetch(buildApiUrl('/api/match-stats', apiHost), {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify({{
@@ -3798,7 +3799,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
       const apiHost = resolvePortalHost();
       const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
-      if (isStreamlitCloud) {{
+      const hasRemoteApi = Boolean(getConfiguredApiBase());
+      if (isStreamlitCloud && !hasRemoteApi) {{
         if (responseBox) responseBox.textContent = 'No deploy web, use o modulo IA Institucional do proprio portal Streamlit.';
         if (status) status.textContent = 'A API local da IA nao fica exposta na Streamlit Cloud.';
         return;
@@ -3809,7 +3811,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (responseBox) responseBox.textContent = 'Processando probabilidades e risco da sua lista de jogos...';
 
       try {{
-        const response = await fetch('http://' + apiHost + ':8765/api/multi-match-analysis', {{
+        const response = await fetch(buildApiUrl('/api/multi-match-analysis', apiHost), {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify({{
@@ -3843,6 +3845,28 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           element.classList.toggle('loading', isLoading);
         }}
       }});
+    }}
+
+    const FD_CONFIGURED_API_BASE = "__FD_API_BASE__";
+
+    function getConfiguredApiBase() {{
+      const base = String(FD_CONFIGURED_API_BASE || '').trim();
+      if (!base) return '';
+      if (!/^https?:\\/\\//i.test(base)) return '';
+      return base.replace(/\\/+$/, '');
+    }}
+
+    function resolveApiBase(apiHost) {{
+      const configuredBase = getConfiguredApiBase();
+      if (configuredBase) return configuredBase;
+      return 'http://' + apiHost + ':8765';
+    }}
+
+    function buildApiUrl(path, apiHost) {{
+      const targetHost = apiHost || resolvePortalHost();
+      const base = resolveApiBase(targetHost);
+      const safePath = String(path || '');
+      return base + (safePath.startsWith('/') ? safePath : ('/' + safePath));
     }}
 
     function resolvePortalHost() {{
@@ -3997,7 +4021,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     async function startPortalRefreshJob(apiHost) {{
-      const response = await fetch('http://' + apiHost + ':8765/api/refresh-portal/start', {{
+      const response = await fetch(buildApiUrl('/api/refresh-portal/start', apiHost), {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
         body: JSON.stringify({{ source: 'portal-ui' }})
@@ -4010,7 +4034,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     async function fetchPortalRefreshStatus(apiHost, jobId) {{
-      const response = await fetch('http://' + apiHost + ':8765/api/refresh-portal/status?job_id=' + encodeURIComponent(jobId));
+      const response = await fetch(buildApiUrl('/api/refresh-portal/status?job_id=' + encodeURIComponent(jobId), apiHost));
       const data = await response.json();
       if (!response.ok || !data.ok || !data.job) {{
         throw new Error(data.error || 'Nao foi possivel consultar o status da atualizacao.');
@@ -4022,6 +4046,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const summary = document.getElementById('resultsSummary');
       const apiHost = resolvePortalHost();
       const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
+      const hasRemoteApi = Boolean(getConfiguredApiBase());
       const isStaticPortal = window.location.port === '8000' || window.location.pathname.toLowerCase().endsWith('/index.html');
       let keepOverlayVisible = false;
       let lastKnownStage = 'cache';
@@ -4031,7 +4056,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       }}
       setRefreshOverlayVisible(true, 'Atualizacao em andamento', 'Buscando resultados...', true);
 
-      if (isStreamlitCloud) {{
+      if (isStreamlitCloud && !hasRemoteApi) {{
         keepOverlayVisible = true;
         setRefreshOverlayMessage('Atualizacao em andamento', 'Solicitando atualizacao no backend do Streamlit...');
         if (summary) {{
@@ -4146,20 +4171,21 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const responseBox = document.getElementById('aiResponse');
       const apiHost = resolvePortalHost();
       const isStreamlitCloud = isStreamlitCloudRuntime(apiHost);
+      const hasRemoteApi = Boolean(getConfiguredApiBase());
       if (!selectedDate) {{
         status.textContent = 'Selecione uma data antes de executar a leitura.';
         return;
       }}
-      if (isStreamlitCloud) {{
+      if (isStreamlitCloud && !hasRemoteApi) {{
         responseBox.textContent = 'No deploy web, use o modulo IA Institucional do proprio portal Streamlit.';
         status.textContent = 'A API local da IA nao fica exposta na Streamlit Cloud.';
         return;
       }}
 
-      status.textContent = 'Consultando a IA local...';
+      status.textContent = 'Consultando a IA...';
       responseBox.textContent = 'Processando leitura quantitativa, aguarde...';
       try {{
-        const response = await fetch('http://' + apiHost + ':8765/api/ai-analysis', {{
+        const response = await fetch(buildApiUrl('/api/ai-analysis', apiHost), {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify({{

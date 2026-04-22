@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -34,8 +35,11 @@ from real_match_stats import (
 from scraper import COMPETITIONS, load_all_matches, load_competition_matches
 
 
-HOST = "0.0.0.0"
-PORT = 8765
+HOST = str(os.getenv("PORTAL_AI_HOST", "0.0.0.0")).strip() or "0.0.0.0"
+try:
+    PORT = int(str(os.getenv("PORT", os.getenv("PORTAL_AI_PORT", "8765"))).strip() or "8765")
+except ValueError:
+    PORT = 8765
 CACHE_TTL_SECONDS = 900
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 

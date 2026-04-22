@@ -33,6 +33,37 @@ streamlit run app.py --server.port 8503
 ```
 Depois, acesse: `http://127.0.0.1:8503/?view=app`
 
+## IA no Streamlit Cloud (sem erro de API local)
+No deploy da Streamlit Cloud, a UI do `index.html` nao consegue acessar `localhost:8765`.
+Para funcionar em producao, publique `portal_ai_server.py` em um backend HTTPS e informe a URL no app.
+
+### 1) Publicar backend da IA (Render)
+Este repositorio ja inclui `render.yaml` com o servico pronto.
+
+No Render:
+1. Crie um **New Web Service** apontando para este repo.
+2. Render vai ler o `render.yaml` automaticamente.
+3. Configure a env var `NVIDIA_API_KEY`.
+4. Deploy.
+
+URL esperada apos deploy (exemplo):
+`https://painel-apostas-portal-ai.onrender.com`
+
+### 2) Configurar Streamlit Cloud
+No app da Streamlit Cloud, em **Settings > Secrets**, adicione:
+
+```toml
+PORTAL_REMOTE_API_BASE_URL = "https://painel-apostas-portal-ai.onrender.com"
+NVIDIA_API_KEY = "SUA_CHAVE_NVIDIA_AQUI"
+```
+
+Depois clique em **Reboot app**.
+
+Com isso:
+- o portal continua local quando voce estiver local;
+- na Cloud, o frontend usa a API remota automaticamente;
+- a mensagem `A API local da IA nao fica exposta na Streamlit Cloud` some quando a URL remota estiver configurada.
+
 ## Estrutura
 - `app.py`: painel Streamlit
 - `scraper.py`: scraping de resultados, fixtures e odds

@@ -994,6 +994,33 @@ def _inject_portal_updated_badge(html: str, updated_at_value: str) -> str:
     )
 
 
+def _resolve_portal_remote_api_base_url() -> str:
+    candidates: list[str] = [
+        str(os.getenv("PORTAL_REMOTE_API_BASE_URL", "")).strip(),
+        str(os.getenv("PUBLIC_PORTAL_API_BASE_URL", "")).strip(),
+    ]
+    try:
+        candidates.extend(
+            [
+                str(st.secrets.get("PORTAL_REMOTE_API_BASE_URL", "")).strip(),
+                str(st.secrets.get("PUBLIC_PORTAL_API_BASE_URL", "")).strip(),
+            ]
+        )
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if re.match(r"^https?://", candidate, flags=re.IGNORECASE):
+            return candidate.rstrip("/")
+    return ""
+
+
+def _inject_portal_api_base(html: str, api_base: str) -> str:
+    return html.replace('"__FD_API_BASE__"', json.dumps(str(api_base or "")))
+
+
 def _extract_portal_git_hash(html: str) -> str:
     match = re.search(r"<!--\s*portal-build-git:\s*([A-Za-z0-9._-]+)\s*-->", html)
     if not match:
@@ -1005,6 +1032,7 @@ def render_embedded_index_portal(updated_at_override: str = "") -> None:
     ensure_portal_ai_server_running()
     html = _load_index_portal_html()
     html = _inject_portal_updated_badge(html, updated_at_override)
+    html = _inject_portal_api_base(html, _resolve_portal_remote_api_base_url())
     components.html(html, height=1200, scrolling=True)
 
 
