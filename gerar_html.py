@@ -4,6 +4,7 @@ from datetime import datetime
 from html import escape
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -25,7 +26,39 @@ from scraper import COMPETITIONS, load_competition_matches
 
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
-PORTAL_RELEASE_LABEL = "11/04/2026 | v2-modern-canvas"
+
+
+def _current_git_short_hash() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=APP_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        short_hash = result.stdout.strip()
+        return short_hash if short_hash else "sem-git"
+    except Exception:
+        return "sem-git"
+
+
+def _current_git_commit_date() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "show", "-s", "--date=format:%d/%m/%Y", "--format=%cd", "HEAD"],
+            cwd=APP_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        commit_date = result.stdout.strip()
+        return commit_date if commit_date else datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y")
+    except Exception:
+        return datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y")
+
+
+PORTAL_RELEASE_LABEL = f"{_current_git_commit_date()} | {_current_git_short_hash()}"
 
 AI_PROMPT_TEMPLATE = """Atue como um analista quantitativo profissional de futebol especializado em modelagem estatistica, leitura de mercado e identificacao de value bets (+EV), com abordagem semelhante a analistas de apostas institucionais.
 
@@ -1008,8 +1041,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             ),
         ]
     )
+    portal_git_hash = _current_git_short_hash()
 
     html = f"""<!doctype html>
+<!-- portal-build-git: {portal_git_hash} -->
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
@@ -2099,6 +2134,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       <div class="topbar-meta">
         <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> <span id="portalUpdatedAt">{_current_app_timestamp()}</span></div>
         <div class="meta-pill"><strong>Release</strong> {PORTAL_RELEASE_LABEL}</div>
+        <div class="meta-pill"><strong>Git</strong> {portal_git_hash}</div>
         <div class="meta-pill"><strong>{competition_count}</strong> competicoes no radar</div>
         <div class="meta-pill"><strong>{odds_coverage}%</strong> cobertura de odds</div>
       </div>

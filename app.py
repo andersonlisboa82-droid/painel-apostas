@@ -5,6 +5,7 @@ import importlib
 import os
 import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -124,7 +125,25 @@ WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
 MODEL_CONFIG_SESSION_KEY = "runtime_model_config"
 MODEL_CONFIG_FEEDBACK_KEY = "_runtime_model_feedback"
 PORTAL_REFRESH_FEEDBACK_KEY = "_portal_refresh_feedback"
-APP_RELEASE_LABEL = "2026-04-13 22:45 | 29fa34a"
+
+
+def _current_git_short_hash() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=APP_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        short_hash = result.stdout.strip()
+        return short_hash if short_hash else "sem-git"
+    except Exception:
+        return "sem-git"
+
+
+CURRENT_GIT_SHORT_HASH = _current_git_short_hash()
+APP_RELEASE_LABEL = f"{datetime.now(APP_TIMEZONE).strftime('%Y-%m-%d')} | {CURRENT_GIT_SHORT_HASH}"
 
 
 def _get_runtime_model_config() -> dict[str, object]:
@@ -975,6 +994,13 @@ def _inject_portal_updated_badge(html: str, updated_at_value: str) -> str:
     )
 
 
+def _extract_portal_git_hash(html: str) -> str:
+    match = re.search(r"<!--\s*portal-build-git:\s*([A-Za-z0-9._-]+)\s*-->", html)
+    if not match:
+        return ""
+    return str(match.group(1)).strip()
+
+
 def render_embedded_index_portal(updated_at_override: str = "") -> None:
     ensure_portal_ai_server_running()
     html = _load_index_portal_html()
@@ -1030,10 +1056,18 @@ def _read_cached_html_snapshot(path_str: str, modified_at: float) -> str:
 
 def _load_index_portal_html() -> str:
     if INDEX_HTML_FILE.exists():
-        return _read_cached_html_snapshot(str(INDEX_HTML_FILE), INDEX_HTML_FILE.stat().st_mtime)
+        cached_html = _read_cached_html_snapshot(str(INDEX_HTML_FILE), INDEX_HTML_FILE.stat().st_mtime)
+        embedded_hash = _extract_portal_git_hash(cached_html)
+        if CURRENT_GIT_SHORT_HASH != "sem-git" and embedded_hash != CURRENT_GIT_SHORT_HASH:
+            refreshed_html = build_index_html()
+            INDEX_HTML_FILE.write_text(refreshed_html, encoding="utf-8")
+            _read_cached_html_snapshot.clear()
+            return refreshed_html
+        return cached_html
 
     html = build_index_html()
     INDEX_HTML_FILE.write_text(html, encoding="utf-8")
+    _read_cached_html_snapshot.clear()
     return html
 
 
@@ -3931,203 +3965,287 @@ elif page == "Analise de Jogo":
             selectable_matches["match_label"] = selectable_matches.apply(build_analysis_match_label, axis=1)
             match_options = selectable_matches["match_option_id"].tolist()
             labels_by_option = dict(zip(selectable_matches["match_option_id"], selectable_matches["match_label"]))
-            selected_option = st.selectbox(
-                "Escolha o jogo",
+            selected_options = st.multiselect(
+                "Escolha um ou mais jogos",
                 options=match_options,
+                default=match_options[:1],
                 format_func=lambda option_id: labels_by_option.get(option_id, option_id),
-                key=f"match_selector_label_{competition}",
+                key=f"match_selector_label_multi_{competition}",
             )
-            selected = selectable_matches.loc[selectable_matches["match_option_id"] == selected_option].iloc[0]
-            selected_match_label = str(selected["match_label"])
-            selected_status = str(selected.get("status", "")).strip() or "Desconhecido"
-            selected_display_date = format_match_datetime(
-                selected.get("date_text"),
-                selected.get("event_timestamp"),
-                selected_status,
-            )
-
-            probs = calculate_match_probabilities(
-                df,
-                selected["home_team"],
-                selected["away_team"],
-                model_config=runtime_model_config,
-            )
-            tip = suggest_bet_strategy(
-                probs,
-                odd_home=float(selected["odds_home"]),
-                odd_draw=float(selected["odds_draw"]),
-                odd_away=float(selected["odds_away"]),
-                bankroll=1000.0,
-                kelly_fractional=runtime_kelly,
-                model_config=runtime_model_config,
-            )
-            model_market, probable_probability = pick_highest_probability_market(probs)
-            probable_market = market_label(str(model_market), str(selected["home_team"]), str(selected["away_team"]))
-            readable_market = market_label(str(tip.best_market), str(selected["home_team"]), str(selected["away_team"]))
-            market_probs = {
-                "Casa": 1 / float(selected["odds_home"]) if float(selected["odds_home"]) > 1 else 0.0,
-                "Empate": 1 / float(selected["odds_draw"]) if float(selected["odds_draw"]) > 1 else 0.0,
-                "Fora": 1 / float(selected["odds_away"]) if float(selected["odds_away"]) > 1 else 0.0,
-            }
-            market_total = sum(market_probs.values()) or 1.0
-            market_probs = {key: value / market_total for key, value in market_probs.items()}
-            house_market = max(market_probs.items(), key=lambda item: item[1])[0]
-
-            render_card_grid(
-                [
-                    {"eyebrow": f"Modelo | {selected['home_team']}", "value": f"{probs.home_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_home']:.2f}."},
-                    {"eyebrow": "Modelo | Empate", "value": f"{probs.draw * 100:.1f}%", "copy": f"Odd atual {selected['odds_draw']:.2f}."},
-                    {"eyebrow": f"Modelo | {selected['away_team']}", "value": f"{probs.away_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_away']:.2f}."},
-                    {"eyebrow": "Entrada por valor", "value": f"{tip.expected_value * 100:.2f}%", "copy": readable_market},
-                ]
-            )
-
-            if selected_status == "Finalizado":
-                final_score = f"{format_score_value(selected.get('home_goals'))} x {format_score_value(selected.get('away_goals'))}"
-                final_market = market_badge_label(
-                    resolve_match_market(selected.get("home_goals"), selected.get("away_goals")),
-                    str(selected["home_team"]),
-                    str(selected["away_team"]),
-                )
-                st.info(
-                    f"Jogo finalizado selecionado. Placar: {final_score} | Resultado real: {final_market}. "
-                    "As odds mostradas abaixo representam a linha usada para a leitura do confronto."
-                )
-
-            render_split_highlight(
-                "Probabilidade x modelo x casas",
-                "Este bloco mostra se o modelo esta convergindo com o mercado ou se esta comprando uma leitura mais agressiva.",
-                [
-                    f"Favorito do modelo: {market_badge_label(str(model_market), str(selected['home_team']), str(selected['away_team']))} ({probable_probability * 100:.2f}%).",
-                    f"Favorito das casas: {market_badge_label(str(house_market), str(selected['home_team']), str(selected['away_team']))} ({market_probs[house_market] * 100:.2f}%).",
-                    f"Entrada por valor: {readable_market} com edge de {(tip.model_probability - tip.implied_probability) * 100:.2f} pontos.",
-                ],
-                tone="warm" if model_market != house_market else "neutral",
-            )
-
-            if tip.expected_value > 0:
-                st.success(f"Melhor aposta por valor: {readable_market} | EV: {tip.expected_value * 100:.2f}%")
+            if not selected_options:
+                st.info("Selecione pelo menos um jogo para gerar a analise.")
             else:
-                st.warning(f"Sem EV positivo no 1X2. Melhor aposta por valor no momento: {readable_market} (EV {tip.expected_value * 100:.2f}%).")
+                selectable_indexed = selectable_matches.set_index("match_option_id", drop=False)
+                selected_matches = selectable_indexed.loc[selected_options].reset_index(drop=True)
+                analysis_bundles: dict[str, dict[str, object]] = {}
+                summary_rows: list[dict[str, object]] = []
+                analysis_errors: list[str] = []
 
-            hedge_df = build_hedge_scenarios(
-                best_market=str(tip.best_market),
-                odd_home=float(selected["odds_home"]),
-                odd_draw=float(selected["odds_draw"]),
-                odd_away=float(selected["odds_away"]),
-                base_stake=float(max(tip.suggested_stake, 10.0)),
-            )
-            if not hedge_df.empty:
-                render_split_highlight(
-                    "Opcoes de fechamento e protecao",
-                    "As simulacoes abaixo usam as odds atuais do painel para montar hedge pre-jogo ou saida parcial planejada. Nao equivalem a cashout ao vivo.",
-                    [
-                        "Leve: reduz pouco o risco e preserva mais upside.",
-                        "Balanceado: aproxima os cenarios e corta a perda maxima.",
-                        "Defensivo: protege mais, mas sacrifica parte do lucro se a leitura principal bater.",
-                    ],
-                    tone="neutral",
-                )
-                hedge_view = hedge_df.copy()
-                hedge_view.columns = [
-                    "Perfil",
-                    "Mercado principal",
-                    "Stake principal",
-                    "Budget hedge",
-                    "Hedge 1",
-                    "Hedge 2",
-                    "Lucro se principal bater",
-                    "Resultado hedge 1",
-                    "Resultado hedge 2",
-                    "Pior cenario",
-                ]
-                st.dataframe(hedge_view, use_container_width=True, hide_index=True)
+                for selected in selected_matches.to_dict(orient="records"):
+                    option_id = str(selected["match_option_id"])
+                    try:
+                        selected_status = str(selected.get("status", "")).strip() or "Desconhecido"
+                        selected_display_date = format_match_datetime(
+                            selected.get("date_text"),
+                            selected.get("event_timestamp"),
+                            selected_status,
+                        )
+                        probs = calculate_match_probabilities(
+                            df,
+                            selected["home_team"],
+                            selected["away_team"],
+                            model_config=runtime_model_config,
+                        )
+                        tip = suggest_bet_strategy(
+                            probs,
+                            odd_home=float(selected["odds_home"]),
+                            odd_draw=float(selected["odds_draw"]),
+                            odd_away=float(selected["odds_away"]),
+                            bankroll=1000.0,
+                            kelly_fractional=runtime_kelly,
+                            model_config=runtime_model_config,
+                        )
+                        model_market, probable_probability = pick_highest_probability_market(probs)
+                        probable_market = market_label(str(model_market), str(selected["home_team"]), str(selected["away_team"]))
+                        readable_market = market_label(str(tip.best_market), str(selected["home_team"]), str(selected["away_team"]))
+                        market_probs = {
+                            "Casa": 1 / float(selected["odds_home"]) if float(selected["odds_home"]) > 1 else 0.0,
+                            "Empate": 1 / float(selected["odds_draw"]) if float(selected["odds_draw"]) > 1 else 0.0,
+                            "Fora": 1 / float(selected["odds_away"]) if float(selected["odds_away"]) > 1 else 0.0,
+                        }
+                        market_total = sum(market_probs.values()) or 1.0
+                        market_probs = {key: value / market_total for key, value in market_probs.items()}
+                        house_market = max(market_probs.items(), key=lambda item: item[1])[0]
 
-            ai_state_key = f"ai_analysis_cache_{competition}_{selected_option}"
-            st.markdown(
-                f"""
+                        analysis_bundles[option_id] = {
+                            "selected": pd.Series(selected),
+                            "selected_match_label": str(selected["match_label"]),
+                            "selected_status": selected_status,
+                            "selected_display_date": selected_display_date,
+                            "probs": probs,
+                            "tip": tip,
+                            "model_market": model_market,
+                            "probable_probability": probable_probability,
+                            "probable_market": probable_market,
+                            "readable_market": readable_market,
+                            "market_probs": market_probs,
+                            "house_market": house_market,
+                        }
+                        summary_rows.append(
+                            {
+                                "Data": selected_display_date,
+                                "Jogo": f"{selected['home_team']} x {selected['away_team']}",
+                                "Status": selected_status,
+                                "Favorito do modelo": probable_market,
+                                "Prob. modelo": probable_probability,
+                                "Entrada por valor": readable_market,
+                                "Odd valor": float(tip.best_odd),
+                                "EV": float(tip.expected_value),
+                                "Stake sugerida": float(tip.suggested_stake),
+                            }
+                        )
+                    except Exception as exc:
+                        analysis_errors.append(f"{labels_by_option.get(option_id, option_id)}: {exc}")
+
+                if analysis_errors:
+                    st.warning(
+                        "Alguns jogos selecionados nao puderam ser processados. "
+                        "Ajuste o filtro ou confira se as odds estao validas."
+                    )
+                    for err in analysis_errors[:3]:
+                        st.caption(f"- {err}")
+
+                valid_options = [option_id for option_id in selected_options if option_id in analysis_bundles]
+                if not valid_options:
+                    st.info("Nao foi possivel analisar os jogos escolhidos.")
+                else:
+                    summary_df = pd.DataFrame(summary_rows)
+                    if not summary_df.empty:
+                        summary_view = summary_df.copy()
+                        summary_view["Prob. modelo"] = (summary_view["Prob. modelo"] * 100).round(2).astype(str) + "%"
+                        summary_view["EV"] = (summary_view["EV"] * 100).round(2).astype(str) + "%"
+                        summary_view["Odd valor"] = summary_view["Odd valor"].round(2)
+                        summary_view["Stake sugerida"] = "R$ " + summary_view["Stake sugerida"].round(2).map(lambda x: f"{x:.2f}")
+                        st.markdown("### Resumo comparativo dos jogos selecionados")
+                        st.dataframe(summary_view, use_container_width=True, hide_index=True)
+
+                    selected_option = valid_options[0]
+                    if len(valid_options) > 1:
+                        selected_option = st.selectbox(
+                            "Jogo em foco para detalhes completos",
+                            options=valid_options,
+                            format_func=lambda option_id: labels_by_option.get(option_id, option_id),
+                            key=f"match_focus_label_{competition}",
+                        )
+                    selected_bundle = analysis_bundles[selected_option]
+                    selected = selected_bundle["selected"]
+                    selected_match_label = str(selected_bundle["selected_match_label"])
+                    selected_status = str(selected_bundle["selected_status"])
+                    selected_display_date = str(selected_bundle["selected_display_date"])
+                    probs = selected_bundle["probs"]
+                    tip = selected_bundle["tip"]
+                    model_market = selected_bundle["model_market"]
+                    probable_probability = float(selected_bundle["probable_probability"])
+                    probable_market = str(selected_bundle["probable_market"])
+                    readable_market = str(selected_bundle["readable_market"])
+                    market_probs = selected_bundle["market_probs"]
+                    house_market = str(selected_bundle["house_market"])
+
+                    render_card_grid(
+                        [
+                            {"eyebrow": f"Modelo | {selected['home_team']}", "value": f"{probs.home_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_home']:.2f}."},
+                            {"eyebrow": "Modelo | Empate", "value": f"{probs.draw * 100:.1f}%", "copy": f"Odd atual {selected['odds_draw']:.2f}."},
+                            {"eyebrow": f"Modelo | {selected['away_team']}", "value": f"{probs.away_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_away']:.2f}."},
+                            {"eyebrow": "Entrada por valor", "value": f"{tip.expected_value * 100:.2f}%", "copy": readable_market},
+                        ]
+                    )
+
+                    if selected_status == "Finalizado":
+                        final_score = f"{format_score_value(selected.get('home_goals'))} x {format_score_value(selected.get('away_goals'))}"
+                        final_market = market_badge_label(
+                            resolve_match_market(selected.get("home_goals"), selected.get("away_goals")),
+                            str(selected["home_team"]),
+                            str(selected["away_team"]),
+                        )
+                        st.info(
+                            f"Jogo finalizado selecionado. Placar: {final_score} | Resultado real: {final_market}. "
+                            "As odds mostradas abaixo representam a linha usada para a leitura do confronto."
+                        )
+
+                    render_split_highlight(
+                        "Probabilidade x modelo x casas",
+                        "Este bloco mostra se o modelo esta convergindo com o mercado ou se esta comprando uma leitura mais agressiva.",
+                        [
+                            f"Favorito do modelo: {market_badge_label(str(model_market), str(selected['home_team']), str(selected['away_team']))} ({probable_probability * 100:.2f}%).",
+                            f"Favorito das casas: {market_badge_label(str(house_market), str(selected['home_team']), str(selected['away_team']))} ({market_probs[house_market] * 100:.2f}%).",
+                            f"Entrada por valor: {readable_market} com edge de {(tip.model_probability - tip.implied_probability) * 100:.2f} pontos.",
+                        ],
+                        tone="warm" if model_market != house_market else "neutral",
+                    )
+
+                    if tip.expected_value > 0:
+                        st.success(f"Melhor aposta por valor: {readable_market} | EV: {tip.expected_value * 100:.2f}%")
+                    else:
+                        st.warning(f"Sem EV positivo no 1X2. Melhor aposta por valor no momento: {readable_market} (EV {tip.expected_value * 100:.2f}%).")
+
+                    hedge_df = build_hedge_scenarios(
+                        best_market=str(tip.best_market),
+                        odd_home=float(selected["odds_home"]),
+                        odd_draw=float(selected["odds_draw"]),
+                        odd_away=float(selected["odds_away"]),
+                        base_stake=float(max(tip.suggested_stake, 10.0)),
+                    )
+                    if not hedge_df.empty:
+                        render_split_highlight(
+                            "Opcoes de fechamento e protecao",
+                            "As simulacoes abaixo usam as odds atuais do painel para montar hedge pre-jogo ou saida parcial planejada. Nao equivalem a cashout ao vivo.",
+                            [
+                                "Leve: reduz pouco o risco e preserva mais upside.",
+                                "Balanceado: aproxima os cenarios e corta a perda maxima.",
+                                "Defensivo: protege mais, mas sacrifica parte do lucro se a leitura principal bater.",
+                            ],
+                            tone="neutral",
+                        )
+                        hedge_view = hedge_df.copy()
+                        hedge_view.columns = [
+                            "Perfil",
+                            "Mercado principal",
+                            "Stake principal",
+                            "Budget hedge",
+                            "Hedge 1",
+                            "Hedge 2",
+                            "Lucro se principal bater",
+                            "Resultado hedge 1",
+                            "Resultado hedge 2",
+                            "Pior cenario",
+                        ]
+                        st.dataframe(hedge_view, use_container_width=True, hide_index=True)
+
+                    ai_state_key = f"ai_analysis_cache_{competition}_{selected_option}"
+                    st.markdown(
+                        f"""
 <div class="ai-action-panel">
-  <strong>Uso da IA no jogo selecionado</strong>
+  <strong>Uso da IA no jogo em foco</strong>
   <span>{'A IA pode transformar os numeros do modelo em uma leitura detalhada com panorama, valor, riscos, estrategia e placares provaveis.' if ai_enabled else 'A IA esta desativada neste ambiente. Configure a variavel NVIDIA_API_KEY para liberar a analise detalhada deste confronto.'}</span>
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-            ai_col1, ai_col2 = st.columns([1.2, 1])
-            with ai_col1:
-                run_ai = st.button(
-                    "Gerar analise detalhada com IA NVIDIA",
-                    key=f"nvidia_analysis_{competition}_{selected_option}",
-                    use_container_width=True,
-                    disabled=not ai_enabled,
-                )
-            with ai_col2:
-                clear_ai = st.button(
-                    "Limpar analise salva",
-                    key=f"clear_ai_analysis_{competition}_{selected_option}",
-                    use_container_width=True,
-                    disabled=ai_state_key not in st.session_state,
-                )
-
-            if clear_ai and ai_state_key in st.session_state:
-                del st.session_state[ai_state_key]
-
-            if run_ai:
-                try:
-                    with st.spinner("Consultando IA da NVIDIA..."):
-                        st.session_state[ai_state_key] = build_ai_analysis_for_fixture(
-                            df,
-                            selected,
-                            model_config=runtime_model_config,
+                        unsafe_allow_html=True,
+                    )
+                    ai_col1, ai_col2 = st.columns([1.2, 1])
+                    with ai_col1:
+                        run_ai = st.button(
+                            "Gerar analise detalhada com IA NVIDIA",
+                            key=f"nvidia_analysis_{competition}_{selected_option}",
+                            use_container_width=True,
+                            disabled=not ai_enabled,
                         )
-                except Exception as exc:
-                    st.error(f"Nao foi possivel gerar a analise com IA da NVIDIA: {exc}")
+                    with ai_col2:
+                        clear_ai = st.button(
+                            "Limpar analise salva",
+                            key=f"clear_ai_analysis_{competition}_{selected_option}",
+                            use_container_width=True,
+                            disabled=ai_state_key not in st.session_state,
+                        )
 
-            cached_ai_analysis = st.session_state.get(ai_state_key)
-            if cached_ai_analysis:
-                st.markdown(
-                    '<div class="ai-panel"><div class="section-title">Analise detalhada com IA NVIDIA</div><div class="section-copy">Leitura em linguagem natural com panorama do jogo, valor, riscos, estrategia e placares provaveis.</div></div>',
-                    unsafe_allow_html=True,
-                )
-                st.markdown(render_detailed_ai_analysis(cached_ai_analysis))
+                    if clear_ai and ai_state_key in st.session_state:
+                        del st.session_state[ai_state_key]
 
-            top_df = pd.DataFrame(probs.top_scorelines, columns=["Placar", "Probabilidade"])
-            top_df["Probabilidade"] = (top_df["Probabilidade"] * 100).round(2).astype(str) + "%"
-            st.dataframe(top_df, use_container_width=True, hide_index=True)
+                    if run_ai:
+                        try:
+                            with st.spinner("Consultando IA da NVIDIA..."):
+                                st.session_state[ai_state_key] = build_ai_analysis_for_fixture(
+                                    df,
+                                    selected,
+                                    model_config=runtime_model_config,
+                                )
+                        except Exception as exc:
+                            st.error(f"Nao foi possivel gerar a analise com IA da NVIDIA: {exc}")
 
-            if isinstance(selected.get("match_url"), str) and selected["match_url"]:
-                st.link_button("Abrir pagina do jogo", selected["match_url"])
+                    cached_ai_analysis = st.session_state.get(ai_state_key)
+                    if cached_ai_analysis:
+                        st.markdown(
+                            '<div class="ai-panel"><div class="section-title">Analise detalhada com IA NVIDIA</div><div class="section-copy">Leitura em linguagem natural com panorama do jogo, valor, riscos, estrategia e placares provaveis.</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.markdown(render_detailed_ai_analysis(cached_ai_analysis))
 
-            st.markdown("### Analise explicada do jogo")
-            home_ctx = get_team_context(df, str(selected["home_team"]))
-            away_ctx = get_team_context(df, str(selected["away_team"]))
-            selected_chat_context = build_match_chat_context(
-                fixture_row=selected,
-                probs=probs,
-                tip=tip,
-                probable_market=probable_market,
-                probable_probability=probable_probability,
-                home_ctx=home_ctx,
-                away_ctx=away_ctx,
-            )
-            selected_chat_label = selected_match_label
-            selected_chat_match_key = f"{competition}_{selected_option}"
+                    top_df = pd.DataFrame(probs.top_scorelines, columns=["Placar", "Probabilidade"])
+                    top_df["Probabilidade"] = (top_df["Probabilidade"] * 100).round(2).astype(str) + "%"
+                    st.dataframe(top_df, use_container_width=True, hide_index=True)
 
-            reasons = []
-            if isinstance(home_ctx.get("rank"), int) and isinstance(away_ctx.get("rank"), int):
-                if home_ctx["rank"] < away_ctx["rank"]:
-                    reasons.append(f"Classificacao: {selected['home_team']} esta melhor posicionado ({home_ctx['rank']}º vs {away_ctx['rank']}º).")
-                elif away_ctx["rank"] < home_ctx["rank"]:
-                    reasons.append(f"Classificacao: {selected['away_team']} esta melhor posicionado ({away_ctx['rank']}º vs {home_ctx['rank']}º).")
-            if home_ctx.get("recent_points", 0) > away_ctx.get("recent_points", 0):
-                reasons.append(f"Momento recente: {selected['home_team']} somou {home_ctx['recent_points']} pontos nos ultimos jogos ({home_ctx['recent_text']}).")
-            elif away_ctx.get("recent_points", 0) > home_ctx.get("recent_points", 0):
-                reasons.append(f"Momento recente: {selected['away_team']} somou {away_ctx['recent_points']} pontos nos ultimos jogos ({away_ctx['recent_text']}).")
+                    if isinstance(selected.get("match_url"), str) and selected["match_url"]:
+                        st.link_button("Abrir pagina do jogo", selected["match_url"])
 
-            btts_line = "Ambos marcam (SIM) aparece interessante." if probs.btts_yes >= 0.55 else "Ambos marcam (NAO) aparece mais conservador."
-            goal_line = "Tendencia de Menos de 2.5 gols." if probs.under_25 >= probs.over_25 else "Tendencia de Mais de 2.5 gols."
-            st.markdown(
-                f"""
+                    st.markdown("### Analise explicada do jogo")
+                    home_ctx = get_team_context(df, str(selected["home_team"]))
+                    away_ctx = get_team_context(df, str(selected["away_team"]))
+                    selected_chat_context = build_match_chat_context(
+                        fixture_row=selected,
+                        probs=probs,
+                        tip=tip,
+                        probable_market=probable_market,
+                        probable_probability=probable_probability,
+                        home_ctx=home_ctx,
+                        away_ctx=away_ctx,
+                    )
+                    selected_chat_label = selected_match_label
+                    selected_chat_match_key = f"{competition}_{selected_option}"
+
+                    reasons = []
+                    if isinstance(home_ctx.get("rank"), int) and isinstance(away_ctx.get("rank"), int):
+                        if home_ctx["rank"] < away_ctx["rank"]:
+                            reasons.append(f"Classificacao: {selected['home_team']} esta melhor posicionado ({home_ctx['rank']}º vs {away_ctx['rank']}º).")
+                        elif away_ctx["rank"] < home_ctx["rank"]:
+                            reasons.append(f"Classificacao: {selected['away_team']} esta melhor posicionado ({away_ctx['rank']}º vs {home_ctx['rank']}º).")
+                    if home_ctx.get("recent_points", 0) > away_ctx.get("recent_points", 0):
+                        reasons.append(f"Momento recente: {selected['home_team']} somou {home_ctx['recent_points']} pontos nos ultimos jogos ({home_ctx['recent_text']}).")
+                    elif away_ctx.get("recent_points", 0) > home_ctx.get("recent_points", 0):
+                        reasons.append(f"Momento recente: {selected['away_team']} somou {away_ctx['recent_points']} pontos nos ultimos jogos ({away_ctx['recent_text']}).")
+
+                    btts_line = "Ambos marcam (SIM) aparece interessante." if probs.btts_yes >= 0.55 else "Ambos marcam (NAO) aparece mais conservador."
+                    goal_line = "Tendencia de Menos de 2.5 gols." if probs.under_25 >= probs.over_25 else "Tendencia de Mais de 2.5 gols."
+                    st.markdown(
+                        f"""
 **Jogo:** {selected['home_team']} x {selected['away_team']} ({selected_display_date})  
 **Odds atuais (1X2):** Casa `{selected['odds_home']:.2f}` | Empate `{selected['odds_draw']:.2f}` | Fora `{selected['odds_away']:.2f}`  
 **Probabilidades do modelo:** Casa `{probs.home_win*100:.1f}%` | Empate `{probs.draw*100:.1f}%` | Fora `{probs.away_win*100:.1f}%`  
@@ -4135,11 +4253,11 @@ elif page == "Analise de Jogo":
 **Melhor aposta por valor:** **{readable_market}** (EV `{tip.expected_value*100:.2f}%`)  
 **Mercados extras:** {btts_line} Prob. BTTS `{probs.btts_yes*100:.1f}%`. {goal_line} Under 2.5 `{probs.under_25*100:.1f}%` / Over 2.5 `{probs.over_25*100:.1f}%`.
 """
-            )
-            if reasons:
-                st.markdown("**Principais motivos:**")
-                for r in reasons[:3]:
-                    st.markdown(f"- {r}")
+                    )
+                    if reasons:
+                        st.markdown("**Principais motivos:**")
+                        for r in reasons[:3]:
+                            st.markdown(f"- {r}")
 
 elif page == "Todos os Futuros":
     st.markdown('<div id="anchor-agenda"></div>', unsafe_allow_html=True)
