@@ -603,6 +603,7 @@ def _build_competition_section(
     match_catalog: list[dict[str, object]] = []
     detail_index = 0
     finished_hits = 0
+    prob_cache: dict[str, object] = {}
     finished_evaluated = 0
     finished_market_hits = 0
     finished_market_evaluated = 0
@@ -745,7 +746,10 @@ def _build_competition_section(
             )
             cached_real_stats_payload = real_stats_cache.get(cache_key)
         try:
-            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            m_key = f"{row.home_team}_{row.away_team}"
+            if m_key not in prob_cache:
+                prob_cache[m_key] = calculate_match_probabilities(df, row.home_team, row.away_team)
+            probs = prob_cache[m_key]
             tip = None
             if _can_build_tip_from_row(row):
                 tip = suggest_bet_strategy(
