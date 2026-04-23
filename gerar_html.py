@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from datetime import datetime
 from html import escape
@@ -3997,7 +3997,11 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         }}
       }} catch (error) {{
         if (responseBox) responseBox.textContent = 'Nao foi possivel gerar a leitura multipla agora.';
-        if (status) status.textContent = 'Erro: ' + (error && error.message ? error.message : 'falha desconhecida.');
+        let errorMsg = error && error.message ? error.message : 'falha desconhecida.';
+        if (errorMsg.toLowerCase().includes('failed to fetch')) {{
+          errorMsg = 'Failed to fetch: Servidor de IA offline ou bloqueio de rede (CORS/Private Network). Verifique se o portal_ai_server.py esta rodando na porta 8765.';
+        }}
+        if (status) status.textContent = 'Erro: ' + errorMsg;
       }} finally {{
         if (runButton) runButton.disabled = false;
       }}
@@ -4298,7 +4302,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         window.setTimeout(() => reloadPortalShell(), 700);
       }} catch (error) {{
         stopRefreshAutomationTicker();
-        const message = error && error.message ? error.message : 'falha desconhecida.';
+        let message = error && error.message ? error.message : 'falha desconhecida.';
+        if (message.toLowerCase().includes('failed to fetch')) {{
+          message = 'Failed to fetch: Servidor de IA offline ou bloqueio de rede (CORS/Private Network). Verifique se o portal_ai_server.py esta rodando na porta 8765.';
+        }}
         if (summary) {{
           summary.textContent = 'Nao foi possivel atualizar os placares: ' + message;
         }}
@@ -4367,8 +4374,12 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         responseBox.textContent = data.analysis || 'A IA nao retornou texto.';
         status.textContent = 'Leitura concluida com sucesso.';
       }} catch (error) {{
-        responseBox.textContent = 'Nao foi possivel gerar a leitura agora.';
-        status.textContent = 'Erro: ' + (error && error.message ? error.message : 'falha desconhecida.');
+        if (responseBox) responseBox.textContent = 'Nao foi possivel gerar a leitura agora.';
+        let errorMsg = error && error.message ? error.message : 'falha desconhecida.';
+        if (errorMsg.toLowerCase().includes('failed to fetch')) {{
+          errorMsg = 'Failed to fetch: Servidor de IA offline ou bloqueio de rede (CORS/Private Network/Mix-Content). Verifique se o portal_ai_server.py esta rodando na porta 8765.';
+        }}
+        if (status) status.textContent = 'Erro: ' + errorMsg;
       }}
     }}
 
