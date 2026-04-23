@@ -47,9 +47,16 @@ def request_nvidia_completion(
         except requests.exceptions.ReadTimeout as exc:
             last_error = exc
             if attempt == 0:
-                time.sleep(1.5)
+                time.sleep(2.0)
                 continue
             raise TimeoutError("A NVIDIA demorou para responder. Tente novamente em alguns segundos.") from exc
+        except requests.exceptions.HTTPError as exc:
+            last_error = exc
+            if exc.response is not None and exc.response.status_code in (429, 500, 502, 503, 504):
+                if attempt == 0:
+                    time.sleep(3.0)
+                    continue
+            raise
         except Exception as exc:
             last_error = exc
             raise
