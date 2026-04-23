@@ -478,6 +478,7 @@ const riskLabel = __RISK__;
 const parentWindow = window.parent;
 const doc = parentWindow.document;
 
+// --- LIMPEZA DE INSTANCIAS ANTERIORES ---
 if (typeof parentWindow.__fdDockCleanup === "function") {
   parentWindow.__fdDockCleanup();
 }
@@ -487,103 +488,67 @@ if (previousDock) previousDock.remove();
 const previousStyle = doc.getElementById("fd-floating-dock-style");
 if (previousStyle) previousStyle.remove();
 
+// --- ESTILOS DO PAINEL ---
 const style = doc.createElement("style");
 style.id = "fd-floating-dock-style";
 style.textContent = `
 #fd-floating-dock {
   position: fixed;
-  right: 22px;
-  top: 86px;
+  right: 18px;
+  top: 18px;
   z-index: 999999;
   display: grid;
   gap: 12px;
   justify-items: end;
   pointer-events: none;
+  user-select: none;
+  transition: opacity 0.3s ease;
 }
 #fd-floating-dock .fd-meta {
   pointer-events: auto;
   display: grid;
   gap: 2px;
   min-width: 170px;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(8,22,37,0.94), rgba(20,48,79,0.96));
+  background: linear-gradient(135deg, #081625, #14304f);
   color: #f8fafc;
-  border: 1px solid rgba(148,163,184,0.22);
-  box-shadow: 0 18px 40px rgba(15,23,42,0.24);
+  border: 1px solid rgba(148,163,184,0.3);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3);
   backdrop-filter: blur(16px);
+  cursor: grab;
 }
-#fd-floating-dock .fd-meta strong {
-  font-size: 0.9rem;
-  line-height: 1.1;
-}
-#fd-floating-dock .fd-meta span {
-  font-size: 0.76rem;
-  color: #cfe4ff;
-}
-#fd-floating-dock .fd-stack {
-  display: grid;
-  gap: 10px;
-}
+#fd-floating-dock .fd-meta:active { cursor: grabbing; }
+#fd-floating-dock .fd-meta strong { font-size: 0.85rem; line-height: 1.1; display: block; }
+#fd-floating-dock .fd-meta span { font-size: 0.72rem; color: #cfe4ff; opacity: 0.8; display: block; }
+
+#fd-floating-dock .fd-stack { display: grid; gap: 8px; }
 #fd-floating-dock .fd-btn {
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  min-width: 54px;
-  height: 54px;
-  padding: 0 18px;
+  min-width: 48px;
+  height: 48px;
+  padding: 0 15px;
   border: 0;
   border-radius: 999px;
-  background: rgba(255,255,255,0.96);
+  background: #ffffff;
   color: #112031;
   cursor: pointer;
-  box-shadow: 0 18px 34px rgba(15,23,42,0.16);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.15);
   border: 1px solid rgba(148,163,184,0.22);
-  transition: transform .18s ease, box-shadow .18s ease, width .18s ease, background .18s ease;
+  transition: transform .15s ease, box-shadow .15s ease;
   overflow: hidden;
 }
-#fd-floating-dock .fd-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 22px 42px rgba(15,23,42,0.22);
-}
-#fd-floating-dock .fd-btn:active {
-  transform: translateY(0);
-}
-#fd-floating-dock .fd-btn svg {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-}
-#fd-floating-dock .fd-btn .fd-label {
-  font: 700 0.82rem/1 "Plus Jakarta Sans", "Segoe UI", sans-serif;
-  white-space: nowrap;
-  letter-spacing: -0.01em;
-}
-#fd-floating-dock .fd-btn[data-action="safe"] {
-  background: linear-gradient(135deg, #eff6ff, #ecfeff);
-  color: #1d4ed8;
-}
-#fd-floating-dock .fd-btn[data-action="simulator"] {
-  background: linear-gradient(135deg, #f8fafc, #eff6ff);
-  color: #0f766e;
-}
-  #fd-floating-dock .fd-btn[data-action="agenda"] {
-  background: linear-gradient(135deg, #fff7ed, #fffbeb);
-  color: #d97706;
-}
-#fd-floating-dock .fd-btn[data-action="results"] {
-  background: linear-gradient(135deg, #ecfdf3, #f0fdf4);
-  color: #059669;
-}
-#fd-floating-dock .fd-btn[data-action="refresh"] {
-  background: linear-gradient(135deg, #081625, #14304f);
-  color: #f8fafc;
-}
+#fd-floating-dock .fd-btn:hover { transform: scale(1.05); box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+#fd-floating-dock .fd-btn svg { width: 16px; height: 16px; flex: 0 0 16px; }
+#fd-floating-dock .fd-btn .fd-label { font: 700 0.78rem/1 sans-serif; white-space: nowrap; }
+
 #fd-floating-dock .fd-btn[data-action="top"] {
   opacity: 0;
-  transform: translateY(12px);
+  transform: translateY(10px);
   pointer-events: none;
 }
 #fd-floating-dock.is-scrolled .fd-btn[data-action="top"] {
@@ -591,88 +556,109 @@ style.textContent = `
   transform: translateY(0);
   pointer-events: auto;
 }
-@media (max-width: 760px) {
-  #fd-floating-dock {
-    right: 12px;
-    left: 12px;
-    top: 76px;
-    justify-items: stretch;
-  }
-  #fd-floating-dock .fd-meta {
-    min-width: 0;
-  }
-  #fd-floating-dock .fd-stack {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-  #fd-floating-dock .fd-btn {
-    width: 100%;
-    min-width: 0;
-    justify-content: center;
-    padding: 0;
-  }
-  #fd-floating-dock .fd-btn .fd-label {
-    display: none;
-  }
-}
 `;
 doc.head.appendChild(style);
 
+// --- ESTRUTURA HTML ---
 const dock = doc.createElement("div");
 dock.id = "fd-floating-dock";
 dock.innerHTML = `
-  <div class="fd-meta">
+  <div class="fd-meta" id="fd-dock-handle">
     <strong>${competitionName}</strong>
-    <span>Atalho rapido - ${riskLabel}</span>
+    <span>↕ Arraste para mover</span>
   </div>
   <div class="fd-stack">
-    <button type="button" class="fd-btn" data-action="top" aria-label="Voltar ao topo" title="Voltar ao topo">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 5l-7 7m7-7l7 7m-7-7v14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <button type="button" class="fd-btn" data-action="top" title="Voltar ao topo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
       <span class="fd-label">Topo</span>
     </button>
-    <button type="button" class="fd-btn" data-action="safe" aria-label="Ir para jogos seguros" title="Ir para jogos seguros">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-2.9 8.7-7 10-4.1-1.3-7-5.5-7-10V6l7-3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path><path d="M9 12.2l2 2 4-4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <button type="button" class="fd-btn" data-action="safe" title="Jogos Seguros">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       <span class="fd-label">Seguros</span>
     </button>
-    <button type="button" class="fd-btn" data-action="simulator" aria-label="Ir para simulador" title="Ir para simulador">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 17l5-5 4 3 7-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path><path d="M15 7h5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <button type="button" class="fd-btn" data-action="simulator" title="Simulador">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
       <span class="fd-label">Simular</span>
     </button>
-    <button type="button" class="fd-btn" data-action="agenda" aria-label="Ir para dashboard do modelo" title="Ir para dashboard do modelo">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="3" stroke="currentColor" stroke-width="1.8"></rect><path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
-      <span class="fd-label">Modelo</span>
-    </button>
-    <button type="button" class="fd-btn" data-action="results" aria-label="Ir para resultados" title="Ir para resultados">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14M12 5v14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"></circle></svg>
-      <span class="fd-label">Resultados</span>
-    </button>
-    <button type="button" class="fd-btn" data-action="refresh" aria-label="Recarregar painel" title="Recarregar painel">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path><path d="M20 4v7h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <button type="button" class="fd-btn" data-action="refresh" title="Atualizar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
       <span class="fd-label">Atualizar</span>
     </button>
   </div>
 `;
 doc.body.appendChild(dock);
 
+// --- LOGICA DE ARRASTAR (DRAG & DROP) ---
+let isDragging = false;
+let startX, startY;
+let initialLeft, initialTop;
+
+const handle = dock.querySelector("#fd-dock-handle");
+
+const onStart = (e) => {
+  isDragging = true;
+  const clientX = e.type.startsWith("touch") ? e.touches[0].clientX : e.clientX;
+  const clientY = e.type.startsWith("touch") ? e.touches[0].clientY : e.clientY;
+  
+  const rect = dock.getBoundingClientRect();
+  startX = clientX;
+  startY = clientY;
+  initialLeft = rect.left;
+  initialTop = rect.top;
+  
+  doc.addEventListener("mousemove", onMove);
+  doc.addEventListener("mouseup", onEnd);
+  doc.addEventListener("touchmove", onMove, { passive: false });
+  doc.addEventListener("touchend", onEnd);
+  
+  // Impede selecao de texto durante o arraste
+  doc.body.style.userSelect = "none";
+};
+
+const onMove = (e) => {
+  if (!isDragging) return;
+  if (e.type === "touchmove") e.preventDefault(); // Evita scroll no mobile
+
+  const clientX = e.type.startsWith("touch") ? e.touches[0].clientX : e.clientX;
+  const clientY = e.type.startsWith("touch") ? e.touches[0].clientY : e.clientY;
+
+  const dx = clientX - startX;
+  const dy = clientY - startY;
+
+  dock.style.right = "auto";
+  dock.style.left = (initialLeft + dx) + "px";
+  dock.style.top = (initialTop + dy) + "px";
+};
+
+const onEnd = () => {
+  isDragging = false;
+  doc.removeEventListener("mousemove", onMove);
+  doc.removeEventListener("mouseup", onEnd);
+  doc.removeEventListener("touchmove", onMove);
+  doc.removeEventListener("touchend", onEnd);
+  doc.body.style.userSelect = "";
+};
+
+handle.addEventListener("mousedown", onStart);
+handle.addEventListener("touchstart", onStart, { passive: true });
+
+// --- LOGICA DE NAVEGACAO E SCROLL ---
 const scrollToId = (id) => {
   const target = doc.getElementById(id);
-  if (target) {
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
 };
 
 const updateScrolledState = () => {
-  const top = parentWindow.scrollY || doc.documentElement.scrollTop || doc.body.scrollTop || 0;
-  dock.classList.toggle("is-scrolled", top > 260);
+  const top = parentWindow.scrollY || doc.documentElement.scrollTop;
+  dock.classList.toggle("is-scrolled", top > 200);
 };
 
-dock.querySelectorAll("[data-action]").forEach((button) => {
-  button.addEventListener("click", () => {
-    const action = button.getAttribute("data-action");
+dock.querySelectorAll("[data-action]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const action = btn.getAttribute("data-action");
     if (action === "top") scrollToId("panel-top-anchor");
     if (action === "safe") scrollToId("anchor-safe");
     if (action === "simulator") scrollToId("anchor-simulator");
-    if (action === "agenda") scrollToId("anchor-dashboard");
-    if (action === "results") scrollToId("anchor-results");
     if (action === "refresh") parentWindow.location.reload();
   });
 });
@@ -680,12 +666,11 @@ dock.querySelectorAll("[data-action]").forEach((button) => {
 parentWindow.addEventListener("scroll", updateScrolledState, { passive: true });
 updateScrolledState();
 
+// --- CLEANUP ---
 parentWindow.__fdDockCleanup = () => {
   parentWindow.removeEventListener("scroll", updateScrolledState);
-  const mountedDock = doc.getElementById("fd-floating-dock");
-  if (mountedDock) mountedDock.remove();
-  const mountedStyle = doc.getElementById("fd-floating-dock-style");
-  if (mountedStyle) mountedStyle.remove();
+  onEnd(); // Garante que remove os listeners globais de drag
+  if (dock) dock.remove();
 };
 </script>
 """
@@ -700,12 +685,12 @@ def _safe_percent(numerator: int | float, denominator: int | float) -> int:
     return round((float(numerator) / float(denominator)) * 100)
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def get_data(competition: str) -> pd.DataFrame:
     return load_competition_matches(competition)
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _build_safe_bets_cached(
     matches_df: pd.DataFrame,
     *,
@@ -729,7 +714,7 @@ def _build_safe_bets_cached(
     )
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _build_backtest_cached(
     matches_df: pd.DataFrame,
     *,
@@ -749,12 +734,12 @@ def _build_backtest_cached(
     )
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _summarize_backtest_cached(backtest_df: pd.DataFrame) -> dict[str, object]:
     return summarize_backtest(backtest_df)
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def _build_probability_buckets_cached(backtest_df: pd.DataFrame) -> pd.DataFrame:
     return build_probability_buckets(backtest_df)
 
@@ -2107,60 +2092,60 @@ st.markdown(
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 16px;
-  padding: 14px 16px;
-  border-radius: 20px;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  border-radius: 16px;
   background: rgba(255,255,255,.72);
   border: 1px solid rgba(148,163,184,.22);
-  box-shadow: 0 16px 34px rgba(15,23,42,.05);
+  box-shadow: 0 10px 25px rgba(15,23,42,.05);
   backdrop-filter: blur(16px);
 }}
 .brand-block {{
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   flex-wrap: wrap;
 }}
 .brand-mark {{
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   background: linear-gradient(135deg, #1d4ed8, #0f766e);
   color: #fff;
   display: grid;
   place-items: center;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: .08em;
 }}
 .brand-copy strong {{
   display: block;
-  font-size: .96rem;
+  font-size: .88rem;
   letter-spacing: -.02em;
   font-family: "Space Grotesk", "Manrope", sans-serif;
 }}
 .brand-copy span {{
   display: block;
-  margin-top: 3px;
+  margin-top: 2px;
   color: var(--muted);
-  font-size: .83rem;
+  font-size: .78rem;
 }}
 .topbar-meta {{
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }}
 .meta-pill {{
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   border-radius: 999px;
   background: #f8fafc;
   border: 1px solid rgba(148,163,184,.25);
   color: #334155;
-  font-size: .82rem;
+  font-size: .76rem;
   font-weight: 600;
 }}
 .status-dot {{
@@ -3578,18 +3563,59 @@ section[data-testid="stSidebar"] {
         unsafe_allow_html=True,
     )
 
-    # --- HEADER / HERO DA HOME ---
-    st.markdown(
-        """
-<div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 40px 20px; text-align: center; color: white; border-radius: 0 0 30px 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
-    <h1 style='font-family: "Space Grotesk", sans-serif; font-size: 3rem; margin: 0; color: #4cc9f0;'>Departamento de Dados de Futebol</h1>
-    <p style='opacity: 0.9; font-size: 1.1rem; margin-top: 10px;'>Painel de Inteligência e Análise Quantitativa para Apostas</p>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
+    if "show_home_header" not in st.session_state:
+        st.session_state["show_home_header"] = False
+
+    # --- CONTROLE DE VISIBILIDADE DO PAINEL ---
+    c_toggle1, c_toggle2, c_toggle3 = st.columns([1, 2, 1])
+    with c_toggle2:
+        if st.button("📂 Exibir Painel de Navegação" if not st.session_state["show_home_header"] else "📁 Ocultar Painel de Navegação", use_container_width=True):
+            st.session_state["show_home_header"] = not st.session_state["show_home_header"]
+            st.rerun()
+
+    if st.session_state["show_home_header"]:
+        # --- HEADER / HERO DA HOME ---
+        st.markdown(
+            """
+    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 40px 20px; text-align: center; color: white; border-radius: 0 0 30px 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
+        <h1 style='font-family: "Space Grotesk", sans-serif; font-size: 3rem; margin: 0; color: #4cc9f0;'>Departamento de Dados de Futebol</h1>
+        <p style='opacity: 0.9; font-size: 1.1rem; margin-top: 10px;'>Painel de Inteligência e Análise Quantitativa para Apostas</p>
+    </div>
+    """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<div style='max-width:1400px; margin: 0 auto; padding: 20px;'>", unsafe_allow_html=True)
+
+    if st.session_state["show_home_header"]:
+        # --- CARROSSEL DE NAVEGAÇÃO ---
+        st.markdown("### 🚀 Navegação Rápida")
+
+        # Gerando o HTML do carrossel para Streamlit
+        nav_items = [
+            {"icon": "🏆", "label": "Copa 2026", "page": "Copa 2026"},
+            {"icon": "🛡️", "label": "Jogos Seguros", "page": "Jogos Seguros"},
+            {"icon": "🤖", "label": "IA Analista", "page": "IA Institucional"},
+            {"icon": "📊", "label": "Painel Modelo", "page": "Painel do Modelo"},
+            {"icon": "⚽", "label": "Simulador", "page": "Analise de Jogo"},
+            {"icon": "📅", "label": "Agenda", "page": "Todos os Futuros"},
+            {"icon": "📈", "label": "Resultados", "page": "Resultados"},
+        ]
+
+        # Criando colunas para os cards de navegação (Simulando o carrossel interativo)
+        cols = st.columns(len(nav_items))
+        for i, item in enumerate(nav_items):
+            with cols[i]:
+                st.markdown(f"""
+                <div class="nav-card">
+                    <div class="nav-icon">{item['icon']}</div>
+                    <div class="nav-label">{item['label']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button(f"Abrir", key=f"nav_btn_{i}", use_container_width=True):
+                    queue_page_navigation(item['page'])
+
+        st.markdown("---")
 
     # --- BOTÃO CENTRAL DE COMANDOS ---
     c_btn1, c_btn2, c_btn3 = st.columns([1, 2, 1])
@@ -3598,34 +3624,6 @@ section[data-testid="stSidebar"] {
             command_center()
         st.caption("<center>Ajuste o modelo, veja notas explicativas e o histórico de alterações aqui.</center>", unsafe_allow_html=True)
 
-    # --- CARROSSEL DE NAVEGAÇÃO ---
-    st.markdown("### 🚀 Navegação Rápida")
-    
-    # Gerando o HTML do carrossel para Streamlit
-    nav_items = [
-        {"icon": "🏆", "label": "Copa 2026", "page": "Copa 2026"},
-        {"icon": "🛡️", "label": "Jogos Seguros", "page": "Jogos Seguros"},
-        {"icon": "🤖", "label": "IA Analista", "page": "IA Institucional"},
-        {"icon": "📊", "label": "Painel Modelo", "page": "Painel do Modelo"},
-        {"icon": "⚽", "label": "Simulador", "page": "Analise de Jogo"},
-        {"icon": "📅", "label": "Agenda", "page": "Todos os Futuros"},
-        {"icon": "📈", "label": "Resultados", "page": "Resultados"},
-    ]
-
-    # Criando colunas para os cards de navegação (Simulando o carrossel interativo)
-    cols = st.columns(len(nav_items))
-    for i, item in enumerate(nav_items):
-        with cols[i]:
-            st.markdown(f"""
-            <div class="nav-card">
-                <div class="nav-icon">{item['icon']}</div>
-                <div class="nav-label">{item['label']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button(f"Abrir", key=f"nav_btn_{i}", use_container_width=True):
-                queue_page_navigation(item['page'])
-
-    st.markdown("---")
     render_embedded_index_portal()
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()

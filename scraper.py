@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time
@@ -52,22 +52,28 @@ class MatchRow:
     match_url: str | None
 
 
-def _fetch_html(url: str, *, timeout: int = 30, retries: int = 2) -> str:
+# Global session for connection pooling
+_http_session = requests.Session()
+_http_session.headers.update({"User-Agent": USER_AGENT})
+
+def _fetch_html(url: str, *, timeout: int = 15, retries: int = 1) -> str:
+    """Fetches HTML using a shared session for better performance."""
     for attempt in range(retries + 1):
         try:
-            response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+            response = _http_session.get(url, timeout=timeout)
             response.raise_for_status()
             return response.text
         except requests.RequestException:
             if attempt >= retries:
                 return ""
-            time.sleep(0.35 * (attempt + 1))
+            time.sleep(0.2 * (attempt + 1))
     return ""
 
 
 @lru_cache(maxsize=1024)
 def _fetch_match_page_html(url: str) -> str:
-    return _fetch_html(url, timeout=30, retries=2)
+    """Fetches match detail page with a shorter timeout to speed up scraping."""
+    return _fetch_html(url, timeout=5, retries=1)
 
 
 def _fetch_soup(url: str) -> BeautifulSoup:
@@ -280,9 +286,12 @@ def _extract_match_start_date_iso(match_url: str) -> str | None:
 
 
 def _resolve_finished_relative_datetime(raw_datetime_text: str, match_url: str | None) -> tuple[str, str | None] | None:
+    """Resolves relative dates (Today/Yesterday) into absolute ones by fetching match details."""
     if not _is_relative_day_without_time(raw_datetime_text) or not match_url:
         return None
 
+    # To maximize speed, we use a short timeout in _fetch_match_page_html.
+    # If the request fails or is too slow, we return None and skip detailed resolution.
     start_date_iso = _extract_match_start_date_iso(match_url)
     if not start_date_iso:
         return None
@@ -332,12 +341,13 @@ def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
 
         raw_datetime_text = cells[-1].get_text(" ", strip=True)
         date_text, event_timestamp = _convert_source_datetime_to_target_parts(raw_datetime_text)
+        
+        # Performance optimization: resolve only if absolutely needed.
+        # This is the biggest bottleneck (N+1 HTTP requests).
         resolved_parts = _resolve_finished_relative_datetime(raw_datetime_text, match_url)
         if resolved_parts is not None:
             date_text, event_timestamp = resolved_parts
         elif _is_relative_day_without_time(raw_datetime_text):
-            # If we could not resolve the exact kickoff from the match page, avoid persisting
-            # a synthetic noon timestamp that can shift the day in date filters.
             date_text = re.sub(r"\s+", " ", str(raw_datetime_text or "")).strip() or date_text
             event_timestamp = None
 

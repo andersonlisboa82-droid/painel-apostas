@@ -1211,41 +1211,41 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 14px;
-      margin-bottom: 16px;
-      padding: 14px 16px;
-      border-radius: 20px;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 8px 14px;
+      border-radius: 16px;
       background: rgba(255,255,255,.72);
       border: 1px solid rgba(148,163,184,.22);
-      box-shadow: 0 16px 34px rgba(15,23,42,.05);
+      box-shadow: 0 10px 25px rgba(15,23,42,.05);
       backdrop-filter: blur(16px);
     }}
-    .brand-block {{ display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }}
+    .brand-block {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
     .brand-mark {{
-      width: 42px;
-      height: 42px;
-      border-radius: 14px;
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
       background: linear-gradient(135deg, #1d4ed8, #0f766e);
       color: #fff;
       display: grid;
       place-items: center;
-      font-size: 15px;
+      font-size: 13px;
       font-weight: 800;
       letter-spacing: .08em;
     }}
-    .brand-copy strong {{ display: block; font-size: .96rem; letter-spacing: -.02em; font-family: "Space Grotesk", sans-serif; }}
-    .brand-copy span {{ display: block; margin-top: 3px; color: var(--muted); font-size: .83rem; }}
-    .topbar-meta {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+    .brand-copy strong {{ display: block; font-size: .88rem; letter-spacing: -.02em; font-family: "Space Grotesk", sans-serif; }}
+    .brand-copy span {{ display: block; margin-top: 2px; color: var(--muted); font-size: .78rem; }}
+    .topbar-meta {{ display: flex; flex-wrap: wrap; gap: 8px; }}
     .meta-pill {{
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 9px 12px;
+      gap: 6px;
+      padding: 6px 10px;
       border-radius: 999px;
       background: #f8fafc;
       border: 1px solid rgba(148,163,184,.25);
       color: #334155;
-      font-size: .82rem;
+      font-size: .76rem;
       font-weight: 600;
     }}
     .meta-pill strong {{ color: #0f172a; }}
