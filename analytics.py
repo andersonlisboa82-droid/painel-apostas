@@ -29,6 +29,8 @@ class BettingSuggestion:
     expected_value: float
     kelly_fraction: float
     suggested_stake: float
+    selection_source: str = "model"
+    selected_probability: float | None = None
 
 
 PROBABILITY_CALIBRATION_BINS = [0.0, 0.20, 0.35, 0.50, 0.65, 1.01]
@@ -39,6 +41,7 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
         "league_away_default": 1.10,
         "min_expected_home": 0.15,
         "min_expected_away": 0.10,
+        "shrink_sample_size": 6.0,
     },
     "calibration": {
         "enabled": True,
@@ -51,10 +54,12 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
     },
     "betting": {
         "kelly_fractional": 0.25,
+        "accuracy_threshold": 0.65,
+        "house_favorite_lock_threshold": 0.72,
     },
     "safe_score": {
         "prob_weight": 0.55,
-        "ev_weight": 2.5,
+        "ev_weight": 0.0,
         "ev_cap": 0.10,
         "bookmakers_weight": 0.20,
         "bookmakers_cap": 20,
@@ -119,6 +124,11 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 0.01,
                 2.5,
             )
+            poisson_cfg["shrink_sample_size"] = _clamp(
+                _safe_float(poisson_raw.get("shrink_sample_size"), _safe_float(poisson_default.get("shrink_sample_size"), 6.0)),
+                0.0,
+                80.0,
+            )
 
     calibration_default = DEFAULT_MODEL_CONFIG["calibration"] if isinstance(DEFAULT_MODEL_CONFIG["calibration"], dict) else {}
     calibration_raw = model_config.get("calibration", {})
@@ -182,6 +192,19 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 0.0,
                 1.0,
             )
+            betting_cfg["accuracy_threshold"] = _clamp(
+                _safe_float(betting_raw.get("accuracy_threshold"), _safe_float(betting_default.get("accuracy_threshold"), 0.65)),
+                0.0,
+                1.0,
+            )
+            betting_cfg["house_favorite_lock_threshold"] = _clamp(
+                _safe_float(
+                    betting_raw.get("house_favorite_lock_threshold"),
+                    _safe_float(betting_default.get("house_favorite_lock_threshold"), 0.72),
+                ),
+                0.0,
+                1.0,
+            )
 
     safe_default = DEFAULT_MODEL_CONFIG["safe_score"] if isinstance(DEFAULT_MODEL_CONFIG["safe_score"], dict) else {}
     safe_raw = model_config.get("safe_score", {})
@@ -194,12 +217,12 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 5.0,
             )
             safe_cfg["ev_weight"] = _clamp(
-                _safe_float(safe_raw.get("ev_weight"), _safe_float(safe_default.get("ev_weight"), 2.5)),
+                _safe_float(safe_raw.get("ev_weight"), _safe_float(safe_default.get("ev_weight"), 0.0)),
                 0.0,
                 10.0,
             )
             safe_cfg["ev_cap"] = _clamp(
-                _safe_float(safe_raw.get("ev_cap"), _safe_float(safe_default.get("ev_cap"), 0.10)),
+                _safe_float(safe_raw.get("ev_cap"), _safe_float(safe_default.get("ev_cap"), 0.0)),
                 0.0,
                 1.0,
             )
@@ -244,6 +267,21 @@ def _safe_mean(series: pd.Series, default: float) -> float:
     return float(value)
 
 
+def _shrunk_mean(series: pd.Series, prior_mean: float, shrink_sample_size: float) -> float:
+    valid = series.dropna()
+    if valid.empty:
+        return float(prior_mean)
+
+    sample_mean = float(valid.mean())
+    n = float(len(valid))
+    shrink = max(0.0, float(shrink_sample_size))
+    if shrink <= 0:
+        return sample_mean
+
+    weight = n / (n + shrink)
+    return (sample_mean * weight) + (float(prior_mean) * (1.0 - weight))
+
+
 def _expected_goals(
     played: pd.DataFrame,
     home_team: str,
@@ -257,6 +295,7 @@ def _expected_goals(
     league_away_default = _safe_float(poisson_cfg.get("league_away_default"), 1.10)
     min_expected_home = _safe_float(poisson_cfg.get("min_expected_home"), 0.15)
     min_expected_away = _safe_float(poisson_cfg.get("min_expected_away"), 0.10)
+    shrink_sample_size = _safe_float(poisson_cfg.get("shrink_sample_size"), 6.0)
 
     league_home_avg = _safe_mean(played["home_goals"], default=league_home_default)
     league_away_avg = _safe_mean(played["away_goals"], default=league_away_default)
@@ -266,17 +305,17 @@ def _expected_goals(
     home_def = played[played["away_team"] == home_team]
     away_def = played[played["home_team"] == away_team]
 
-    home_scored_home = _safe_mean(home_home["home_goals"], league_home_avg)
-    home_conceded_home = _safe_mean(home_def["home_goals"], league_away_avg)
+    home_scored_home = _shrunk_mean(home_home["home_goals"], league_home_avg, shrink_sample_size)
+    home_conceded_home = _shrunk_mean(home_def["home_goals"], league_away_avg, shrink_sample_size)
 
-    away_scored_away = _safe_mean(away_away["away_goals"], league_away_avg)
-    away_conceded_away = _safe_mean(away_def["away_goals"], league_home_avg)
+    away_scored_away = _shrunk_mean(away_away["away_goals"], league_away_avg, shrink_sample_size)
+    away_conceded_away = _shrunk_mean(away_def["away_goals"], league_home_avg, shrink_sample_size)
 
-    attack_home = home_scored_home / max(league_home_avg, 0.01)
-    defense_away = away_conceded_away / max(league_home_avg, 0.01)
+    attack_home = _clamp(home_scored_home / max(league_home_avg, 0.01), 0.35, 2.5)
+    defense_away = _clamp(away_conceded_away / max(league_home_avg, 0.01), 0.35, 2.5)
 
-    attack_away = away_scored_away / max(league_away_avg, 0.01)
-    defense_home = home_conceded_home / max(league_away_avg, 0.01)
+    attack_away = _clamp(away_scored_away / max(league_away_avg, 0.01), 0.35, 2.5)
+    defense_home = _clamp(home_conceded_home / max(league_away_avg, 0.01), 0.35, 2.5)
 
     expected_home = max(min_expected_home, attack_home * defense_away * league_home_avg)
     expected_away = max(min_expected_away, attack_away * defense_home * league_away_avg)
@@ -683,6 +722,8 @@ def suggest_bet_strategy(
         if kelly_fractional is not None
         else _clamp(_safe_float(betting_cfg.get("kelly_fractional"), 0.25), 0.0, 1.0)
     )
+    accuracy_threshold = _clamp(_safe_float(betting_cfg.get("accuracy_threshold"), 0.65), 0.0, 1.0)
+    house_favorite_lock_threshold = _clamp(_safe_float(betting_cfg.get("house_favorite_lock_threshold"), 0.72), 0.0, 1.0)
 
     markets = [
         ("Casa", probs.home_win, odd_home),
@@ -690,7 +731,7 @@ def suggest_bet_strategy(
         ("Fora", probs.away_win, odd_away),
     ]
 
-    candidates = []
+    candidates: list[tuple[str, float, float, float, float, float, float]] = []
     for label, p_model, odd in markets:
         if odd is None or odd <= 1.0:
             continue
@@ -706,16 +747,47 @@ def suggest_bet_strategy(
     if not candidates:
         raise ValueError("Odds invalidas para montar estrategia.")
 
-    best = max(candidates, key=lambda x: x[4])
+    # Modo focado em acuracia:
+    # - usa o favorito do modelo quando a confianca e alta;
+    # - em baixa confianca, usa o favorito das casas (consenso de mercado).
+    model_best = max(candidates, key=lambda x: (x[2], -x[1]))
+    model_best_market = str(model_best[0])
+    model_best_probability = float(model_best[2])
+    by_market = {str(item[0]): item for item in candidates}
+    house_probs = normalized_implied_probabilities(odd_home, odd_draw, odd_away)
+    house_best_market, house_best_probability = max(house_probs.items(), key=lambda item: item[1])
+
+    selection_source = "model"
+    chosen_market = model_best_market
+    selected_probability = model_best_probability
+
+    if house_best_probability >= house_favorite_lock_threshold and house_best_market != model_best_market:
+        chosen_market = house_best_market
+        selected_probability = float(house_best_probability)
+        selection_source = "house_lock"
+    elif model_best_probability < accuracy_threshold:
+        chosen_market = house_best_market
+        selected_probability = float(house_best_probability)
+        selection_source = "house_consensus"
+
+    best = by_market.get(chosen_market, model_best)
+    odd = float(best[1])
+    implied_probability = float(best[3])
+    expected_value = selected_probability * odd - 1.0
+    kelly_full = max(0.0, (selected_probability * odd - 1.0) / (odd - 1.0)) if odd > 1.0 else 0.0
+    kelly = kelly_full * resolved_kelly_fractional
+    stake = bankroll * kelly
 
     return BettingSuggestion(
         best_market=best[0],
-        best_odd=best[1],
-        model_probability=best[2],
-        implied_probability=best[3],
-        expected_value=best[4],
-        kelly_fraction=best[5],
-        suggested_stake=best[6],
+        best_odd=odd,
+        model_probability=selected_probability,
+        implied_probability=implied_probability,
+        expected_value=expected_value,
+        kelly_fraction=kelly,
+        suggested_stake=stake,
+        selection_source=selection_source,
+        selected_probability=selected_probability,
     )
 
 
@@ -730,6 +802,7 @@ def build_safe_bets_table(
     *,
     model_config: dict[str, object] | None = None,
 ) -> pd.DataFrame:
+    del min_expected_value
     cfg = normalize_model_config(model_config)
     betting_cfg = cfg["betting"] if isinstance(cfg.get("betting"), dict) else {}
     safe_cfg = cfg["safe_score"] if isinstance(cfg.get("safe_score"), dict) else {}
@@ -739,8 +812,6 @@ def build_safe_bets_table(
         else _clamp(_safe_float(betting_cfg.get("kelly_fractional"), 0.25), 0.0, 1.0)
     )
     prob_weight = _safe_float(safe_cfg.get("prob_weight"), 0.55)
-    ev_weight = _safe_float(safe_cfg.get("ev_weight"), 2.5)
-    ev_cap = max(0.0, _safe_float(safe_cfg.get("ev_cap"), 0.10))
     bookmakers_weight = _safe_float(safe_cfg.get("bookmakers_weight"), 0.20)
     bookmakers_cap = max(1, _safe_int(safe_cfg.get("bookmakers_cap"), 20))
     odd_weight = _safe_float(safe_cfg.get("odd_weight"), 0.05)
@@ -769,7 +840,6 @@ def build_safe_bets_table(
         bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
         safety_score = (
             tip.model_probability * prob_weight
-            + max(0.0, min(ev_cap, tip.expected_value)) * ev_weight
             + max(0, min(bookmakers, bookmakers_cap)) / bookmakers_cap * bookmakers_weight
             + max(0.0, 1.0 - (tip.best_odd - odd_reference) / odd_span) * odd_weight
         )
@@ -799,7 +869,6 @@ def build_safe_bets_table(
     out = pd.DataFrame(rows)
     filtered = out[
         (out["model_probability"] >= min_model_prob)
-        & (out["expected_value"] >= min_expected_value)
         & (out["odd"] <= max_odd)
         & (out["bookmakers"] >= min_bookmakers)
     ].copy()
@@ -808,7 +877,7 @@ def build_safe_bets_table(
         return filtered
 
     filtered = filtered.sort_values(
-        by=["safety_score", "expected_value", "model_probability"],
+        by=["safety_score", "model_probability", "bookmakers"],
         ascending=False,
     ).reset_index(drop=True)
     return filtered

@@ -324,8 +324,8 @@ def refresh_portal_snapshot_with_progress(
             progress_callback,
             progress=38,
             stage="prefetch_real_stats",
-            start_message="Atualizando historico de cartoes e escanteios...",
-            pulse_message="Atualizando historico de cartoes e escanteios",
+            start_message="Atualizando historico de cartoes, escanteios, faltas e posse...",
+            pulse_message="Atualizando historico de estatisticas reais",
             work=lambda: prefetch_finished_match_stats(
                 matches_frame,
                 competitions=list(COMPETITIONS.keys()),
@@ -338,13 +338,13 @@ def refresh_portal_snapshot_with_progress(
         _emit_refresh_progress(
             progress_callback,
             38,
-            "Pulando pre-carga de cartoes/escanteios para acelerar atualizacao...",
+            "Pulando pre-carga de estatisticas reais para acelerar atualizacao...",
             "prefetch_real_stats",
         )
         real_stats_report = {
             "ok": True,
             "skipped": True,
-            "message": "Pre-carga de cartoes/escanteios pulada para modo rapido.",
+            "message": "Pre-carga de estatisticas reais pulada para modo rapido.",
             "available_total": 0,
             "saved_now": 0,
             "missing_total": 0,
@@ -421,7 +421,7 @@ def build_match_context_for_date(selected_date: date) -> tuple[pd.DataFrame, str
                         f"Probabilidades do modelo: casa {probs.home_win * 100:.1f}% | empate {probs.draw * 100:.1f}% | fora {probs.away_win * 100:.1f}%",
                         f"BTTS: {probs.btts_yes * 100:.1f}% | Over 2.5: {probs.over_25 * 100:.1f}% | Under 2.5: {probs.under_25 * 100:.1f}%",
                         f"Gols esperados: mandante {probs.expected_home_goals:.2f} | visitante {probs.expected_away_goals:.2f}",
-                        f"Melhor leitura por valor: {market_label(str(tip.best_market), str(row.home_team), str(row.away_team))} | EV {tip.expected_value * 100:.2f}% | stake {tip.suggested_stake:.2f}",
+                        f"Resultado mais provavel no modelo: {market_label(str(tip.best_market), str(row.home_team), str(row.away_team))} | Prob {tip.model_probability * 100:.2f}% | EV informativo {tip.expected_value * 100:.2f}% | stake {tip.suggested_stake:.2f}",
                         f"Contexto mandante: posicao {home_ctx.get('rank')} | pontos {home_ctx.get('points')} | forma {home_ctx.get('recent_text')}",
                         f"Contexto visitante: posicao {away_ctx.get('rank')} | pontos {away_ctx.get('points')} | forma {away_ctx.get('recent_text')}",
                         f"Placares provaveis: {top_scorelines or '-'}",

@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from difflib import SequenceMatcher
 import re
 import threading
 import unicodedata
@@ -15,6 +16,7 @@ from bs4 import BeautifulSoup
 
 BASE_DIR = Path(__file__).resolve().parent
 SOURCE_NAME = "KickingData"
+FALLBACK_SOURCE_NAME = "ESPN"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -43,6 +45,25 @@ TEAM_SLUG_ALIASES: dict[str, list[str]] = {
     "U. Catolica": ["universidad-catolica", "u-catolica"],
     "U. de Deportes": ["universitario-de-deportes", "universidad-de-deportes", "u-de-deportes"],
     "U. de Chile": ["universidad-de-chile", "u-de-chile"],
+}
+TEAM_MATCH_ALIASES: dict[str, list[str]] = {
+    "Athletico-PR": ["Athletico Paranaense", "Athletico"],
+    "Atletico-MG": ["Atletico Mineiro", "Atletico MG"],
+    "Botafogo RJ": ["Botafogo"],
+    "Chapecoense-SC": ["Chapecoense"],
+    "Flamengo RJ": ["Flamengo"],
+    "A. Italiano": ["Audax Italiano"],
+    "Ath Bilbao": ["Athletic Club", "Athletic Bilbao"],
+    "Dep. Cuenca": ["Deportivo Cuenca"],
+    "Dep. Riestra": ["Deportivo Riestra"],
+    "Ind. del Valle": ["Independiente del Valle"],
+    "Ind. Medellin": ["Independiente Medellin"],
+    "Ind. Rivadavia": ["Independiente Rivadavia"],
+    "Libertad Asuncion": ["Libertad"],
+    "Olimpia Asuncion": ["Olimpia"],
+    "U. Catolica": ["Universidad Catolica"],
+    "U. de Deportes": ["Universitario"],
+    "U. de Chile": ["Universidad de Chile"],
 }
 STATE_SUFFIXES = ("-rj", "-sp", "-mg", "-sc", "-pr", "-rs", "-lp")
 _persistent_cache_lock = threading.Lock()
@@ -182,6 +203,303 @@ def _format_metric(label: str, values: dict[str, int | float] | None, unit: str 
         "home": values["home"],
         "away": values["away"],
         "unit": unit,
+    }
+
+
+def _normalize_team_name_for_matching(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii").lower()
+    ascii_text = ascii_text.replace("&", " and ")
+    ascii_text = re.sub(r"[^a-z0-9]+", " ", ascii_text)
+    tokens = [token for token in ascii_text.split() if token not in {"fc", "ac", "club"}]
+    return " ".join(tokens).strip()
+
+
+def _team_match_candidates(team: str) -> list[str]:
+    raw_candidates = [team]
+    raw_candidates.extend(TEAM_MATCH_ALIASES.get(team, []))
+
+    normalized_candidates: list[str] = []
+    for value in raw_candidates:
+        normalized_value = _normalize_team_name_for_matching(value)
+        if normalized_value:
+            normalized_candidates.append(normalized_value)
+            parts = normalized_value.split()
+            if parts and parts[-1] in {"rj", "sp", "mg", "sc", "pr", "rs", "lp"}:
+                short_value = " ".join(parts[:-1]).strip()
+                if short_value:
+                    normalized_candidates.append(short_value)
+    return _unique(normalized_candidates)
+
+
+def _similarity_score(expected_candidates: list[str], observed_name: str) -> float:
+    observed_normalized = _normalize_team_name_for_matching(observed_name)
+    if not observed_normalized:
+        return 0.0
+    if not expected_candidates:
+        return 0.0
+    return max(SequenceMatcher(None, candidate, observed_normalized).ratio() for candidate in expected_candidates)
+
+
+@lru_cache(maxsize=64)
+def _fetch_espn_scoreboard(date_token: str) -> dict[str, object]:
+    url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={date_token}"
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=20)
+    if response.status_code != 200:
+        return {}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+@lru_cache(maxsize=512)
+def _fetch_espn_summary(event_id: str) -> dict[str, object]:
+    url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/summary?event={event_id}"
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=20)
+    if response.status_code != 200:
+        return {}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _extract_home_away_competitors(competition_payload: dict[str, object]) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    competitors_raw = competition_payload.get("competitors")
+    competitors = competitors_raw if isinstance(competitors_raw, list) else []
+    home_competitor: dict[str, object] | None = None
+    away_competitor: dict[str, object] | None = None
+
+    for competitor in competitors:
+        if not isinstance(competitor, dict):
+            continue
+        side = str(competitor.get("homeAway") or "").lower()
+        if side == "home" and home_competitor is None:
+            home_competitor = competitor
+        elif side == "away" and away_competitor is None:
+            away_competitor = competitor
+
+    if (home_competitor is None or away_competitor is None) and len(competitors) >= 2:
+        fallback_a = competitors[0] if isinstance(competitors[0], dict) else None
+        fallback_b = competitors[1] if isinstance(competitors[1], dict) else None
+        if home_competitor is None:
+            home_competitor = fallback_a
+        if away_competitor is None:
+            away_competitor = fallback_b
+    return home_competitor, away_competitor
+
+
+def _extract_espn_stat_value(raw_value: object) -> int | float | None:
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, (int, float)):
+        numeric_value = float(raw_value)
+    else:
+        parsed = _parse_numeric_value(str(raw_value))
+        if parsed is None:
+            return None
+        numeric_value = float(parsed)
+    if numeric_value.is_integer():
+        return int(numeric_value)
+    return round(numeric_value, 2)
+
+
+def _lookup_real_match_stats_espn(
+    home_team: str,
+    away_team: str,
+    date_text: str,
+    event_timestamp: str | None = None,
+) -> dict[str, object]:
+    date_candidates = _date_candidates(date_text, event_timestamp)
+    if not date_candidates:
+        return {
+            "available": False,
+            "source": FALLBACK_SOURCE_NAME,
+            "message": "Nao foi possivel montar a busca na fonte de fallback.",
+        }
+
+    home_expected = _team_match_candidates(home_team)
+    away_expected = _team_match_candidates(away_team)
+    if not home_expected or not away_expected:
+        return {
+            "available": False,
+            "source": FALLBACK_SOURCE_NAME,
+            "message": "Nao foi possivel normalizar os times para busca no fallback.",
+        }
+
+    best_event: dict[str, object] | None = None
+    for iso_date in date_candidates:
+        date_token = iso_date.replace("-", "")
+        scoreboard = _fetch_espn_scoreboard(date_token)
+        events = scoreboard.get("events")
+        if not isinstance(events, list):
+            continue
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            competitions = event.get("competitions")
+            if not isinstance(competitions, list) or not competitions:
+                continue
+            competition = competitions[0] if isinstance(competitions[0], dict) else {}
+            home_competitor, away_competitor = _extract_home_away_competitors(competition)
+            if not home_competitor or not away_competitor:
+                continue
+
+            home_name = str(((home_competitor.get("team") or {}).get("displayName") or "")).strip()
+            away_name = str(((away_competitor.get("team") or {}).get("displayName") or "")).strip()
+            if not home_name or not away_name:
+                continue
+
+            home_score = _similarity_score(home_expected, home_name)
+            away_score = _similarity_score(away_expected, away_name)
+            if home_score < 0.52 or away_score < 0.52:
+                continue
+
+            event_id = str(event.get("id") or competition.get("id") or "").strip()
+            if not event_id:
+                continue
+
+            total_score = home_score + away_score
+            status_type = ((competition.get("status") or {}).get("type") or {})
+            if bool(status_type.get("completed")):
+                total_score += 0.05
+
+            source_url = ""
+            links = event.get("links")
+            if isinstance(links, list):
+                for link in links:
+                    href = str((link or {}).get("href") or "").strip() if isinstance(link, dict) else ""
+                    if href and "espn.com" in href:
+                        source_url = href
+                        break
+            if not source_url:
+                source_url = f"https://www.espn.com/soccer/match/_/gameId/{event_id}"
+
+            candidate_event = {
+                "score": total_score,
+                "event_id": event_id,
+                "home_id": str(((home_competitor.get("team") or {}).get("id") or "")).strip(),
+                "away_id": str(((away_competitor.get("team") or {}).get("id") or "")).strip(),
+                "home_name": home_name,
+                "away_name": away_name,
+                "source_url": source_url,
+            }
+            if best_event is None or float(candidate_event["score"]) > float(best_event["score"]):
+                best_event = candidate_event
+
+    if not best_event:
+        return {
+            "available": False,
+            "source": FALLBACK_SOURCE_NAME,
+            "message": "Fallback ESPN nao encontrou o jogo para consulta de estatisticas reais.",
+        }
+
+    summary_payload = _fetch_espn_summary(str(best_event["event_id"]))
+    boxscore = summary_payload.get("boxscore") if isinstance(summary_payload, dict) else {}
+    teams_payload = boxscore.get("teams") if isinstance(boxscore, dict) else None
+    teams = teams_payload if isinstance(teams_payload, list) else []
+    if not teams:
+        return {
+            "available": False,
+            "source": FALLBACK_SOURCE_NAME,
+            "source_url": str(best_event["source_url"]),
+            "message": "Fallback ESPN encontrou o jogo, mas nao retornou boxscore de estatisticas.",
+        }
+
+    parsed_teams: list[dict[str, object]] = []
+    for team_payload in teams:
+        if not isinstance(team_payload, dict):
+            continue
+        team_data = team_payload.get("team") if isinstance(team_payload.get("team"), dict) else {}
+        team_name = str(team_data.get("displayName") or "").strip()
+        team_id = str(team_data.get("id") or "").strip()
+        statistics_raw = team_payload.get("statistics")
+        statistics_list = statistics_raw if isinstance(statistics_raw, list) else []
+        statistics_map: dict[str, int | float] = {}
+        for stat in statistics_list:
+            if not isinstance(stat, dict):
+                continue
+            stat_name = str(stat.get("name") or "").strip()
+            if not stat_name:
+                continue
+            raw_value = stat.get("displayValue")
+            if raw_value is None:
+                raw_value = stat.get("value")
+            parsed_value = _extract_espn_stat_value(raw_value)
+            if parsed_value is None:
+                continue
+            statistics_map[stat_name] = parsed_value
+        parsed_teams.append({"id": team_id, "name": team_name, "stats": statistics_map})
+
+    if not parsed_teams:
+        return {
+            "available": False,
+            "source": FALLBACK_SOURCE_NAME,
+            "source_url": str(best_event["source_url"]),
+            "message": "Fallback ESPN nao retornou estatisticas estruturadas para o jogo.",
+        }
+
+    home_entry = next((entry for entry in parsed_teams if str(entry.get("id")) == str(best_event["home_id"])), None)
+    away_entry = next((entry for entry in parsed_teams if str(entry.get("id")) == str(best_event["away_id"])), None)
+
+    if home_entry is None:
+        home_entry = max(
+            parsed_teams,
+            key=lambda entry: _similarity_score(home_expected, str(entry.get("name") or "")),
+            default=None,
+        )
+    if away_entry is None:
+        remaining_entries = [entry for entry in parsed_teams if entry is not home_entry] or parsed_teams
+        away_entry = max(
+            remaining_entries,
+            key=lambda entry: _similarity_score(away_expected, str(entry.get("name") or "")),
+            default=None,
+        )
+
+    home_stats = home_entry.get("stats") if isinstance(home_entry, dict) else {}
+    away_stats = away_entry.get("stats") if isinstance(away_entry, dict) else {}
+    if not isinstance(home_stats, dict):
+        home_stats = {}
+    if not isinstance(away_stats, dict):
+        away_stats = {}
+
+    def metric_from_stat(stat_name: str, label: str, unit: str = "") -> dict[str, object] | None:
+        home_value = _extract_espn_stat_value(home_stats.get(stat_name))
+        away_value = _extract_espn_stat_value(away_stats.get(stat_name))
+        if home_value is None or away_value is None:
+            return None
+        return {"label": label, "home": home_value, "away": away_value, "unit": unit}
+
+    stats = {
+        key: value
+        for key, value in {
+            "corners": metric_from_stat("wonCorners", "Escanteios"),
+            "yellow_cards": metric_from_stat("yellowCards", "Cartoes amarelos"),
+            "fouls": metric_from_stat("foulsCommitted", "Faltas"),
+            "possession": metric_from_stat("possessionPct", "Posse de bola", unit="%"),
+        }.items()
+        if value is not None
+    }
+    if not stats:
+        return {
+            "available": False,
+            "source": FALLBACK_SOURCE_NAME,
+            "source_url": str(best_event["source_url"]),
+            "message": "Fallback ESPN encontrou o jogo, mas sem os indicadores esperados.",
+        }
+
+    return {
+        "available": True,
+        "source": FALLBACK_SOURCE_NAME,
+        "source_url": str(best_event["source_url"]),
+        "message": "Estatisticas reais carregadas com sucesso (fallback ESPN).",
+        "stats": stats,
     }
 
 
@@ -353,10 +671,22 @@ def _lookup_real_match_stats_live(
                     "stats": stats,
                 }
 
+    fallback_payload = _lookup_real_match_stats_espn(
+        home_team=home_team,
+        away_team=away_team,
+        date_text=date_text,
+        event_timestamp=event_timestamp,
+    )
+    if fallback_payload.get("available"):
+        return fallback_payload
+
     return {
         "available": False,
-        "source": SOURCE_NAME,
-        "message": "Nao encontrei cartoes e escanteios reais para este jogo na fonte complementar.",
+        "source": FALLBACK_SOURCE_NAME,
+        "message": (
+            "Nao encontrei cartoes, escanteios, faltas e posse reais para este jogo "
+            "nas fontes complementares (KickingData e ESPN)."
+        ),
     }
 
 
@@ -378,6 +708,8 @@ def get_real_match_stats(
         }
 
     cache_key = build_match_stats_cache_key(home_team, away_team, date_text, event_timestamp=event_timestamp)
+    cached_payload: dict[str, object] | None = None
+    cached_missing_metrics: list[str] = []
     if prefer_persistent_cache and not force_refresh:
         cached_payload = get_persisted_match_stats(
             home_team=home_team,
@@ -386,7 +718,13 @@ def get_real_match_stats(
             event_timestamp=event_timestamp,
         )
         if cached_payload:
-            return {**cached_payload, "cache_hit": True, "cache_key": cache_key}
+            cached_stats = cached_payload.get("stats", {}) if isinstance(cached_payload, dict) else {}
+            if not isinstance(cached_stats, dict):
+                cached_stats = {}
+            required_metrics = ("corners", "yellow_cards", "fouls", "possession")
+            cached_missing_metrics = [metric for metric in required_metrics if metric not in cached_stats]
+            if not cached_missing_metrics:
+                return {**cached_payload, "cache_hit": True, "cache_key": cache_key}
 
     payload = _lookup_real_match_stats_live(
         home_team=home_team,
@@ -397,6 +735,18 @@ def get_real_match_stats(
     )
     if persist_result and payload.get("available"):
         _store_persisted_match_stats(cache_key, payload)
+    if cached_payload and cached_missing_metrics and not payload.get("available"):
+        cached_message = str(cached_payload.get("message") or "Estatisticas reais carregadas do cache.")
+        missing_text = ", ".join(cached_missing_metrics)
+        return {
+            **cached_payload,
+            "cache_hit": True,
+            "cache_key": cache_key,
+            "message": (
+                f"{cached_message} Nao foi possivel atualizar agora os campos faltantes "
+                f"({missing_text}) na fonte complementar."
+            ),
+        }
     return {**payload, "cache_hit": False, "cache_key": cache_key}
 
 

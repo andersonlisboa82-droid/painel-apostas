@@ -119,12 +119,25 @@ div[data-testid="stVerticalBlock"] > div:has(div.element-container) {
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-NVIDIA_MODEL = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-70b-instruct")
+DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-70b-instruct"
 INDEX_HTML_FILE = APP_DIR / "index.html"
 WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
 MODEL_CONFIG_SESSION_KEY = "runtime_model_config"
 MODEL_CONFIG_FEEDBACK_KEY = "_runtime_model_feedback"
 PORTAL_REFRESH_FEEDBACK_KEY = "_portal_refresh_feedback"
+
+
+def _read_runtime_secret(name: str) -> str:
+    env_value = str(os.getenv(name, "")).strip()
+    if env_value:
+        return env_value
+    try:
+        return str(st.secrets.get(name, "")).strip()
+    except Exception:
+        return ""
+
+
+NVIDIA_MODEL = _read_runtime_secret("NVIDIA_MODEL") or DEFAULT_NVIDIA_MODEL
 
 
 def _current_git_short_hash() -> str:
@@ -784,13 +797,17 @@ def format_score_value(value: object) -> str:
 
 
 def format_match_datetime(date_text: object, event_timestamp: object = None, status: str = "") -> str:
+    raw = str(date_text or "").strip()
+    if str(status).strip() == "Finalizado":
+        explicit_date = re.search(r"(\d{2})/(\d{2})/(\d{4})", raw)
+        if explicit_date:
+            return f"{explicit_date.group(1)}/{explicit_date.group(2)}/{explicit_date.group(3)}"
     parsed_ts = pd.to_datetime(event_timestamp, errors="coerce", utc=True)
     if not pd.isna(parsed_ts):
         local_dt = parsed_ts.tz_convert(APP_TIMEZONE)
         if str(status).strip() == "Finalizado":
             return local_dt.strftime("%d/%m/%Y")
         return local_dt.strftime("%d/%m/%Y %H:%M")
-    raw = str(date_text or "").strip()
     return raw if raw else "-"
 
 
@@ -866,6 +883,18 @@ def filter_matches_by_date(
         event_series = pd.to_datetime(out["event_timestamp"], errors="coerce", utc=True)
         if event_series.notna().any():
             parsed_local = event_series.dt.tz_convert(APP_TIMEZONE).dt.tz_localize(None)
+
+    if "status" in out.columns and "date_text" in out.columns:
+        final_mask = out["status"].fillna("").astype(str).str.strip().eq("Finalizado")
+        if final_mask.any():
+            explicit_text = (
+                out.loc[final_mask, "date_text"]
+                .fillna("")
+                .astype(str)
+                .str.extract(r"(\d{2}/\d{2}/\d{4})", expand=False)
+            )
+            explicit_dates = pd.to_datetime(explicit_text, errors="coerce", dayfirst=True)
+            parsed_local.loc[final_mask] = explicit_dates
 
     if "date_text" in out.columns:
         unresolved = parsed_local.isna()
@@ -1068,7 +1097,7 @@ def render_public_model_criteria_help() -> None:
 - Poisson: `max_goals={int(poisson_cfg.get('max_goals', 5))}` | `home_default={float(poisson_cfg.get('league_home_default', 1.35)):.2f}` | `away_default={float(poisson_cfg.get('league_away_default', 1.10)):.2f}`.
 - Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}` | `min_history={int(calibration_cfg.get('min_history_matches', 40))}` | `min_bucket={int(calibration_cfg.get('min_bucket_matches', 8))}`.
 - Stake: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`.
-- Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}` | `ev_weight={float(safe_cfg.get('ev_weight', 2.5)):.2f}` | `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`.
+- Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}` | `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}` | `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
 """
         )
         st.caption(
@@ -1144,7 +1173,7 @@ def render_portal_refresh_action_button(
         ensure_portal_ai_server_running()
         payload = refresh_portal_snapshot_with_progress(
             progress_callback=on_refresh_progress,
-            prefetch_real_stats=False,
+            prefetch_real_stats=True,
         )
         try:
             progress_widget.progress(100, text="Atualizacao concluida.")
@@ -1361,7 +1390,7 @@ def _execute_public_portal_refresh(*, refresh_nonce: str) -> str:
 
         payload = refresh_portal_snapshot_with_progress(
             progress_callback=on_progress,
-            prefetch_real_stats=False,
+            prefetch_real_stats=True,
         )
         try:
             progress_widget.progress(100, text="Atualizacao concluida.")
@@ -1466,7 +1495,8 @@ def format_ai_analysis(text: str) -> str:
 
     label_map = {
         "resultado mais provavel:": "Resultado mais provavel",
-        "melhor aposta por valor:": "Melhor aposta por valor",
+        "melhor aposta por valor:": "Entrada por probabilidade",
+        "entrada por probabilidade:": "Entrada por probabilidade",
         "cuidado antes de apostar:": "Cuidado antes de apostar",
     }
     collected = {title: [] for title in label_map.values()}
@@ -1491,7 +1521,7 @@ def format_ai_analysis(text: str) -> str:
 
     if any(collected.values()):
         blocks = []
-        for title in ["Resultado mais provavel", "Melhor aposta por valor", "Cuidado antes de apostar"]:
+        for title in ["Resultado mais provavel", "Entrada por probabilidade", "Cuidado antes de apostar"]:
             body = " ".join(collected[title]).strip(" .:-")
             if body:
                 blocks.append(f"**{title}**\n{body}.")
@@ -1501,7 +1531,7 @@ def format_ai_analysis(text: str) -> str:
     plain_text = " ".join(joined.split())
     markers = [
         ("Resultado mais provavel", ["O resultado mais provavel", "Resultado mais provavel"]),
-        ("Melhor aposta por valor", ["A melhor aposta por valor", "Melhor aposta por valor"]),
+        ("Entrada por probabilidade", ["Entrada por probabilidade", "A melhor aposta por valor", "Melhor aposta por valor"]),
         ("Cuidado antes de apostar", ["Antes de apostar", "Cuidado antes de apostar"]),
     ]
 
@@ -1529,7 +1559,7 @@ def format_ai_analysis(text: str) -> str:
             return "\n\n".join(blocks)
 
     sentences = [item.strip(" .") for item in plain_text.split(".") if item.strip()]
-    labels = ["Resultado mais provavel", "Melhor aposta por valor", "Cuidado antes de apostar"]
+    labels = ["Resultado mais provavel", "Entrada por probabilidade", "Cuidado antes de apostar"]
     blocks = []
     for idx, sentence in enumerate(sentences[:3]):
         blocks.append(f"**{labels[idx]}**\n{sentence}.")
@@ -1547,6 +1577,7 @@ def extract_ai_analysis_blocks(text: str) -> tuple[str, str, str]:
     label_map = {
         "resultado mais provavel:": "resultado",
         "melhor aposta por valor:": "valor",
+        "entrada por probabilidade:": "valor",
         "cuidado antes de apostar:": "cuidado",
     }
     collected = {"resultado": [], "valor": [], "cuidado": []}
@@ -1586,7 +1617,7 @@ def extract_ai_analysis_blocks(text: str) -> tuple[str, str, str]:
 def render_ai_analysis_blocks(resultado: str, valor: str, cuidado: str) -> str:
     blocks = [
         ("Resultado mais provavel", resultado),
-        ("Melhor aposta por valor", valor),
+        ("Entrada por probabilidade", valor),
         ("Cuidado antes de apostar", cuidado),
     ]
     rendered = []
@@ -1754,7 +1785,7 @@ def request_nvidia_completion(
     top_p: float = 0.9,
     max_tokens: int = 520,
 ) -> str:
-    api_key = (os.getenv("NVIDIA_API_KEY") or "").strip()
+    api_key = _read_runtime_secret("NVIDIA_API_KEY")
     if not api_key:
         raise ValueError("Defina a variavel de ambiente NVIDIA_API_KEY para usar a analise com IA.")
 
@@ -1869,7 +1900,7 @@ Data: {date_text}
 Dados quantitativos:
 - Odds 1X2: Casa {odds_home:.2f}, Empate {odds_draw:.2f}, Fora {odds_away:.2f}
 - Probabilidades Modelo: Casa {home_win_prob * 100:.1f}%, Empate {draw_prob * 100:.2f}%, Fora {away_win_prob * 100:.1f}%
-- Mercado de Valor sugerido: {value_market} (EV {expected_value * 100:.2f}%)
+- Entrada por probabilidade sugerida: {value_market} (EV informativo {expected_value * 100:.2f}%)
 
 Classificacao de Risco:
 0-39 = RISCO BAIXO
@@ -1956,9 +1987,9 @@ Contexto do jogo atual:
 - Odds 1X2: Casa {float(fixture_row['odds_home']):.2f} | Empate {float(fixture_row['odds_draw']):.2f} | Fora {float(fixture_row['odds_away']):.2f}
 - Probabilidades do modelo: Casa {probs.home_win * 100:.1f}% | Empate {probs.draw * 100:.1f}% | Fora {probs.away_win * 100:.1f}%
 - Resultado mais provavel: {probable_market} ({probable_probability * 100:.1f}%)
-- Melhor aposta por valor: {readable_market}
-- EV da aposta por valor: {tip.expected_value * 100:.2f}%
-- Prob. modelo da aposta por valor: {tip.model_probability * 100:.2f}%
+- Entrada por probabilidade: {readable_market}
+- EV informativo da entrada: {tip.expected_value * 100:.2f}%
+- Prob. modelo da entrada: {tip.model_probability * 100:.2f}%
 - Prob. implicita da odd: {tip.implied_probability * 100:.2f}%
 - Stake sugerida: R$ {tip.suggested_stake:.2f}
 - Gols esperados: mandante {probs.expected_home_goals:.2f} | visitante {probs.expected_away_goals:.2f}
@@ -2799,7 +2830,7 @@ def command_center():
             c1, c2 = st.columns(2)
             with c1:
                 st.slider("Prob. Mínima", 0.40, 0.80, 0.55, 0.01, key="slider_prob")
-                st.slider("EV Mínimo", 0.00, 0.15, 0.02, 0.005, key="slider_ev")
+                st.caption("EV permanece apenas como métrica informativa (fora do critério de seleção).")
             with c2:
                 st.slider("Odd Máxima", 1.20, 4.00, 2.20, 0.05, key="slider_odd")
                 st.slider("Mínimo de Casas", 1, 20, 8, 1, key="slider_books")
@@ -2822,7 +2853,7 @@ def command_center():
             • <b>Fator Casa:</b> Ajuste estatístico pelo peso da torcida e gramado.<br><br>
             <strong>Como Alterar Manualmente:</strong><br>
             Para tornar o modelo mais agressivo, reduza a <i>Probabilidade Mínima</i> e aumente a <i>Odd Máxima</i>. 
-            Para um perfil conservador (Banca Alta), mantenha a Probabilidade acima de 0.60 e o EV acima de 0.02.
+            Para um perfil conservador (Banca Alta), mantenha a Probabilidade acima de 0.60 com odds controladas e mais casas.
         </div>
         """, unsafe_allow_html=True)
 
@@ -2916,9 +2947,9 @@ with st.sidebar:
     )
 
     profile_presets = {
-        "Baixo risco": {"min_prob": 0.58, "min_ev": 0.02, "max_odd": 2.30},
-        "Medio risco": {"min_prob": 0.50, "min_ev": 0.01, "max_odd": 2.80},
-        "Alto risco": {"min_prob": 0.40, "min_ev": 0.00, "max_odd": 4.00},
+        "Baixo risco": {"min_prob": 0.58, "max_odd": 2.30},
+        "Medio risco": {"min_prob": 0.50, "max_odd": 2.80},
+        "Alto risco": {"min_prob": 0.40, "max_odd": 4.00},
     }
 
     competition_min_books = {
@@ -2933,18 +2964,17 @@ with st.sidebar:
 
     if risk_profile == "Personalizado":
         min_prob = st.slider("Prob. minima do modelo", min_value=0.40, max_value=0.80, value=0.55, step=0.01)
-        min_ev = st.slider("EV minimo", min_value=0.00, max_value=0.15, value=0.02, step=0.005)
         max_odd = st.slider("Odd maxima", min_value=1.20, max_value=4.00, value=2.20, step=0.05)
         min_books = st.slider("Minimo de casas (B's)", min_value=1, max_value=20, value=8, step=1)
+        st.caption("EV segue visivel no portal como metrica informativa, mas nao entra no criterio de selecao do modelo.")
     else:
         preset = profile_presets[risk_profile]
         min_prob = preset["min_prob"]
-        min_ev = preset["min_ev"]
         max_odd = preset["max_odd"]
         min_books = competition_min_books.get(competition, {}).get(risk_profile, 3)
         st.caption(
             f"Filtro aplicado: Prob >= {min_prob:.2f} | "
-            f"EV >= {min_ev:.2f} | Odd <= {max_odd:.2f} | Casas >= {min_books}"
+            f"Odd <= {max_odd:.2f} | Casas >= {min_books}"
         )
 
     runtime_model_config = _get_runtime_model_config()
@@ -2956,7 +2986,7 @@ with st.sidebar:
     with st.expander("Criterios do Modelo (Resumo Claro)", expanded=False):
         st.markdown("**Filtro operacional atual**")
         st.caption(
-            f"Perfil `{risk_profile}` | Prob >= `{min_prob:.2f}` | EV >= `{min_ev:.3f}` | "
+            f"Perfil `{risk_profile}` | Prob >= `{min_prob:.2f}` | "
             f"Odd <= `{max_odd:.2f}` | Casas >= `{int(min_books)}`"
         )
         st.markdown("**Parametros tecnicos em uso**")
@@ -2967,7 +2997,7 @@ with st.sidebar:
 - Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}`, `min_history={int(calibration_cfg.get('min_history_matches', 40))}`, `min_bucket={int(calibration_cfg.get('min_bucket_matches', 8))}`.
 - Ajuste da calibracao: `baseline_weight={float(calibration_cfg.get('baseline_weight', 0.20)):.2f}`, `max_adjustment_weight={float(calibration_cfg.get('max_adjustment_weight', 0.70)):.2f}`, `weight_sample_size={float(calibration_cfg.get('weight_sample_size', 30.0)):.1f}`.
 - Gestao de stake: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`.
-- Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}`, `ev_weight={float(safe_cfg.get('ev_weight', 2.5)):.2f}`, `ev_cap={float(safe_cfg.get('ev_cap', 0.10)):.2f}`, `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`, `bookmakers_cap={int(safe_cfg.get('bookmakers_cap', 20))}`, `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
+- Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}`, `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`, `bookmakers_cap={int(safe_cfg.get('bookmakers_cap', 20))}`, `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
 """
         )
         st.markdown("**Como recalibrar com autonomia**")
@@ -3111,20 +3141,22 @@ with st.sidebar:
                 key="model_cfg_safe_prob_weight",
             )
             safe_ev_weight_input = st.number_input(
-                "Peso EV",
+                "Peso EV (desativado)",
                 min_value=0.0,
                 max_value=10.0,
-                value=float(safe_cfg.get("ev_weight", 2.5)),
+                value=0.0,
                 step=0.05,
                 key="model_cfg_safe_ev_weight",
+                disabled=True,
             )
             safe_ev_cap_input = st.number_input(
-                "Teto EV no score",
+                "Teto EV no score (desativado)",
                 min_value=0.0,
                 max_value=1.0,
-                value=float(safe_cfg.get("ev_cap", 0.10)),
+                value=0.0,
                 step=0.01,
                 key="model_cfg_safe_ev_cap",
+                disabled=True,
             )
             safe_bookmakers_weight_input = st.number_input(
                 "Peso bookmakers",
@@ -3220,8 +3252,8 @@ with st.sidebar:
                         },
                         "safe_score": {
                             "prob_weight": float(safe_prob_weight_input),
-                            "ev_weight": float(safe_ev_weight_input),
-                            "ev_cap": float(safe_ev_cap_input),
+                            "ev_weight": 0.0,
+                            "ev_cap": 0.0,
                             "bookmakers_weight": float(safe_bookmakers_weight_input),
                             "bookmakers_cap": int(safe_bookmakers_cap_input),
                             "odd_weight": float(safe_odd_weight_input),
@@ -3249,7 +3281,7 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    ai_enabled = bool((os.getenv("NVIDIA_API_KEY") or "").strip())
+    ai_enabled = bool(_read_runtime_secret("NVIDIA_API_KEY"))
     st.markdown(
         f"""
 <div class="sidebar-ai-panel">
@@ -3297,7 +3329,7 @@ if competition_load_warning:
 finished = df[df["status"] == "Finalizado"].copy()
 fixtures = df[df["status"] == "Agendado"].copy()
 valid = fixtures.dropna(subset=["odds_home", "odds_draw", "odds_away"]).copy()
-ai_enabled = bool((os.getenv("NVIDIA_API_KEY") or "").strip())
+ai_enabled = bool(_read_runtime_secret("NVIDIA_API_KEY"))
 runtime_betting_cfg = runtime_model_config.get("betting", {})
 runtime_kelly = (
     float(runtime_betting_cfg.get("kelly_fractional", 0.25))
@@ -3333,7 +3365,7 @@ if needs_safe_data:
         bankroll=1000.0,
         kelly_fractional=runtime_kelly,
         min_model_prob=float(min_prob),
-        min_expected_value=float(min_ev),
+        min_expected_value=-1.0,
         max_odd=float(max_odd),
         min_bookmakers=int(min_books),
         model_config=runtime_model_config,
@@ -3345,16 +3377,16 @@ if needs_safe_data:
 
     if safe_df.empty and risk_profile != "Personalizado":
         relax_steps = [
-            (max(min_prob - 0.05, 0.35), max(min_ev - 0.01, -0.02), max_odd + 0.30, max(min_books - 1, 1)),
-            (max(min_prob - 0.10, 0.30), max(min_ev - 0.02, -0.05), max_odd + 0.70, 1),
+            (max(min_prob - 0.05, 0.35), max_odd + 0.30, max(min_books - 1, 1)),
+            (max(min_prob - 0.10, 0.30), max_odd + 0.70, 1),
         ]
-        for rp, rev, rodd, rbooks in relax_steps:
+        for rp, rodd, rbooks in relax_steps:
             safe_df = _build_safe_bets_cached(
                 matches_df=df,
                 bankroll=1000.0,
                 kelly_fractional=runtime_kelly,
                 min_model_prob=float(rp),
-                min_expected_value=float(rev),
+                min_expected_value=-1.0,
                 max_odd=float(rodd),
                 min_bookmakers=int(rbooks),
                 model_config=runtime_model_config,
@@ -3366,7 +3398,7 @@ if needs_safe_data:
             if not safe_df.empty:
                 relaxed_note = (
                     f"Filtro do perfil foi relaxado automaticamente para exibir opcoes: "
-                    f"Prob >= {rp:.2f} | EV >= {rev:.2f} | Odd <= {rodd:.2f} | Casas >= {rbooks}."
+                    f"Prob >= {rp:.2f} | Odd <= {rodd:.2f} | Casas >= {rbooks}."
                 )
                 break
 
@@ -3419,7 +3451,7 @@ page_descriptions = {
     "Configuracoes": "Area para ajustar competicao, filtro por time e perfil de risco usando os controles do menu lateral.",
     "IA Institucional": "Central de leitura do dia com prompt profissional, execucao e resposta completa dentro do portal.",
     "Jogos Seguros": "Ranking das selecoes mais conservadoras dentro do filtro atual.",
-    "Painel do Modelo": "Comparativo detalhado entre modelo, casas de aposta e entradas por valor.",
+    "Painel do Modelo": "Comparativo detalhado entre modelo, casas de aposta e entradas por probabilidade.",
     "Analise de Jogo": "Simulador por confronto com probabilidades, valor e revisao de jogos futuros ou finalizados.",
     "Todos os Futuros": "Agenda completa dos jogos futuros com odds e numero de casas.",
     "Resultados": "Jogos ja encerrados com comparativo de acerto do modelo.",
@@ -3632,7 +3664,7 @@ elif page == "Configuracoes":
         items=[
             "Competicao: muda o universo de jogos analisados no portal.",
             "Filtrar por time: reduz a leitura para confrontos do clube ou selecao desejada.",
-            "Perfil de risco: troca a regua de probabilidade, EV, odd maxima e casas minimas.",
+            "Perfil de risco: troca a regua de probabilidade, odd maxima e casas minimas.",
             "Atualizar agora: refaz o scraping e regenera o portal completo (pode levar alguns segundos).",
         ],
         tone="neutral",
@@ -3649,10 +3681,10 @@ elif page == "Configuracoes":
         title="Criterios em uso agora",
         copy="Estes sao os valores ativos do modelo neste momento para previsao, calibracao e score de seguranca.",
         items=[
-            f"Filtro operacional: Perfil {risk_profile} | Prob >= {min_prob:.2f} | EV >= {min_ev:.3f} | Odd <= {max_odd:.2f} | Casas >= {int(min_books)}.",
+            f"Filtro operacional: Perfil {risk_profile} | Prob >= {min_prob:.2f} | Odd <= {max_odd:.2f} | Casas >= {int(min_books)}.",
             f"Poisson: max_goals={int(config_poisson.get('max_goals', 5))}, home_default={float(config_poisson.get('league_home_default', 1.35)):.2f}, away_default={float(config_poisson.get('league_away_default', 1.10)):.2f}.",
             f"Calibracao: enabled={bool(config_calib.get('enabled', True))}, min_history={int(config_calib.get('min_history_matches', 40))}, min_bucket={int(config_calib.get('min_bucket_matches', 8))}.",
-            f"Stake (Kelly): {float(config_betting.get('kelly_fractional', 0.25)):.2f} | Safe score prob={float(config_safe.get('prob_weight', 0.55)):.2f}, ev={float(config_safe.get('ev_weight', 2.5)):.2f}.",
+            f"Stake (Kelly): {float(config_betting.get('kelly_fractional', 0.25)):.2f} | Safe score prob={float(config_safe.get('prob_weight', 0.55)):.2f}, books={float(config_safe.get('bookmakers_weight', 0.20)):.2f}, odd={float(config_safe.get('odd_weight', 0.05)):.2f}.",
         ],
         tone="neutral",
     )
@@ -3765,7 +3797,7 @@ elif page == "Jogos Seguros":
   <div class="section-header">
     <div>
       <div class="section-title">Ranking de Jogos Mais Seguros</div>
-      <p>Visao conservadora, combinando probabilidade, EV, odd e numero de casas para priorizar entradas mais limpas.</p>
+      <p>Visao conservadora, combinando probabilidade, odd e numero de casas para priorizar entradas mais limpas.</p>
     </div>
     <div class="section-badge">Filtro ativo</div>
   </div>
@@ -3871,7 +3903,7 @@ elif page == "Jogos Seguros":
 
         st.markdown("#### Ranking detalhado")
         st.dataframe(format_date_column_for_display(show_safe.head(20)), use_container_width=True, hide_index=True)
-        st.markdown("<div class='small-note'>Score combina probabilidade, EV, odd e numero de casas.</div>", unsafe_allow_html=True)
+        st.markdown("<div class='small-note'>Score combina probabilidade, odd e numero de casas.</div>", unsafe_allow_html=True)
 
 elif page == "Painel do Modelo":
     st.markdown('<div id="anchor-dashboard"></div>', unsafe_allow_html=True)
@@ -3879,8 +3911,8 @@ elif page == "Painel do Modelo":
         [
             {"eyebrow": "Acerto modelo", "value": f"{model_accuracy:.1f}%", "copy": "Percentual de acertos do favorito do modelo."},
             {"eyebrow": "Acerto casas", "value": f"{house_accuracy:.1f}%", "copy": "Percentual de acertos do favorito do mercado."},
-            {"eyebrow": "Acerto valor", "value": f"{value_accuracy:.1f}%", "copy": "Hit rate das apostas por valor."},
-            {"eyebrow": "ROI valor", "value": f"{value_roi:.1f}%", "copy": "Retorno medio usando stake fixa."},
+            {"eyebrow": "Acerto entrada", "value": f"{value_accuracy:.1f}%", "copy": "Hit rate da entrada por probabilidade."},
+            {"eyebrow": "ROI entrada", "value": f"{value_roi:.1f}%", "copy": "Retorno medio da entrada sugerida (stake fixa)."},
         ]
     )
     if recent_backtest.empty:
@@ -3888,7 +3920,7 @@ elif page == "Painel do Modelo":
     else:
         render_split_highlight(
             "Modelo x casas de apostas",
-            "O painel abaixo usa jogos ja finalizados para comparar previsao mais provavel do modelo, favorito das odds e aposta de valor.",
+            "O painel abaixo usa jogos ja finalizados para comparar previsao mais provavel do modelo, favorito das odds e entrada por probabilidade.",
             tuning_actions if tuning_actions else [
                 f"Modelo: {model_accuracy:.1f}% de acerto.",
                 f"Casas: {house_accuracy:.1f}% de acerto.",
@@ -3898,8 +3930,8 @@ elif page == "Painel do Modelo":
         )
         if not probability_buckets.empty:
             buckets_view = probability_buckets.copy()
-            buckets_view.columns = ["Faixa do modelo", "Jogos", "Acerto modelo", "Acerto casas", "ROI modelo", "ROI valor", "EV medio"]
-            for col in ["Acerto modelo", "Acerto casas", "ROI modelo", "ROI valor", "EV medio"]:
+            buckets_view.columns = ["Faixa do modelo", "Jogos", "Acerto modelo", "Acerto casas", "ROI modelo", "ROI entrada", "EV medio"]
+            for col in ["Acerto modelo", "Acerto casas", "ROI modelo", "ROI entrada", "EV medio"]:
                 buckets_view[col] = (buckets_view[col] * 100).round(2).astype(str) + "%"
             st.markdown("#### Calibracao por faixa de probabilidade")
             st.dataframe(buckets_view, use_container_width=True, hide_index=True)
@@ -3931,7 +3963,7 @@ elif page == "Painel do Modelo":
             lambda row: market_badge_label(str(row["house_market"]), str(row["home_team"]), str(row["away_team"])),
             axis=1,
         )
-        model_compare["Valor"] = model_compare.apply(
+        model_compare["Entrada"] = model_compare.apply(
             lambda row: market_badge_label(str(row["value_market"]), str(row["home_team"]), str(row["away_team"])),
             axis=1,
         )
@@ -3941,15 +3973,15 @@ elif page == "Painel do Modelo":
         )
         model_compare["Prob. Modelo"] = (model_compare["model_probability"] * 100).round(2).astype(str) + "%"
         model_compare["Prob. Casas"] = (model_compare["house_probability"] * 100).round(2).astype(str) + "%"
-        model_compare["EV Valor"] = (model_compare["value_ev"] * 100).round(2).astype(str) + "%"
+        model_compare["EV Entrada"] = (model_compare["value_ev"] * 100).round(2).astype(str) + "%"
         model_compare["Hit Modelo"] = model_compare["model_hit"].map({True: "Sim", False: "Nao"})
         model_compare["Hit Casas"] = model_compare["house_hit"].map({True: "Sim", False: "Nao"})
-        model_compare["Hit Valor"] = model_compare["value_hit"].map({True: "Sim", False: "Nao"})
+        model_compare["Hit Entrada"] = model_compare["value_hit"].map({True: "Sim", False: "Nao"})
         model_compare = format_date_column_for_display(model_compare, status="Finalizado")
         model_compare = model_compare[
-            ["date_text", "Jogo", "Resultado", "Modelo", "Prob. Modelo", "Casas", "Prob. Casas", "Valor", "EV Valor", "Hit Modelo", "Hit Casas", "Hit Valor"]
+            ["date_text", "Jogo", "Resultado", "Modelo", "Prob. Modelo", "Casas", "Prob. Casas", "Entrada", "EV Entrada", "Hit Modelo", "Hit Casas", "Hit Entrada"]
         ]
-        model_compare.columns = ["Data", "Jogo", "Resultado final", "Leitura do modelo", "Prob. modelo", "Leitura das casas", "Prob. casas", "Entrada por valor", "EV valor", "Modelo acertou", "Casas acertaram", "Valor acertou"]
+        model_compare.columns = ["Data", "Jogo", "Resultado final", "Leitura do modelo", "Prob. modelo", "Leitura das casas", "Prob. casas", "Entrada por probabilidade", "EV informativo", "Modelo acertou", "Casas acertaram", "Entrada acertou"]
         st.markdown("#### Comparativo detalhado por jogo finalizado")
         st.dataframe(model_compare.head(30), use_container_width=True, hide_index=True)
 
@@ -4066,9 +4098,9 @@ elif page == "Analise de Jogo":
                                 "Status": selected_status,
                                 "Favorito do modelo": probable_market,
                                 "Prob. modelo": probable_probability,
-                                "Entrada por valor": readable_market,
-                                "Odd valor": float(tip.best_odd),
-                                "EV": float(tip.expected_value),
+                                "Entrada por probabilidade": readable_market,
+                                "Odd entrada": float(tip.best_odd),
+                                "EV informativo": float(tip.expected_value),
                                 "Stake sugerida": float(tip.suggested_stake),
                             }
                         )
@@ -4091,8 +4123,8 @@ elif page == "Analise de Jogo":
                     if not summary_df.empty:
                         summary_view = summary_df.copy()
                         summary_view["Prob. modelo"] = (summary_view["Prob. modelo"] * 100).round(2).astype(str) + "%"
-                        summary_view["EV"] = (summary_view["EV"] * 100).round(2).astype(str) + "%"
-                        summary_view["Odd valor"] = summary_view["Odd valor"].round(2)
+                        summary_view["EV informativo"] = (summary_view["EV informativo"] * 100).round(2).astype(str) + "%"
+                        summary_view["Odd entrada"] = summary_view["Odd entrada"].round(2)
                         summary_view["Stake sugerida"] = "R$ " + summary_view["Stake sugerida"].round(2).map(lambda x: f"{x:.2f}")
                         st.markdown("### Resumo comparativo dos jogos selecionados")
                         st.dataframe(summary_view, use_container_width=True, hide_index=True)
@@ -4124,7 +4156,7 @@ elif page == "Analise de Jogo":
                             {"eyebrow": f"Modelo | {selected['home_team']}", "value": f"{probs.home_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_home']:.2f}."},
                             {"eyebrow": "Modelo | Empate", "value": f"{probs.draw * 100:.1f}%", "copy": f"Odd atual {selected['odds_draw']:.2f}."},
                             {"eyebrow": f"Modelo | {selected['away_team']}", "value": f"{probs.away_win * 100:.1f}%", "copy": f"Odd atual {selected['odds_away']:.2f}."},
-                            {"eyebrow": "Entrada por valor", "value": f"{tip.expected_value * 100:.2f}%", "copy": readable_market},
+                            {"eyebrow": "Entrada por probabilidade", "value": f"{tip.model_probability * 100:.2f}%", "copy": readable_market},
                         ]
                     )
 
@@ -4146,15 +4178,15 @@ elif page == "Analise de Jogo":
                         [
                             f"Favorito do modelo: {market_badge_label(str(model_market), str(selected['home_team']), str(selected['away_team']))} ({probable_probability * 100:.2f}%).",
                             f"Favorito das casas: {market_badge_label(str(house_market), str(selected['home_team']), str(selected['away_team']))} ({market_probs[house_market] * 100:.2f}%).",
-                            f"Entrada por valor: {readable_market} com edge de {(tip.model_probability - tip.implied_probability) * 100:.2f} pontos.",
+                            f"Entrada por probabilidade: {readable_market} com edge de {(tip.model_probability - tip.implied_probability) * 100:.2f} pontos.",
                         ],
                         tone="warm" if model_market != house_market else "neutral",
                     )
 
                     if tip.expected_value > 0:
-                        st.success(f"Melhor aposta por valor: {readable_market} | EV: {tip.expected_value * 100:.2f}%")
+                        st.success(f"Entrada por probabilidade: {readable_market} | EV informativo: {tip.expected_value * 100:.2f}%")
                     else:
-                        st.warning(f"Sem EV positivo no 1X2. Melhor aposta por valor no momento: {readable_market} (EV {tip.expected_value * 100:.2f}%).")
+                        st.warning(f"Sem EV positivo no 1X2. Entrada por probabilidade no momento: {readable_market} (EV informativo {tip.expected_value * 100:.2f}%).")
 
                     hedge_df = build_hedge_scenarios(
                         best_market=str(tip.best_market),
@@ -4278,7 +4310,7 @@ elif page == "Analise de Jogo":
 **Odds atuais (1X2):** Casa `{selected['odds_home']:.2f}` | Empate `{selected['odds_draw']:.2f}` | Fora `{selected['odds_away']:.2f}`  
 **Probabilidades do modelo:** Casa `{probs.home_win*100:.1f}%` | Empate `{probs.draw*100:.1f}%` | Fora `{probs.away_win*100:.1f}%`  
 **Resultado mais provavel:** **{probable_market}** (`{probable_probability*100:.1f}%`)  
-**Melhor aposta por valor:** **{readable_market}** (EV `{tip.expected_value*100:.2f}%`)  
+**Entrada por probabilidade:** **{readable_market}** (EV informativo `{tip.expected_value*100:.2f}%`)  
 **Mercados extras:** {btts_line} Prob. BTTS `{probs.btts_yes*100:.1f}%`. {goal_line} Under 2.5 `{probs.under_25*100:.1f}%` / Over 2.5 `{probs.over_25*100:.1f}%`.
 """
                     )
@@ -4397,7 +4429,7 @@ elif page == "Resultados":
             [
                 {"eyebrow": "Acuracia modelo", "value": f"{model_accuracy:.1f}%", "copy": "Favorito do modelo."},
                 {"eyebrow": "Acuracia casas", "value": f"{house_accuracy:.1f}%", "copy": "Favorito das odds."},
-                {"eyebrow": "Acuracia valor", "value": f"{value_accuracy:.1f}%", "copy": "Entrada por valor."},
+                {"eyebrow": "Acuracia entrada", "value": f"{value_accuracy:.1f}%", "copy": "Entrada por probabilidade."},
                 {"eyebrow": "ROI modelo", "value": f"{model_roi:.1f}%", "copy": "Resultado flat stake."},
             ]
         )
@@ -4417,18 +4449,18 @@ elif page == "Resultados":
             lambda row: market_badge_label(str(row["house_market"]), str(row["home_team"]), str(row["away_team"])),
             axis=1,
         )
-        results_compare["Valor"] = results_compare.apply(
+        results_compare["Entrada"] = results_compare.apply(
             lambda row: market_badge_label(str(row["value_market"]), str(row["home_team"]), str(row["away_team"])),
             axis=1,
         )
         results_compare["Modelo acertou"] = results_compare["model_hit"].map({True: "Sim", False: "Nao"})
         results_compare["Casas acertaram"] = results_compare["house_hit"].map({True: "Sim", False: "Nao"})
-        results_compare["Valor acertou"] = results_compare["value_hit"].map({True: "Sim", False: "Nao"})
+        results_compare["Entrada acertou"] = results_compare["value_hit"].map({True: "Sim", False: "Nao"})
         results_compare = format_date_column_for_display(results_compare, status="Finalizado")
         results_compare = results_compare[
-            ["date_text", "Jogo", "Resultado", "Modelo", "Casas", "Valor", "Modelo acertou", "Casas acertaram", "Valor acertou"]
+            ["date_text", "Jogo", "Resultado", "Modelo", "Casas", "Entrada", "Modelo acertou", "Casas acertaram", "Entrada acertou"]
         ]
-        results_compare.columns = ["Data", "Jogo", "Resultado final", "Modelo", "Casas", "Valor", "Modelo acertou", "Casas acertaram", "Valor acertou"]
+        results_compare.columns = ["Data", "Jogo", "Resultado final", "Modelo", "Casas", "Entrada por probabilidade", "Modelo acertou", "Casas acertaram", "Entrada acertou"]
         st.dataframe(results_compare.head(30), use_container_width=True, hide_index=True)
 
 st.markdown("</div>", unsafe_allow_html=True)

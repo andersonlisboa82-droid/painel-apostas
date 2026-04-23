@@ -60,7 +60,7 @@ def _current_git_commit_date() -> str:
 
 PORTAL_RELEASE_LABEL = f"{_current_git_commit_date()} | {_current_git_short_hash()}"
 
-AI_PROMPT_TEMPLATE = """Atue como um analista quantitativo profissional de futebol especializado em modelagem estatistica, leitura de mercado e identificacao de value bets (+EV), com abordagem semelhante a analistas de apostas institucionais.
+AI_PROMPT_TEMPLATE = """Atue como um analista quantitativo profissional de futebol especializado em modelagem estatistica, leitura de mercado e projecao de probabilidades de resultado, com abordagem semelhante a analistas de apostas institucionais.
 
 Seu objetivo e analisar os jogos da data selecionada (__DATA_SELECIONADA__) e identificar as melhores oportunidades de aposta com base em dados historicos recentes, metricas avancadas e movimentacao das odds.
 
@@ -92,9 +92,9 @@ Possivel placar provavel
 
 Compare com odds implicitas do mercado quando disponiveis.
 
-Identifique possiveis value bets (+EV).
+Identifique possiveis distorcoes de mercado, mas sem usar EV como criterio principal.
 
-Se nao houver value bet, informe claramente.
+Se nao houver distorcao relevante, informe claramente.
 
 --------------------------------------------------
 
@@ -261,10 +261,9 @@ Classificacao final:
 
 Confidence Score (0-10):
 
-Value bet identificada:
-(sim ou nao)
+Entrada sugerida pelo modelo (maior probabilidade):
 
-Se sim, explicar qual.
+Explique objetivamente por que esse resultado foi o mais provavel.
 
 Fornecer justificativa objetiva baseada nos dados.
 
@@ -294,14 +293,14 @@ ETAPA 15 - CONCLUSAO FINAL
 
 Ao final da analise:
 
-Liste as 3 melhores apostas do dia com maior valor esperado (+EV)
+Liste as 3 melhores apostas do dia com maior probabilidade e melhor confianca estatistica
 
 Informe:
 
 se e melhor apostar agora (early line)
 ou esperar closing line
 
-Se nao houver apostas com valor estatistico claro, informe explicitamente."""
+Se nao houver apostas com confiabilidade estatistica clara, informe explicitamente."""
 
 
 def _current_app_timestamp() -> str:
@@ -322,20 +321,29 @@ def _fmt_score(value: float | None) -> str:
 
 
 def _format_match_datetime(date_text: object, event_timestamp: object = None, status: str = "") -> str:
+    raw = str(date_text or "").strip()
     parsed_ts = pd.to_datetime(event_timestamp, errors="coerce", utc=True)
     if not pd.isna(parsed_ts):
         local_dt = parsed_ts.tz_convert(APP_TIMEZONE)
         if str(status).strip() == "Finalizado":
             return local_dt.strftime("%d/%m/%Y")
         return local_dt.strftime("%d/%m/%Y %H:%M")
-    raw = str(date_text or "").strip()
+    if str(status).strip() == "Finalizado":
+        explicit_date = re.search(r"(\d{2})/(\d{2})/(\d{4})", raw)
+        if explicit_date:
+            return f"{explicit_date.group(1)}/{explicit_date.group(2)}/{explicit_date.group(3)}"
     return raw if raw else "-"
 
 
 def _match_filter_date(date_text: object, event_timestamp: object = None, status: str = "") -> str:
+    raw = str(date_text or "").strip()
     parsed_ts = pd.to_datetime(event_timestamp, errors="coerce", utc=True)
     if not pd.isna(parsed_ts):
         return parsed_ts.tz_convert(APP_TIMEZONE).strftime("%Y-%m-%d")
+    if str(status).strip() == "Finalizado":
+        explicit_date = re.search(r"(\d{2})/(\d{2})/(\d{4})", raw)
+        if explicit_date:
+            return f"{explicit_date.group(3)}-{explicit_date.group(2)}-{explicit_date.group(1)}"
 
     display_date = _format_match_datetime(date_text, event_timestamp, status)
     match = re.search(r"(\d{2})/(\d{2})/(\d{4})", display_date)
@@ -387,6 +395,30 @@ def _best_model_result(probs, home_team: str, away_team: str) -> tuple[str, floa
     return max(options, key=lambda item: item[1])
 
 
+def _best_bookmaker_result(
+    home_team: str,
+    away_team: str,
+    odd_home: object,
+    odd_draw: object,
+    odd_away: object,
+) -> str:
+    options: list[tuple[str, float]] = []
+    for label, odd_value in (
+        (f"Vitoria {home_team}", odd_home),
+        ("Empate", odd_draw),
+        (f"Vitoria {away_team}", odd_away),
+    ):
+        if odd_value is None or pd.isna(odd_value):
+            continue
+        odd_num = float(odd_value)
+        if odd_num <= 1.0:
+            continue
+        options.append((label, odd_num))
+    if not options:
+        return "-"
+    return min(options, key=lambda item: item[1])[0]
+
+
 def _risk_stage_from_metrics(probability: float, expected_value: float, odd: float, bookmakers: int) -> str:
     if probability >= 0.62 and expected_value >= 0.03 and 1.0 < odd <= 1.95 and bookmakers >= 10:
         return "Baixo risco"
@@ -409,20 +441,47 @@ def _risk_stage_context(stage: str, suggested_label: str, has_valid_odd: bool = 
     return f"{suggested_label} existe na leitura, mas ainda fica fora da regua principal de risco do portal."
 
 
-def _classify_model_risk(row, probs, home_team: str, away_team: str) -> tuple[str, str]:
-    market_rows = [
-        ("Casa", f"Vitoria {home_team}", float(probs.home_win), getattr(row, "odds_home", None)),
-        ("Empate", "Empate", float(probs.draw), getattr(row, "odds_draw", None)),
-        ("Fora", f"Vitoria {away_team}", float(probs.away_win), getattr(row, "odds_away", None)),
-    ]
-    best_market, best_label, best_prob, best_odd = max(market_rows, key=lambda item: item[2])
+def _classify_model_risk(row, probs, home_team: str, away_team: str, tip=None) -> tuple[str, str]:
+    if tip is not None:
+        best_market = str(getattr(tip, "best_market", ""))
+        best_label = _market_label(best_market, home_team, away_team)
+        best_prob = float(getattr(tip, "selected_probability", None) or getattr(tip, "model_probability", 0.0))
+        odd_value = float(getattr(tip, "best_odd", 0.0) or 0.0)
+        expected_value = float(getattr(tip, "expected_value", -1.0))
+        selection_source = str(getattr(tip, "selection_source", "model") or "model")
+    else:
+        market_rows = [
+            ("Casa", f"Vitoria {home_team}", float(probs.home_win), getattr(row, "odds_home", None)),
+            ("Empate", "Empate", float(probs.draw), getattr(row, "odds_draw", None)),
+            ("Fora", f"Vitoria {away_team}", float(probs.away_win), getattr(row, "odds_away", None)),
+        ]
+        best_market, best_label, best_prob, best_odd = max(market_rows, key=lambda item: item[2])
+        odd_value = float(best_odd) if best_odd is not None and not pd.isna(best_odd) and float(best_odd) > 1.0 else 0.0
+        expected_value = (best_prob * odd_value) - 1.0 if odd_value > 1.0 else -1.0
+        selection_source = "model"
 
-    odd_value = float(best_odd) if best_odd is not None and not pd.isna(best_odd) and float(best_odd) > 1.0 else 0.0
     bookmakers = int(getattr(row, "bookmakers", 0)) if getattr(row, "bookmakers", None) is not None and not pd.isna(getattr(row, "bookmakers", None)) else 0
-    expected_value = (best_prob * odd_value) - 1.0 if odd_value > 1.0 else -1.0
-
     stage = _risk_stage_from_metrics(best_prob, expected_value, odd_value, bookmakers)
-    return stage, _risk_stage_context(stage, best_label, has_valid_odd=odd_value > 1.0)
+    context = _risk_stage_context(stage, best_label, has_valid_odd=odd_value > 1.0)
+    if selection_source == "house_lock":
+        context = f"{context} Favorito muito forte das casas foi priorizado para proteger o percentual de acerto."
+    elif selection_source == "house_consensus":
+        context = f"{context} Como a confianca do modelo ficou baixa, o consenso das casas entrou como criterio principal."
+    return stage, context
+
+
+def _can_build_tip_from_row(row) -> bool:
+    odd_home = getattr(row, "odds_home", None)
+    odd_draw = getattr(row, "odds_draw", None)
+    odd_away = getattr(row, "odds_away", None)
+    if odd_home is None or odd_draw is None or odd_away is None:
+        return False
+    if pd.isna(odd_home) or pd.isna(odd_draw) or pd.isna(odd_away):
+        return False
+    try:
+        return float(odd_home) > 1.0 and float(odd_draw) > 1.0 and float(odd_away) > 1.0
+    except Exception:
+        return False
 
 
 def _get_detail_json(
@@ -440,10 +499,30 @@ def _get_detail_json(
         getattr(row, "event_timestamp", None),
         status,
     )
+    resolved_tip = tip
+    if resolved_tip is None and _can_build_tip_from_row(row):
+        try:
+            resolved_tip = suggest_bet_strategy(
+                probs,
+                odd_home=float(getattr(row, "odds_home")),
+                odd_draw=float(getattr(row, "odds_draw")),
+                odd_away=float(getattr(row, "odds_away")),
+                bankroll=1000.0,
+                kelly_fractional=0.25,
+            )
+        except Exception:
+            resolved_tip = None
+
     final_score = ""
     actual_result = ""
-    model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
-    model_risk_stage, model_risk_context = _classify_model_risk(row, probs, str(row.home_team), str(row.away_team))
+    if resolved_tip is not None:
+        model_result = _market_label(str(resolved_tip.best_market), str(row.home_team), str(row.away_team))
+        model_probability = float(getattr(resolved_tip, "selected_probability", None) or resolved_tip.model_probability)
+        model_selection_source = str(getattr(resolved_tip, "selection_source", "model") or "model")
+    else:
+        model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
+        model_selection_source = "model"
+    model_risk_stage, model_risk_context = _classify_model_risk(row, probs, str(row.home_team), str(row.away_team), tip=resolved_tip)
     model_hit = ""
     if status == "Finalizado":
         final_score = f"{_fmt_score(getattr(row, 'home_goals', None))} x {_fmt_score(getattr(row, 'away_goals', None))}"
@@ -469,6 +548,7 @@ def _get_detail_json(
         "actual_result": actual_result,
         "model_result": model_result,
         "model_probability": round(model_probability * 100, 1),
+        "model_selection_source": model_selection_source,
         "model_risk_stage": model_risk_stage,
         "model_risk_context": model_risk_context,
         "model_hit": model_hit,
@@ -490,13 +570,14 @@ def _get_detail_json(
     }
     if cached_real_stats_payload and cached_real_stats_payload.get("available"):
         data["prefetched_real_stats"] = cached_real_stats_payload
-    if tip:
+    if resolved_tip:
         data["tip"] = {
-            "market": _market_label(tip.best_market, str(row.home_team), str(row.away_team)),
-            "odd": round(tip.best_odd, 2),
-            "prob": round(tip.model_probability * 100, 1),
-            "ev": round(tip.expected_value * 100, 2),
-            "stake": round(tip.suggested_stake, 2),
+            "market": _market_label(resolved_tip.best_market, str(row.home_team), str(row.away_team)),
+            "odd": round(resolved_tip.best_odd, 2),
+            "prob": round((resolved_tip.selected_probability or resolved_tip.model_probability) * 100, 1),
+            "ev": round(resolved_tip.expected_value * 100, 2),
+            "stake": round(resolved_tip.suggested_stake, 2),
+            "selection_source": str(getattr(resolved_tip, "selection_source", "model") or "model"),
         }
     return json.dumps(data, ensure_ascii=False)
 
@@ -523,6 +604,8 @@ def _build_competition_section(
     detail_index = 0
     finished_hits = 0
     finished_evaluated = 0
+    finished_market_hits = 0
+    finished_market_evaluated = 0
 
     def register_detail(detail_json: str) -> str:
         nonlocal detail_index
@@ -609,10 +692,11 @@ def _build_competition_section(
                 bankroll=1000.0,
                 kelly_fractional=0.25,
             )
+            selected_probability = float(tip.selected_probability or tip.model_probability)
             detail_json = _get_detail_json(df, row, probs, tip)
             detail_key = register_detail(detail_json)
             bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
-            risk_stage = _risk_stage_from_metrics(float(tip.model_probability), float(tip.expected_value), float(tip.best_odd), bookmakers)
+            risk_stage = _risk_stage_from_metrics(selected_probability, float(tip.expected_value), float(tip.best_odd), bookmakers)
             if risk_stage != "Fora dos criterios":
                 risk_entries.append(
                     {
@@ -623,19 +707,19 @@ def _build_competition_section(
                         "matchup": f"{row.home_team} x {row.away_team}",
                         "suggestion": _market_label(tip.best_market, str(row.home_team), str(row.away_team)),
                         "odd": float(tip.best_odd),
-                        "probability": float(tip.model_probability),
+                        "probability": selected_probability,
                         "ev": float(tip.expected_value),
                         "bookmakers": bookmakers,
                         "detail_key": detail_key,
                     }
                 )
             rec_rows.append(
-                f"<tr data-filter-scope=\"model\" data-date=\"{escape(filter_date)}\" data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{tip.model_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
+                f"<tr data-filter-scope=\"model\" data-date=\"{escape(filter_date)}\" data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{selected_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
                 f"<td>{tip.best_odd:.2f}</td>"
-                f"<td>{tip.model_probability * 100:.1f}%</td>"
+                f"<td>{selected_probability * 100:.1f}%</td>"
                 f"<td>{tip.expected_value * 100:.2f}%</td>"
                 f"<td>R$ {tip.suggested_stake:.2f}</td>"
                 f"<td><button class='btn-mini' data-detail-key='{escape(detail_key)}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
@@ -662,8 +746,30 @@ def _build_competition_section(
             cached_real_stats_payload = real_stats_cache.get(cache_key)
         try:
             probs = calculate_match_probabilities(df, row.home_team, row.away_team)
-            model_result, best_prob = _best_model_result(probs, str(row.home_team), str(row.away_team))
-            model_probability = f"{best_prob * 100:.1f}%"
+            tip = None
+            if _can_build_tip_from_row(row):
+                tip = suggest_bet_strategy(
+                    probs,
+                    odd_home=float(getattr(row, "odds_home")),
+                    odd_draw=float(getattr(row, "odds_draw")),
+                    odd_away=float(getattr(row, "odds_away")),
+                    bankroll=1000.0,
+                    kelly_fractional=0.25,
+                )
+            if tip is not None:
+                selected_probability = float(tip.selected_probability or tip.model_probability)
+                model_result = _market_label(str(tip.best_market), str(row.home_team), str(row.away_team))
+                model_probability = f"{selected_probability * 100:.1f}%"
+            else:
+                model_result, best_prob = _best_model_result(probs, str(row.home_team), str(row.away_team))
+                model_probability = f"{best_prob * 100:.1f}%"
+            bookmaker_result = _best_bookmaker_result(
+                str(row.home_team),
+                str(row.away_team),
+                getattr(row, "odds_home", None),
+                getattr(row, "odds_draw", None),
+                getattr(row, "odds_away", None),
+            )
             actual_result = _actual_market_label(
                 getattr(row, "home_goals", None),
                 getattr(row, "away_goals", None),
@@ -677,10 +783,15 @@ def _build_competition_section(
                     model_hit_label = "Acertou"
                 else:
                     model_hit_label = "Errou"
+                if bookmaker_result != "-":
+                    finished_market_evaluated += 1
+                    if actual_result == bookmaker_result:
+                        finished_market_hits += 1
             detail_json = _get_detail_json(
                 df,
                 row,
                 probs,
+                tip,
                 cached_real_stats_payload=cached_real_stats_payload,
             )
         except Exception:
@@ -782,6 +893,9 @@ def _build_competition_section(
         "finished_hits": finished_hits,
         "finished_evaluated": finished_evaluated,
         "finished_hit_rate": round((finished_hits / finished_evaluated) * 100) if finished_evaluated else 0,
+        "finished_market_hits": finished_market_hits,
+        "finished_market_evaluated": finished_market_evaluated,
+        "finished_market_hit_rate": round((finished_market_hits / finished_market_evaluated) * 100) if finished_market_evaluated else 0,
         "fixtures": len(fixtures),
         "fixtures_valid": len(fixtures_valid),
         "safe": len(safe_rows),
@@ -972,16 +1086,6 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         global_risk_entries.extend(section_risk_entries)
         global_match_catalog.extend(section_match_catalog)
 
-    total_finished = sum(int(item["finished"]) for item in competition_stats)
-    total_fixtures = sum(int(item["fixtures"]) for item in competition_stats)
-    total_odds = sum(int(item["fixtures_valid"]) for item in competition_stats)
-    total_safe = sum(int(item["safe"]) for item in competition_stats)
-    total_recommendations = sum(int(item["recommendations"]) for item in competition_stats)
-    competition_count = len(competition_stats)
-    odds_coverage = round((total_odds / total_fixtures) * 100) if total_fixtures else 0
-    safe_rate = round((total_safe / total_odds) * 100) if total_odds else 0
-    recommendations_rate = round((total_recommendations / total_odds) * 100) if total_odds else 0
-
     competition_options = "".join(f"<option>{escape(str(item['name']))}</option>" for item in competition_stats)
     competition_filter_cards = "".join(
         (
@@ -993,19 +1097,41 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         )
         for item in competition_stats
     )
-    competition_jump_links = "".join(
-        f"<a href=\"#{escape(str(item['id']))}\" class=\"jump-link\" data-comp-name=\"{escape(str(item['name']))}\">{escape(str(item['name']))}<span>{int(item['safe'])} seguros</span></a>"
-        for item in competition_stats
-    )
-    side_league_cards = "".join(
-        (
-            f"<a href=\"#{escape(str(item['id']))}\" class=\"rail-link\" data-comp-name=\"{escape(str(item['name']))}\">"
-            f"<div class=\"rail-link-head\"><strong>{escape(str(item['name']))}</strong><span>{int(item['fixtures'])} jogos</span></div>"
-            f"<div class=\"rail-link-meta\"><span>{int(item['safe'])} seguros</span><span>{int(item['fixtures_valid'])} odds</span></div>"
-            f"<div class=\"rail-track\"><i style=\"width:{round((int(item['fixtures_valid']) / int(item['fixtures'])) * 100) if int(item['fixtures']) else 0}%\"></i></div>"
-            "</a>"
+    accuracy_rows: list[str] = []
+    for item in competition_stats:
+        model_evaluated = int(item.get("finished_evaluated", 0))
+        model_rate = int(item.get("finished_hit_rate", 0)) if model_evaluated > 0 else 0
+        model_rate = max(0, min(100, model_rate))
+        model_label = f"{model_rate}%" if model_evaluated > 0 else "--"
+        market_evaluated = int(item.get("finished_market_evaluated", 0))
+        market_rate = int(item.get("finished_market_hit_rate", 0)) if market_evaluated > 0 else 0
+        market_rate = max(0, min(100, market_rate))
+        market_label = f"{market_rate}%" if market_evaluated > 0 else "--"
+        accuracy_rows.append(
+            f"<div class=\"accuracy-row\">"
+            f"<span class=\"accuracy-league\">{escape(str(item['name']))}</span>"
+            f"<div class=\"accuracy-duo\">"
+            f"<div class=\"accuracy-metric\">"
+            f"<em>Modelo</em>"
+            f"<div class=\"accuracy-track\"><i style=\"width:{model_rate}%\"></i></div>"
+            f"<strong>{model_label}</strong>"
+            f"</div>"
+            f"<div class=\"accuracy-metric accuracy-metric-market\">"
+            f"<em>Casas</em>"
+            f"<div class=\"accuracy-track\"><i style=\"width:{market_rate}%\"></i></div>"
+            f"<strong>{market_label}</strong>"
+            f"</div>"
+            f"</div>"
+            f"</div>"
         )
-        for item in competition_stats
+    accuracy_overview_rows = "".join(accuracy_rows) or (
+        "<div class=\"accuracy-row\">"
+        "<span class=\"accuracy-league\">Sem competicoes avaliadas</span>"
+        "<div class=\"accuracy-duo\">"
+        "<div class=\"accuracy-metric\"><em>Modelo</em><div class=\"accuracy-track\"><i style=\"width:0%\"></i></div><strong>--</strong></div>"
+        "<div class=\"accuracy-metric accuracy-metric-market\"><em>Casas</em><div class=\"accuracy-track\"><i style=\"width:0%\"></i></div><strong>--</strong></div>"
+        "</div>"
+        "</div>"
     )
     ai_prompt_html = escape(AI_PROMPT_TEMPLATE)
     ai_prompt_js = AI_PROMPT_TEMPLATE
@@ -1145,7 +1271,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       pointer-events: none;
     }}
     .hero-grid {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.9fr); gap: 18px; align-items: end; }}
-    .hero-grid, .metrics, .quick-nav {{ position: relative; z-index: 1; }}
+    .hero-grid, .accuracy-overview {{ position: relative; z-index: 1; }}
     .hero-tag {{ display: inline-flex; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16); color: #dbeafe; }}
     .hero h1 {{ margin: 14px 0 0; max-width: 12ch; font-size: clamp(2.2rem, 4vw, 3.6rem); line-height: .96; letter-spacing: -.04em; font-family: "Space Grotesk", sans-serif; }}
     .hero p {{ margin: 14px 0 0; max-width: 64ch; color: rgba(226,232,240,.88); line-height: 1.68; }}
@@ -1154,19 +1280,64 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     .hero-note span {{ display: block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #bfdbfe; }}
     .hero-note strong {{ display: block; margin-top: 8px; font-size: 1.7rem; line-height: 1.05; font-family: "Space Grotesk", sans-serif; }}
     .hero-note p {{ display: none; }}
-    .metrics {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }}
-    .metric {{ padding: 16px; border-radius: 18px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }}
-    .metric span {{ display: block; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #cfe4ff; }}
-    .metric strong {{ display: block; margin-top: 10px; font-size: 1.65rem; letter-spacing: -.04em; font-family: "Space Grotesk", sans-serif; }}
-    .metric p {{ margin: 8px 0 0; font-size: .86rem; color: rgba(226,232,240,.8); line-height: 1.45; }}
-    .metric-track {{ margin-top: 12px; height: 7px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }}
-    .metric-track i {{ display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #93c5fd, #6ee7b7); }}
-    .quick-nav {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }}
-    .quick-nav::before {{ content: "Areas monitoradas"; width: 100%; margin-bottom: 2px; font-size: .76rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #bfdbfe; }}
-    .jump-link {{ display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.12); color: #fff; text-decoration: none; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }}
-    .jump-link span {{ font-size: .76rem; letter-spacing: .05em; text-transform: uppercase; color: #bfdbfe; }}
-    .jump-link.active {{ background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.32); box-shadow: inset 0 1px 0 rgba(255,255,255,.16), 0 8px 20px rgba(8,22,37,.18); }}
-    .jump-link.active span {{ color: #ffffff; }}
+    .accuracy-overview {{ margin-top: 18px; display: grid; gap: 10px; }}
+    .accuracy-row {{
+      display: grid;
+      grid-template-columns: minmax(150px, 1.3fr) minmax(220px, 4fr);
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.14);
+    }}
+    .accuracy-league {{
+      font-size: .9rem;
+      color: #e2e8f0;
+      font-weight: 700;
+      letter-spacing: .01em;
+    }}
+    .accuracy-duo {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }}
+    .accuracy-metric {{
+      display: grid;
+      grid-template-columns: 52px 1fr 44px;
+      align-items: center;
+      gap: 8px;
+    }}
+    .accuracy-metric em {{
+      font-style: normal;
+      font-size: .74rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #bfdbfe;
+    }}
+    .accuracy-metric strong {{
+      justify-self: end;
+      font-size: .86rem;
+      color: #f8fafc;
+      font-weight: 800;
+    }}
+    .accuracy-track {{
+      height: 9px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.16);
+      overflow: hidden;
+    }}
+    .accuracy-track i {{
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #93c5fd, #6ee7b7);
+      min-width: 4px;
+    }}
+    .accuracy-metric-market .accuracy-track i {{
+      background: linear-gradient(90deg, #fde68a, #f59e0b);
+    }}
     .dashboard-shell {{
       display: grid;
       grid-template-columns: 1fr;
@@ -1595,7 +1766,6 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     .legend {{ margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }}
     .pill {{ display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.82); font-size: .84rem; }}
     .pill::before {{ content: ""; width: 10px; height: 10px; border-radius: 50%; background: currentColor; opacity: .78; }}
-    .metric p {{ display: none; }}
     .competition-card {{
       position: relative;
       padding: 22px;
@@ -2096,12 +2266,15 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       .card-head {{ grid-template-columns: 1fr; }}
       .multi-modal-card .modal-body {{ grid-template-columns: 1fr; }}
     }}
-    @media (max-width: 1100px) {{ .hero-grid, .metrics, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+    @media (max-width: 1100px) {{ .hero-grid, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
     @media (max-width: 760px) {{
       .container {{ padding: 18px 14px 32px; }}
       .topbar {{ align-items: flex-start; }}
       .hero, .card, .competition-card {{ padding: 18px; }}
-      .hero-grid, .metrics, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: 1fr; }}
+      .hero-grid, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: 1fr; }}
+      .accuracy-row {{ grid-template-columns: 1fr; gap: 8px; }}
+      .accuracy-duo {{ grid-template-columns: 1fr; }}
+      .accuracy-metric {{ grid-template-columns: 52px 1fr 44px; }}
       .topbar, .brand-block, .topbar-meta {{ flex-direction: column; align-items: flex-start; }}
       .btn, .btn-link {{ width: 100%; }}
       .floating-actions {{
@@ -2135,32 +2308,26 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> <span id="portalUpdatedAt">{_current_app_timestamp()}</span></div>
         <div class="meta-pill"><strong>Release</strong> {PORTAL_RELEASE_LABEL}</div>
         <div class="meta-pill"><strong>Git</strong> {portal_git_hash}</div>
-        <div class="meta-pill"><strong>{competition_count}</strong> competicoes no radar</div>
-        <div class="meta-pill"><strong>{odds_coverage}%</strong> cobertura de odds</div>
       </div>
     </section>
 
     <section class="hero">
       <div class="hero-grid">
-        <div></div>
+        <div>
+          <span class="hero-tag">Painel de acuracia</span>
+          <h1>% de acerto por liga</h1>
+          <p>Leitura comparativa por competicao com foco no desempenho de acertos do modelo e das casas de apostas.</p>
+        </div>
         <div class="hero-stack">
           <div class="hero-note">
-            <span>Painel inicial</span>
-            <strong>{len(competition_stats)} competicoes</strong>
-            <p>{total_fixtures} jogos futuros observados, {total_odds} linhas com odds completas, {total_safe} selecoes conservadoras e {total_finished} jogos finalizados para comparar a performance do modelo.</p>
+            <span>Resumo da leitura</span>
+            <strong>Modelo x Casas por competicao</strong>
+            <p>O grafico abaixo consolida o percentual de acerto em jogos finalizados avaliados em cada liga.</p>
           </div>
         </div>
       </div>
 
-      <div class="metrics">
-        <div class="metric"><span>Competicoes</span><strong>{competition_count}</strong><p>Torneios monitorados no painel.</p><div class="metric-track"><i style="width:100%"></i></div></div>
-        <div class="metric"><span>Jogos futuros</span><strong>{total_fixtures}</strong><p>Partidas disponiveis para leitura.</p><div class="metric-track"><i style="width:100%"></i></div></div>
-        <div class="metric"><span>Odds completas</span><strong>{total_odds}</strong><p>{odds_coverage}% dos jogos futuros com linha principal completa.</p><div class="metric-track"><i style="width:{odds_coverage}%"></i></div></div>
-        <div class="metric"><span>Top seguros</span><strong>{total_safe}</strong><p>{safe_rate}% das linhas com odds entram no filtro conservador.</p><div class="metric-track"><i style="width:{safe_rate}%"></i></div></div>
-        <div class="metric"><span>Entradas EV</span><strong>{total_recommendations}</strong><p>{recommendations_rate}% das linhas com odds geram sugestao de stake.</p><div class="metric-track"><i style="width:{recommendations_rate}%"></i></div></div>
-      </div>
-
-      <div class="quick-nav">{competition_jump_links}</div>
+      <div class="accuracy-overview">{accuracy_overview_rows}</div>
     </section>
 
     <div class="dashboard-shell">
@@ -2352,7 +2519,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
               <strong id="realPossession">-</strong>
             </div>
           </div>
-          <div id="realStatsStatus" class="real-stats-status">Abra um jogo finalizado para consultar cartoes e escanteios reais.</div>
+          <div id="realStatsStatus" class="real-stats-status">Abra um jogo finalizado para consultar cartoes, escanteios, faltas e posse reais.</div>
           <a id="realStatsSourceLink" class="btn-link real-stats-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Ver fonte externa</a>
         </div>
 
@@ -2554,7 +2721,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         <ul id="refreshStageList" class="refresh-stage-list">
           <li class="is-pending" data-stage="cache"><i></i><span>Limpando cache local</span></li>
           <li class="is-pending" data-stage="fetch_matches"><i></i><span>Buscando resultados e odds</span></li>
-          <li class="is-pending" data-stage="prefetch_real_stats"><i></i><span>Atualizando cartoes e escanteios</span></li>
+          <li class="is-pending" data-stage="prefetch_real_stats"><i></i><span>Atualizando estatisticas reais</span></li>
           <li class="is-pending" data-stage="prepare_frames"><i></i><span>Consolidando dados por competicao</span></li>
           <li class="is-pending" data-stage="build_html"><i></i><span>Regenerando HTML do painel</span></li>
           <li class="is-pending" data-stage="write_file"><i></i><span>Salvando arquivo atualizado</span></li>
@@ -2577,7 +2744,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     const refreshAutomationSteps = [
       'Buscando resultados e odds mais recentes...',
       'Consolidando partidas e estatisticas por competicao...',
-      'Atualizando cache de cartoes e escanteios...',
+      'Atualizando cache de cartoes, escanteios, faltas e posse...',
       'Regenerando o HTML do painel...',
       'Preparando recarga da tela com os novos dados...'
     ];
@@ -2966,7 +3133,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       setRealStatsCardValue('realPossession', '-');
       const status = document.getElementById('realStatsStatus');
       if (status) {{
-        status.textContent = message || 'Abra um jogo finalizado para consultar cartoes e escanteios reais.';
+        status.textContent = message || 'Abra um jogo finalizado para consultar cartoes, escanteios, faltas e posse reais.';
       }}
       const sourceLink = document.getElementById('realStatsSourceLink');
       if (sourceLink) {{
@@ -3123,7 +3290,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (prefetchedRealStats) {{
         applyRealStatsPayload(prefetchedRealStats, 'Estatisticas reais carregadas do historico salvo no portal.');
       }} else if (data.status === 'Finalizado' && status) {{
-        status.textContent = 'Buscando cartoes e escanteios reais do jogo...';
+        status.textContent = 'Buscando cartoes, escanteios, faltas e posse reais do jogo...';
       }} else {{
         resetRealStatsBlock('Estatisticas reais do jogo ficam disponiveis apenas apos o encerramento da partida.');
       }}
@@ -3167,7 +3334,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       }} catch (error) {{
         if (requestId !== activeMatchStatsRequest) return;
         if (!prefetchedRealStats) {{
-          resetRealStatsBlock('Nao foi possivel carregar cartoes e escanteios reais agora.');
+          resetRealStatsBlock('Nao foi possivel carregar estatisticas reais do jogo agora.');
         }} else if (status) {{
           status.textContent = 'Estatisticas reais carregadas do historico salvo no portal. Nao foi possivel atualizar a consulta externa agora.';
         }}
@@ -3230,7 +3397,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       positionVisibleModal('matchModal');
       resetRealStatsBlock(
         data.status === 'Finalizado'
-          ? 'Buscando cartoes e escanteios reais do jogo...'
+          ? 'Buscando cartoes, escanteios, faltas e posse reais do jogo...'
           : 'Estatisticas reais do jogo ficam disponiveis apenas apos o encerramento da partida.'
       );
       resetProjectionBlock(

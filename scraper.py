@@ -2,7 +2,10 @@
 
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time
+from functools import lru_cache
+import json
 import re
+import time
 import unicodedata
 from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
@@ -19,6 +22,7 @@ USER_AGENT = (
 
 SOURCE_TIMEZONE = ZoneInfo("Europe/Prague")
 TARGET_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+RELATIVE_DAY_LABELS = {"hoje", "ontem", "amanha"}
 
 COMPETITIONS = {
     "Brasileirao": "https://www.betexplorer.com/br/football/brazil/serie-a-betano/",
@@ -48,10 +52,29 @@ class MatchRow:
     match_url: str | None
 
 
+def _fetch_html(url: str, *, timeout: int = 30, retries: int = 2) -> str:
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException:
+            if attempt >= retries:
+                return ""
+            time.sleep(0.35 * (attempt + 1))
+    return ""
+
+
+@lru_cache(maxsize=1024)
+def _fetch_match_page_html(url: str) -> str:
+    return _fetch_html(url, timeout=30, retries=2)
+
+
 def _fetch_soup(url: str) -> BeautifulSoup:
-    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
-    response.raise_for_status()
-    return BeautifulSoup(response.text, "html.parser")
+    html = _fetch_html(url, timeout=30, retries=2)
+    if not html:
+        raise requests.HTTPError(f"Nao foi possivel carregar URL: {url}")
+    return BeautifulSoup(html, "html.parser")
 
 
 def _extract_odd(td) -> float | None:
@@ -163,9 +186,10 @@ def _convert_source_datetime_to_target_parts(text: str) -> tuple[str, str | None
     if relative_no_time:
         label = relative_no_time.group(1)
         offset_days = {"ontem": -1, "hoje": 0, "amanha": 1}[label]
-        target_now = datetime.now(TARGET_TIMEZONE)
-        target_date = target_now.date().fromordinal(target_now.date().toordinal() + offset_days)
-        target_dt = datetime.combine(target_date, dt_time(hour=12, minute=0), tzinfo=TARGET_TIMEZONE)
+        source_now = datetime.now(SOURCE_TIMEZONE)
+        source_date = source_now.date().fromordinal(source_now.date().toordinal() + offset_days)
+        source_dt = datetime.combine(source_date, dt_time(hour=12, minute=0), tzinfo=SOURCE_TIMEZONE)
+        target_dt = source_dt.astimezone(TARGET_TIMEZONE)
         return _format_target_datetime(target_dt, include_time=False), target_dt.isoformat()
 
     full_match = re.fullmatch(r"(\d{2})\.(\d{2})\.\s+(\d{2}):(\d{2})", clean)
@@ -197,6 +221,78 @@ def _convert_source_datetime_to_target_parts(text: str) -> tuple[str, str | None
 def _convert_source_datetime_to_target(text: str) -> str:
     display_text, _ = _convert_source_datetime_to_target_parts(text)
     return display_text
+
+
+def _is_relative_day_without_time(text: str) -> bool:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean:
+        return False
+    ascii_clean = _strip_accents(clean).casefold()
+    return ascii_clean in RELATIVE_DAY_LABELS
+
+
+def _extract_match_start_date_iso(match_url: str) -> str | None:
+    html = _fetch_match_page_html(match_url)
+    if not html:
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+
+    scripts = soup.find_all("script", type="application/ld+json")
+    for script in scripts:
+        payload = script.string or script.get_text(" ", strip=True)
+        if not payload:
+            continue
+        try:
+            parsed = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+
+        queue: list[object] = [parsed]
+        while queue:
+            current = queue.pop(0)
+            if isinstance(current, list):
+                queue.extend(current)
+                continue
+            if not isinstance(current, dict):
+                continue
+
+            type_value = str(current.get("@type", "")).strip().casefold()
+            start_date = current.get("startDate")
+            if "sportsevent" in type_value and isinstance(start_date, str) and start_date.strip():
+                return start_date.strip()
+
+            for value in current.values():
+                if isinstance(value, (dict, list)):
+                    queue.append(value)
+
+    # Fallback targeted to structured data fields to avoid capturing unrelated timestamps.
+    start_date_regex = re.search(
+        r'"startDate"\s*:\s*"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?[+-]\d{2}:\d{2})"',
+        html,
+    )
+    if start_date_regex:
+        return start_date_regex.group(1)
+
+    match = re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?[+-]\d{2}:\d{2}", html)
+    if match:
+        return match.group(0)
+    return None
+
+
+def _resolve_finished_relative_datetime(raw_datetime_text: str, match_url: str | None) -> tuple[str, str | None] | None:
+    if not _is_relative_day_without_time(raw_datetime_text) or not match_url:
+        return None
+
+    start_date_iso = _extract_match_start_date_iso(match_url)
+    if not start_date_iso:
+        return None
+
+    parsed_dt = pd.to_datetime(start_date_iso, errors="coerce", utc=True)
+    if pd.isna(parsed_dt):
+        return None
+
+    target_dt = parsed_dt.tz_convert(TARGET_TIMEZONE)
+    return target_dt.strftime("%d/%m/%Y"), target_dt.isoformat()
 
 
 def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
@@ -231,8 +327,19 @@ def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
         odd_d = _extract_odd(odds_cells[1]) if len(odds_cells) > 1 else None
         odd_a = _extract_odd(odds_cells[2]) if len(odds_cells) > 2 else None
 
-        date_text, event_timestamp = _convert_source_datetime_to_target_parts(cells[-1].get_text(" ", strip=True))
         href = match_anchor.get("href")
+        match_url = urljoin("https://www.betexplorer.com", href) if href else None
+
+        raw_datetime_text = cells[-1].get_text(" ", strip=True)
+        date_text, event_timestamp = _convert_source_datetime_to_target_parts(raw_datetime_text)
+        resolved_parts = _resolve_finished_relative_datetime(raw_datetime_text, match_url)
+        if resolved_parts is not None:
+            date_text, event_timestamp = resolved_parts
+        elif _is_relative_day_without_time(raw_datetime_text):
+            # If we could not resolve the exact kickoff from the match page, avoid persisting
+            # a synthetic noon timestamp that can shift the day in date filters.
+            date_text = re.sub(r"\s+", " ", str(raw_datetime_text or "")).strip() or date_text
+            event_timestamp = None
 
         rows.append(
             MatchRow(
@@ -248,7 +355,7 @@ def _parse_results(competition: str, base_url: str) -> list[MatchRow]:
                 odds_draw=odd_d,
                 odds_away=odd_a,
                 bookmakers=None,
-                match_url=urljoin("https://www.betexplorer.com", href) if href else None,
+                match_url=match_url,
             )
         )
 
