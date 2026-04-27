@@ -1080,7 +1080,7 @@ def render_public_model_criteria_help() -> None:
         st.markdown(
             f"""
 - Poisson: `max_goals={int(poisson_cfg.get('max_goals', 5))}` | `home_default={float(poisson_cfg.get('league_home_default', 1.35)):.2f}` | `away_default={float(poisson_cfg.get('league_away_default', 1.10)):.2f}`.
-- Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}` | `min_history={int(calibration_cfg.get('min_history_matches', 40))}` | `min_bucket={int(calibration_cfg.get('min_bucket_matches', 8))}`.
+- Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}` | `min_history={int(calibration_cfg.get('min_history_matches', 80))}` | `min_bucket={int(calibration_cfg.get('min_bucket_matches', 12))}`.
 - Stake: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`.
 - Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}` | `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}` | `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
 """
@@ -2375,9 +2375,32 @@ div[data-testid="stDataFrame"] * {{
 .stButton > button,
 .stLinkButton > a {{
   color: #112031 !important;
+  border-radius: 12px !important;
+  border: 1px solid rgba(148,163,184,.34) !important;
+  background: linear-gradient(180deg, #ffffff, #f1f5f9) !important;
+  font-weight: 700 !important;
+  letter-spacing: -.01em;
+  min-height: 32px;
+  box-shadow: 0 10px 20px rgba(15,23,42,.06);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, filter .16s ease;
+}}
+.stButton > button:hover,
+.stLinkButton > a:hover {{
+  transform: translateY(-1px);
+  border-color: rgba(59,130,246,.36) !important;
+  box-shadow: 0 14px 28px rgba(15,23,42,.10);
+  filter: saturate(1.02);
 }}
 .stButton > button[kind="primary"] {{
+  background: linear-gradient(135deg, #1d4ed8, #0f766e) !important;
+  border: 1px solid rgba(15,118,110,.35) !important;
   color: #ffffff !important;
+  box-shadow: 0 14px 30px rgba(29,78,216,.24);
+}}
+.stButton > button:disabled {{
+  opacity: .62;
+  transform: none !important;
+  box-shadow: none;
 }}
 [data-baseweb="select"] > div,
 .stNumberInput input,
@@ -2513,6 +2536,107 @@ div[data-testid="stDataFrame"] * {{
   color: var(--muted);
   font-size: .86rem;
   margin-top: .2rem;
+}}
+.top-index-toolbar {{
+  margin: 2px 0 6px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background:
+    radial-gradient(circle at top right, rgba(191,219,254,.55), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.90));
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 22px rgba(15,23,42,.07);
+}}
+.top-index-toolbar .eyebrow {{
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: .66rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 800;
+  color: #1e3a8a;
+  background: rgba(219,234,254,.8);
+  border: 1px solid rgba(147,197,253,.45);
+}}
+.top-index-toolbar h3 {{
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: -.02em;
+  color: var(--text);
+  display: none;
+}}
+.top-index-toolbar p {{
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.25;
+  font-size: .74rem;
+}}
+.quick-action-chip {{
+  margin: 0 0 4px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.90));
+}}
+.quick-action-chip span {{
+  display: inline-flex;
+  align-items: center;
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #1e40af;
+  font-weight: 800;
+}}
+.quick-action-chip strong {{
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: .82rem;
+  letter-spacing: -.01em;
+}}
+.action-card-head {{
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.90));
+}}
+.action-card-head span {{
+  display: inline-flex;
+  align-items: center;
+  font-size: .74rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: #1e40af;
+  font-weight: 800;
+}}
+.action-card-head strong {{
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 1rem;
+  letter-spacing: -.01em;
+}}
+.action-card-head p {{
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: .86rem;
+  line-height: 1.45;
+}}
+.action-card-footnote {{
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: .84rem;
+  line-height: 1.45;
+}}
+.home-top-actions {{
+  margin: 0 0 6px;
 }}
 .page-shell {{
   display: grid;
@@ -2814,11 +2938,11 @@ def command_center():
         if new_risk_profile == "Personalizado":
             c1, c2 = st.columns(2)
             with c1:
-                st.slider("Prob. Mínima", 0.40, 0.80, 0.55, 0.01, key="slider_prob")
+                st.slider("Prob. Mínima", 0.40, 0.80, 0.60, 0.01, key="slider_prob")
                 st.caption("EV permanece apenas como métrica informativa (fora do critério de seleção).")
             with c2:
-                st.slider("Odd Máxima", 1.20, 4.00, 2.20, 0.05, key="slider_odd")
-                st.slider("Mínimo de Casas", 1, 20, 8, 1, key="slider_books")
+                st.slider("Odd Máxima", 1.20, 4.00, 2.30, 0.05, key="slider_odd")
+                st.slider("Mínimo de Casas", 1, 20, 10, 1, key="slider_books")
         
         if st.button("💾 Aplicar Novas Configurações", type="primary", use_container_width=True):
             st.session_state["competition_selector"] = new_competition
@@ -2912,8 +3036,19 @@ with st.sidebar:
     st.caption("Use este menu lateral para navegar entre os modulos taticos, analiticos e de IA do portal.")
     st.markdown("---")
     st.markdown("### Configuracoes")
-    competition = st.selectbox("Competicao", options=list(COMPETITIONS.keys()))
-    team_filter = st.text_input("Filtrar por time", placeholder="Ex: Flamengo")
+    competition_options = list(COMPETITIONS.keys())
+    if st.session_state.get("competition_selector") not in competition_options:
+        st.session_state["competition_selector"] = competition_options[0]
+    competition = st.selectbox(
+        "Competicao",
+        options=competition_options,
+        index=competition_options.index(st.session_state.get("competition_selector", competition_options[0])),
+    )
+    team_filter = st.text_input(
+        "Filtrar por time",
+        value=st.session_state.get("team_filter_input", ""),
+        placeholder="Ex: Flamengo",
+    )
     date_filter_enabled = st.checkbox("Filtrar jogos por data", value=False, key="match_date_filter_enabled")
     date_filter_start: date | None = None
     date_filter_end: date | None = None
@@ -2928,29 +3063,34 @@ with st.sidebar:
     risk_profile = st.selectbox(
         "Perfil de risco",
         options=["Baixo risco", "Medio risco", "Alto risco", "Personalizado"],
-        index=0,
+        index=["Baixo risco", "Medio risco", "Alto risco", "Personalizado"].index(
+            st.session_state.get("risk_profile_input", "Baixo risco")
+        ),
     )
+    st.session_state["competition_selector"] = competition
+    st.session_state["team_filter_input"] = team_filter
+    st.session_state["risk_profile_input"] = risk_profile
 
     profile_presets = {
-        "Baixo risco": {"min_prob": 0.58, "max_odd": 2.30},
-        "Medio risco": {"min_prob": 0.50, "max_odd": 2.80},
-        "Alto risco": {"min_prob": 0.40, "max_odd": 4.00},
+        "Baixo risco": {"min_prob": 0.64, "max_odd": 2.30},
+        "Medio risco": {"min_prob": 0.57, "max_odd": 2.60},
+        "Alto risco": {"min_prob": 0.48, "max_odd": 3.60},
     }
 
     competition_min_books = {
-        "Brasileirao": {"Baixo risco": 2, "Medio risco": 2, "Alto risco": 1},
-        "Copa do Brasil": {"Baixo risco": 4, "Medio risco": 3, "Alto risco": 2},
-        "Premier League": {"Baixo risco": 5, "Medio risco": 4, "Alto risco": 3},
-        "La Liga": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
-        "Copa Sul-Americana": {"Baixo risco": 6, "Medio risco": 5, "Alto risco": 3},
-        "Libertadores da America": {"Baixo risco": 6, "Medio risco": 5, "Alto risco": 3},
-        "Copa do Mundo": {"Baixo risco": 10, "Medio risco": 8, "Alto risco": 5},
+        "Brasileirao": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
+        "Copa do Brasil": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
+        "Premier League": {"Baixo risco": 10, "Medio risco": 8, "Alto risco": 6},
+        "La Liga": {"Baixo risco": 10, "Medio risco": 8, "Alto risco": 6},
+        "Copa Sul-Americana": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
+        "Libertadores da America": {"Baixo risco": 8, "Medio risco": 6, "Alto risco": 4},
+        "Copa do Mundo": {"Baixo risco": 12, "Medio risco": 10, "Alto risco": 8},
     }
 
     if risk_profile == "Personalizado":
-        min_prob = st.slider("Prob. minima do modelo", min_value=0.40, max_value=0.80, value=0.55, step=0.01)
-        max_odd = st.slider("Odd maxima", min_value=1.20, max_value=4.00, value=2.20, step=0.05)
-        min_books = st.slider("Minimo de casas (B's)", min_value=1, max_value=20, value=8, step=1)
+        min_prob = st.slider("Prob. minima do modelo", min_value=0.40, max_value=0.80, value=0.60, step=0.01)
+        max_odd = st.slider("Odd maxima", min_value=1.20, max_value=4.00, value=2.30, step=0.05)
+        min_books = st.slider("Minimo de casas (B's)", min_value=1, max_value=20, value=10, step=1)
         st.caption("EV segue visivel no portal como metrica informativa, mas nao entra no criterio de selecao do modelo.")
     else:
         preset = profile_presets[risk_profile]
@@ -2979,8 +3119,8 @@ with st.sidebar:
             f"""
 - Poisson: `max_goals={int(poisson_cfg.get('max_goals', 5))}`, `league_home_default={float(poisson_cfg.get('league_home_default', 1.35)):.2f}`, `league_away_default={float(poisson_cfg.get('league_away_default', 1.10)):.2f}`.
 - Minimos de gols esperados: `home={float(poisson_cfg.get('min_expected_home', 0.15)):.2f}`, `away={float(poisson_cfg.get('min_expected_away', 0.10)):.2f}`.
-- Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}`, `min_history={int(calibration_cfg.get('min_history_matches', 40))}`, `min_bucket={int(calibration_cfg.get('min_bucket_matches', 8))}`.
-- Ajuste da calibracao: `baseline_weight={float(calibration_cfg.get('baseline_weight', 0.20)):.2f}`, `max_adjustment_weight={float(calibration_cfg.get('max_adjustment_weight', 0.70)):.2f}`, `weight_sample_size={float(calibration_cfg.get('weight_sample_size', 30.0)):.1f}`.
+- Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}`, `min_history={int(calibration_cfg.get('min_history_matches', 80))}`, `min_bucket={int(calibration_cfg.get('min_bucket_matches', 12))}`.
+- Ajuste da calibracao: `baseline_weight={float(calibration_cfg.get('baseline_weight', 0.30)):.2f}`, `max_adjustment_weight={float(calibration_cfg.get('max_adjustment_weight', 0.55)):.2f}`, `weight_sample_size={float(calibration_cfg.get('weight_sample_size', 45.0)):.1f}`.
 - Gestao de stake: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`.
 - Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}`, `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`, `bookmakers_cap={int(safe_cfg.get('bookmakers_cap', 20))}`, `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
 """
@@ -3068,7 +3208,7 @@ with st.sidebar:
                 "Min. jogos historicos p/ calibrar",
                 min_value=10,
                 max_value=2000,
-                value=int(calibration_cfg.get("min_history_matches", 40)),
+                value=int(calibration_cfg.get("min_history_matches", 80)),
                 step=1,
                 key="model_cfg_min_history",
             )
@@ -3076,7 +3216,7 @@ with st.sidebar:
                 "Peso baseline da calibracao",
                 min_value=0.00,
                 max_value=1.00,
-                value=float(calibration_cfg.get("baseline_weight", 0.20)),
+                value=float(calibration_cfg.get("baseline_weight", 0.30)),
                 step=0.01,
                 key="model_cfg_baseline_weight",
             )
@@ -3085,7 +3225,7 @@ with st.sidebar:
                 "Min. amostras por bucket",
                 min_value=1,
                 max_value=200,
-                value=int(calibration_cfg.get("min_bucket_matches", 8)),
+                value=int(calibration_cfg.get("min_bucket_matches", 12)),
                 step=1,
                 key="model_cfg_min_bucket",
             )
@@ -3093,7 +3233,7 @@ with st.sidebar:
                 "Peso maximo do ajuste",
                 min_value=0.00,
                 max_value=1.00,
-                value=float(calibration_cfg.get("max_adjustment_weight", 0.70)),
+                value=float(calibration_cfg.get("max_adjustment_weight", 0.55)),
                 step=0.01,
                 key="model_cfg_max_adjust_weight",
             )
@@ -3101,7 +3241,7 @@ with st.sidebar:
             "Amostras para peso maximo do ajuste",
             min_value=1.0,
             max_value=500.0,
-            value=float(calibration_cfg.get("weight_sample_size", 30.0)),
+            value=float(calibration_cfg.get("weight_sample_size", 45.0)),
             step=1.0,
             key="model_cfg_weight_sample_size",
         )
@@ -3292,15 +3432,23 @@ if portal_refresh_feedback:
     else:
         st.success(portal_refresh_feedback)
 
-refresh_col, refresh_info_col = st.columns([1.2, 4.8])
+refresh_col, quick_comp_col = st.columns([0.9, 1.1], gap="small")
 with refresh_col:
     render_portal_refresh_action_button(
         key="main_refresh_now",
-        label="Atualizar agora",
+        label="Atualizar",
         use_container_width=True,
     )
-with refresh_info_col:
-    st.caption("Atualiza scraping, recalcula o portal e recarrega os dados da sessao.")
+if st.session_state.get("main_competition_selector") != competition:
+    st.session_state["main_competition_selector"] = competition
+with quick_comp_col:
+    competition = st.selectbox(
+        "Focos por competicao",
+        options=competition_options,
+        key="main_competition_selector",
+        label_visibility="collapsed",
+    )
+st.session_state["competition_selector"] = competition
 
 try:
     competition, df, competition_load_warning = get_data_with_fallback(competition)
@@ -3395,7 +3543,7 @@ if needs_backtest_data:
         matches_df=df,
         bankroll=1000.0,
         kelly_fractional=runtime_kelly,
-        min_history_matches=30,
+        min_history_matches=40,
         max_evaluated_matches=120,
         model_config=runtime_model_config,
     )
@@ -3566,12 +3714,25 @@ section[data-testid="stSidebar"] {
     if "show_home_header" not in st.session_state:
         st.session_state["show_home_header"] = False
 
-    # --- CONTROLE DE VISIBILIDADE DO PAINEL ---
-    c_toggle1, c_toggle2, c_toggle3 = st.columns([1, 2, 1])
-    with c_toggle2:
-        if st.button("📂 Exibir Painel de Navegação" if not st.session_state["show_home_header"] else "📁 Ocultar Painel de Navegação", use_container_width=True):
+    st.markdown('<div class="home-top-actions">', unsafe_allow_html=True)
+    home_action_col1, home_action_col2 = st.columns([1, 1], gap="small")
+    with home_action_col1:
+        if st.button(
+            "Exibir painel" if not st.session_state["show_home_header"] else "Ocultar painel",
+            use_container_width=True,
+            key="home_toggle_navigation_panel",
+        ):
             st.session_state["show_home_header"] = not st.session_state["show_home_header"]
             st.rerun()
+    with home_action_col2:
+        if st.button(
+            "Central de comandos",
+            use_container_width=True,
+            type="primary",
+            key="home_open_command_center",
+        ):
+            command_center()
+    st.markdown("</div>", unsafe_allow_html=True)
 
     if st.session_state["show_home_header"]:
         # --- HEADER / HERO DA HOME ---
@@ -3616,13 +3777,6 @@ section[data-testid="stSidebar"] {
                     queue_page_navigation(item['page'])
 
         st.markdown("---")
-
-    # --- BOTÃO CENTRAL DE COMANDOS ---
-    c_btn1, c_btn2, c_btn3 = st.columns([1, 2, 1])
-    with c_btn2:
-        if st.button("🛠️ Abrir Central de Comandos e Calibragem", use_container_width=True, type="primary"):
-            command_center()
-        st.caption("<center>Ajuste o modelo, veja notas explicativas e o histórico de alterações aqui.</center>", unsafe_allow_html=True)
 
     render_embedded_index_portal()
     st.markdown("</div>", unsafe_allow_html=True)
@@ -3681,7 +3835,7 @@ elif page == "Configuracoes":
         items=[
             f"Filtro operacional: Perfil {risk_profile} | Prob >= {min_prob:.2f} | Odd <= {max_odd:.2f} | Casas >= {int(min_books)}.",
             f"Poisson: max_goals={int(config_poisson.get('max_goals', 5))}, home_default={float(config_poisson.get('league_home_default', 1.35)):.2f}, away_default={float(config_poisson.get('league_away_default', 1.10)):.2f}.",
-            f"Calibracao: enabled={bool(config_calib.get('enabled', True))}, min_history={int(config_calib.get('min_history_matches', 40))}, min_bucket={int(config_calib.get('min_bucket_matches', 8))}.",
+            f"Calibracao: enabled={bool(config_calib.get('enabled', True))}, min_history={int(config_calib.get('min_history_matches', 80))}, min_bucket={int(config_calib.get('min_bucket_matches', 12))}.",
             f"Stake (Kelly): {float(config_betting.get('kelly_fractional', 0.25)):.2f} | Safe score prob={float(config_safe.get('prob_weight', 0.55)):.2f}, books={float(config_safe.get('bookmakers_weight', 0.20)):.2f}, odd={float(config_safe.get('odd_weight', 0.05)):.2f}.",
         ],
         tone="neutral",

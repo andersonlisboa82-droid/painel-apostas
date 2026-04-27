@@ -484,6 +484,435 @@ def _can_build_tip_from_row(row) -> bool:
         return False
 
 
+PRECISION_BASELINE_THRESHOLDS = {
+    "oddMin": 1.20,
+    "oddMax": 1.95,
+    "probMin": 0.62,
+    "evMin": 0.03,
+    "booksMin": 10,
+}
+
+PRECISION_THRESHOLD_GRID = {
+    "oddMin": [1.10, 1.20, 1.30],
+    "oddMax": [1.75, 1.95, 2.20, 2.50],
+    "probMin": [0.55, 0.58, 0.60, 0.62, 0.65, 0.68, 0.70],
+    "evMin": [-0.08, -0.05, -0.03, -0.01, 0.00, 0.01, 0.02, 0.03],
+    "booksMin": [0, 2, 4, 6, 8, 10],
+}
+
+PRECISION_METRIC_HIT_FIELD = {
+    "model": "model_hit",
+    "suggestion": "suggestion_hit",
+    "house": "house_hit",
+}
+
+RELIABILITY_METRIC_PROB_FIELD = {
+    "model": "model_prob",
+    "suggestion": "suggestion_prob",
+    "house": "house_prob",
+}
+
+RELIABILITY_BUCKET_SIZE = 0.05
+RELIABILITY_BUCKET_MIN_SAMPLES = 4
+RELIABILITY_PRIOR_WEIGHT = 6.0
+
+
+def _safe_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if pd.isna(number):
+        return None
+    return float(number)
+
+
+def _safe_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        number = int(float(value))
+    except Exception:
+        return None
+    return number
+
+
+def _hit_label_to_bool(value: object) -> bool | None:
+    text = str(value or "").strip().lower()
+    if text == "acertou":
+        return True
+    if text == "errou":
+        return False
+    return None
+
+
+def _market_key_from_result_label(result_label: object, detail_payload: dict[str, object]) -> str | None:
+    label = str(result_label or "").strip().lower()
+    if not label:
+        return None
+    if label == "empate":
+        return "draw"
+    home_team = str(detail_payload.get("home", "")).strip().lower()
+    away_team = str(detail_payload.get("away", "")).strip().lower()
+    if home_team and label == f"vitoria {home_team}":
+        return "home"
+    if away_team and label == f"vitoria {away_team}":
+        return "away"
+    if "vitoria" in label and home_team and home_team in label:
+        return "home"
+    if "vitoria" in label and away_team and away_team in label:
+        return "away"
+    return None
+
+
+def _extract_precision_history_from_details(detail_registry: dict[str, object]) -> list[dict[str, object]]:
+    history: list[dict[str, object]] = []
+    for raw_detail in detail_registry.values():
+        if not isinstance(raw_detail, dict):
+            continue
+        if str(raw_detail.get("status", "")).strip() != "Finalizado":
+            continue
+        tip_payload = raw_detail.get("tip")
+        odd: float | None = None
+        prob: float | None = None
+        expected_value: float | None = None
+
+        if isinstance(tip_payload, dict):
+            odd = _safe_float(tip_payload.get("odd"))
+            prob_raw = _safe_float(tip_payload.get("prob"))
+            ev_raw = _safe_float(tip_payload.get("ev"))
+            if prob_raw is not None:
+                prob = (prob_raw / 100.0) if prob_raw > 1.0 else prob_raw
+            if ev_raw is not None:
+                expected_value = (ev_raw / 100.0) if abs(ev_raw) > 0.5 else ev_raw
+
+        if odd is None or prob is None or expected_value is None:
+            market_key = _market_key_from_result_label(
+                raw_detail.get("suggestion_result") or raw_detail.get("model_result"),
+                raw_detail,
+            )
+            probs_payload = raw_detail.get("probs")
+            odds_payload = raw_detail.get("odds")
+            if isinstance(probs_payload, dict) and isinstance(odds_payload, dict) and market_key:
+                odd = _safe_float(odds_payload.get(market_key))
+                prob_raw = _safe_float(probs_payload.get(market_key))
+                if prob_raw is not None:
+                    prob = (prob_raw / 100.0) if prob_raw > 1.0 else prob_raw
+                if odd is not None and prob is not None:
+                    expected_value = (prob * odd) - 1.0
+
+        books = _safe_int(raw_detail.get("bookmakers"))
+        if odd is None or prob is None or expected_value is None:
+            continue
+        if books is None:
+            books = 0
+        if odd <= 1.0 or books < 0:
+            continue
+
+        competition_name = str(raw_detail.get("competition", "")).strip() or "Sem competicao"
+        history.append(
+            {
+                "competition": competition_name,
+                "odd": odd,
+                "prob": prob,
+                "ev": expected_value,
+                "books": books,
+                "model_hit": _hit_label_to_bool(raw_detail.get("model_hit")),
+                "suggestion_hit": _hit_label_to_bool(raw_detail.get("suggestion_hit")),
+                "house_hit": _hit_label_to_bool(raw_detail.get("house_hit")),
+            }
+        )
+    return history
+
+
+def _entry_passes_precision_thresholds(entry: dict[str, object], thresholds: dict[str, float | int]) -> bool:
+    odd = _safe_float(entry.get("odd"))
+    prob = _safe_float(entry.get("prob"))
+    expected_value = _safe_float(entry.get("ev"))
+    books = _safe_int(entry.get("books"))
+    if odd is None or prob is None or expected_value is None or books is None:
+        return False
+    if odd < float(thresholds["oddMin"]):
+        return False
+    if odd > float(thresholds["oddMax"]):
+        return False
+    if prob < float(thresholds["probMin"]):
+        return False
+    if expected_value < float(thresholds["evMin"]):
+        return False
+    if books < int(thresholds["booksMin"]):
+        return False
+    return True
+
+
+def _evaluate_precision_thresholds(
+    entries: list[dict[str, object]],
+    thresholds: dict[str, float | int],
+    metric_key: str,
+) -> dict[str, float | int]:
+    metric_field = PRECISION_METRIC_HIT_FIELD.get(metric_key, "model_hit")
+    eligible_entries = [entry for entry in entries if entry.get(metric_field) is not None]
+    selected_entries = [entry for entry in eligible_entries if _entry_passes_precision_thresholds(entry, thresholds)]
+    hits = sum(1 for entry in selected_entries if entry.get(metric_field) is True)
+    selected_games = len(selected_entries)
+    base_games = len(eligible_entries)
+    accuracy_ratio = (hits / selected_games) if selected_games else 0.0
+    coverage_ratio = (selected_games / base_games) if base_games else 0.0
+    return {
+        "hits": hits,
+        "selected_games": selected_games,
+        "base_games": base_games,
+        "accuracy_ratio": accuracy_ratio,
+        "coverage_ratio": coverage_ratio,
+    }
+
+
+def _optimize_precision_thresholds(
+    entries: list[dict[str, object]],
+    metric_key: str,
+) -> dict[str, object] | None:
+    metric_field = PRECISION_METRIC_HIT_FIELD.get(metric_key, "model_hit")
+    eligible_entries = [entry for entry in entries if entry.get(metric_field) is not None]
+    if not eligible_entries:
+        return None
+
+    candidate_results: list[tuple[dict[str, float | int], dict[str, float | int]]] = []
+    for odd_min in PRECISION_THRESHOLD_GRID["oddMin"]:
+        for odd_max in PRECISION_THRESHOLD_GRID["oddMax"]:
+            if odd_max < odd_min:
+                continue
+            for prob_min in PRECISION_THRESHOLD_GRID["probMin"]:
+                for ev_min in PRECISION_THRESHOLD_GRID["evMin"]:
+                    for books_min in PRECISION_THRESHOLD_GRID["booksMin"]:
+                        thresholds = {
+                            "oddMin": float(odd_min),
+                            "oddMax": float(odd_max),
+                            "probMin": float(prob_min),
+                            "evMin": float(ev_min),
+                            "booksMin": int(books_min),
+                        }
+                        stats = _evaluate_precision_thresholds(eligible_entries, thresholds, metric_key)
+                        if int(stats["selected_games"]) <= 0:
+                            continue
+                        candidate_results.append((thresholds, stats))
+
+    if not candidate_results:
+        return None
+
+    base_games = len(eligible_entries)
+    min_required = max(4, min(18, int(round(base_games * 0.25))))
+    target_games = max(min_required, int(round(base_games * 0.35)))
+    strict_candidates = [item for item in candidate_results if int(item[1]["selected_games"]) >= min_required]
+    chosen_pool = strict_candidates if strict_candidates else candidate_results
+
+    def score(item: tuple[dict[str, float | int], dict[str, float | int]]) -> tuple[float, float, int, float, int, float, float]:
+        thresholds, stats = item
+        selected_games = int(stats["selected_games"])
+        coverage_target_ratio = min(selected_games, target_games) / target_games if target_games > 0 else 0.0
+        return (
+            float(stats["accuracy_ratio"]),
+            coverage_target_ratio,
+            selected_games,
+            float(thresholds["probMin"]),
+            int(thresholds["booksMin"]),
+            -float(thresholds["oddMax"]),
+            float(thresholds["evMin"]),
+        )
+
+    best_thresholds, best_stats = max(chosen_pool, key=score)
+    source = "optimized" if strict_candidates else "optimized_relaxed"
+    return {
+        "thresholds": {
+            "oddMin": round(float(best_thresholds["oddMin"]), 2),
+            "oddMax": round(float(best_thresholds["oddMax"]), 2),
+            "probMin": round(float(best_thresholds["probMin"]), 3),
+            "evMin": round(float(best_thresholds["evMin"]), 3),
+            "booksMin": int(best_thresholds["booksMin"]),
+        },
+        "stats": {
+            "hits": int(best_stats["hits"]),
+            "selected_games": int(best_stats["selected_games"]),
+            "base_games": int(best_stats["base_games"]),
+            "accuracy_pct": round(float(best_stats["accuracy_ratio"]) * 100.0, 1),
+            "coverage_pct": round(float(best_stats["coverage_ratio"]) * 100.0, 1),
+            "min_required_games": int(min_required),
+        },
+        "source": source,
+    }
+
+
+def _build_precision_optimizer_store(detail_registry: dict[str, object]) -> dict[str, object]:
+    history = _extract_precision_history_from_details(detail_registry)
+    competitions_by_key: dict[str, str] = {}
+    history_by_competition: dict[str, list[dict[str, object]]] = {}
+    for entry in history:
+        competition_name = str(entry.get("competition", "")).strip() or "Sem competicao"
+        competition_key = competition_name.lower()
+        competitions_by_key[competition_key] = competition_name
+        history_by_competition.setdefault(competition_key, []).append(entry)
+
+    metrics_store: dict[str, object] = {}
+    for metric_key in ("model", "suggestion", "house"):
+        metric_payload: dict[str, object] = {
+            "global": _optimize_precision_thresholds(history, metric_key),
+            "competitions": {},
+        }
+        for competition_key, entries in history_by_competition.items():
+            optimized = _optimize_precision_thresholds(entries, metric_key)
+            if optimized is None:
+                continue
+            optimized["competition"] = competitions_by_key.get(competition_key, competition_key)
+            metric_payload["competitions"][competition_key] = optimized
+        metrics_store[metric_key] = metric_payload
+
+    return {
+        "updated_at": _current_app_timestamp(),
+        "fallback_thresholds": {
+            "oddMin": round(float(PRECISION_BASELINE_THRESHOLDS["oddMin"]), 2),
+            "oddMax": round(float(PRECISION_BASELINE_THRESHOLDS["oddMax"]), 2),
+            "probMin": round(float(PRECISION_BASELINE_THRESHOLDS["probMin"]), 3),
+            "evMin": round(float(PRECISION_BASELINE_THRESHOLDS["evMin"]), 3),
+            "booksMin": int(PRECISION_BASELINE_THRESHOLDS["booksMin"]),
+        },
+        "metrics": metrics_store,
+    }
+
+
+def _normalize_probability_value(value: object) -> float | None:
+    number = _safe_float(value)
+    if number is None:
+        return None
+    if number > 1.0:
+        number = number / 100.0
+    number = max(0.0, min(1.0, float(number)))
+    return number
+
+
+def _extract_reliability_history_from_details(detail_registry: dict[str, object]) -> list[dict[str, object]]:
+    history: list[dict[str, object]] = []
+    for raw_detail in detail_registry.values():
+        if not isinstance(raw_detail, dict):
+            continue
+        if str(raw_detail.get("status", "")).strip() != "Finalizado":
+            continue
+
+        competition_name = str(raw_detail.get("competition", "")).strip() or "Sem competicao"
+        model_prob = _normalize_probability_value(raw_detail.get("model_probability"))
+        suggestion_prob = _normalize_probability_value(raw_detail.get("suggestion_probability"))
+
+        house_prob: float | None = None
+        odds_payload = raw_detail.get("odds")
+        house_key = _market_key_from_result_label(raw_detail.get("house_result"), raw_detail)
+        if isinstance(odds_payload, dict) and house_key:
+            house_odd = _safe_float(odds_payload.get(house_key))
+            if house_odd is not None and house_odd > 1.0:
+                house_prob = max(0.0, min(1.0, 1.0 / house_odd))
+
+        history.append(
+            {
+                "competition": competition_name,
+                "model_prob": model_prob,
+                "suggestion_prob": suggestion_prob,
+                "house_prob": house_prob,
+                "model_hit": _hit_label_to_bool(raw_detail.get("model_hit")),
+                "suggestion_hit": _hit_label_to_bool(raw_detail.get("suggestion_hit")),
+                "house_hit": _hit_label_to_bool(raw_detail.get("house_hit")),
+            }
+        )
+    return history
+
+
+def _build_reliability_profile(
+    entries: list[dict[str, object]],
+    probability_field: str,
+    hit_field: str,
+) -> dict[str, object] | None:
+    points: list[tuple[float, bool]] = []
+    for entry in entries:
+        probability = _normalize_probability_value(entry.get(probability_field))
+        hit = entry.get(hit_field)
+        if probability is None or hit is None:
+            continue
+        points.append((probability, bool(hit)))
+
+    if not points:
+        return None
+
+    total_samples = len(points)
+    total_hits = sum(1 for _, hit in points if hit)
+    overall_accuracy = (total_hits / total_samples) if total_samples else 0.0
+    bins: list[dict[str, object]] = []
+
+    bucket_size = RELIABILITY_BUCKET_SIZE
+    bucket_count = int(round(1.0 / bucket_size))
+    for index in range(bucket_count):
+        p_min = round(index * bucket_size, 3)
+        p_max = round((index + 1) * bucket_size, 3)
+        bucket_values = [
+            hit
+            for probability, hit in points
+            if probability >= p_min and (probability < p_max or (index == bucket_count - 1 and probability <= p_max))
+        ]
+        sample_size = len(bucket_values)
+        if sample_size <= 0:
+            continue
+        bucket_hits = sum(1 for hit in bucket_values if hit)
+        smoothed_accuracy = (bucket_hits + (RELIABILITY_PRIOR_WEIGHT * overall_accuracy)) / (
+            sample_size + RELIABILITY_PRIOR_WEIGHT
+        )
+        bins.append(
+            {
+                "p_min": p_min,
+                "p_max": p_max,
+                "samples": int(sample_size),
+                "hits": int(bucket_hits),
+                "accuracy_pct": round(smoothed_accuracy * 100.0, 1),
+            }
+        )
+
+    return {
+        "total_samples": int(total_samples),
+        "total_hits": int(total_hits),
+        "overall_accuracy_pct": round(overall_accuracy * 100.0, 1),
+        "bins": bins,
+    }
+
+
+def _build_reliability_store(detail_registry: dict[str, object]) -> dict[str, object]:
+    history = _extract_reliability_history_from_details(detail_registry)
+    competitions_by_key: dict[str, str] = {}
+    history_by_competition: dict[str, list[dict[str, object]]] = {}
+    for entry in history:
+        competition_name = str(entry.get("competition", "")).strip() or "Sem competicao"
+        competition_key = competition_name.lower()
+        competitions_by_key[competition_key] = competition_name
+        history_by_competition.setdefault(competition_key, []).append(entry)
+
+    metrics_store: dict[str, object] = {}
+    for metric_key, hit_field in PRECISION_METRIC_HIT_FIELD.items():
+        probability_field = RELIABILITY_METRIC_PROB_FIELD.get(metric_key, "model_prob")
+        metric_payload: dict[str, object] = {
+            "global": _build_reliability_profile(history, probability_field, hit_field),
+            "competitions": {},
+        }
+        for competition_key, entries in history_by_competition.items():
+            profile = _build_reliability_profile(entries, probability_field, hit_field)
+            if profile is None:
+                continue
+            profile["competition"] = competitions_by_key.get(competition_key, competition_key)
+            metric_payload["competitions"][competition_key] = profile
+        metrics_store[metric_key] = metric_payload
+
+    return {
+        "updated_at": _current_app_timestamp(),
+        "min_bucket_samples": RELIABILITY_BUCKET_MIN_SAMPLES,
+        "bucket_size": RELIABILITY_BUCKET_SIZE,
+        "metrics": metrics_store,
+    }
+
+
 def _get_detail_json(
     df: pd.DataFrame,
     row,
@@ -515,15 +944,25 @@ def _get_detail_json(
 
     final_score = ""
     actual_result = ""
+    model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
+    suggestion_result = model_result
+    suggestion_probability = model_probability
+    suggestion_selection_source = "model"
+    house_result = _best_bookmaker_result(
+        str(row.home_team),
+        str(row.away_team),
+        getattr(row, "odds_home", None),
+        getattr(row, "odds_draw", None),
+        getattr(row, "odds_away", None),
+    )
     if resolved_tip is not None:
-        model_result = _market_label(str(resolved_tip.best_market), str(row.home_team), str(row.away_team))
-        model_probability = float(getattr(resolved_tip, "selected_probability", None) or resolved_tip.model_probability)
-        model_selection_source = str(getattr(resolved_tip, "selection_source", "model") or "model")
-    else:
-        model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
-        model_selection_source = "model"
+        suggestion_result = _market_label(str(resolved_tip.best_market), str(row.home_team), str(row.away_team))
+        suggestion_probability = float(getattr(resolved_tip, "selected_probability", None) or resolved_tip.model_probability)
+        suggestion_selection_source = str(getattr(resolved_tip, "selection_source", "model") or "model")
     model_risk_stage, model_risk_context = _classify_model_risk(row, probs, str(row.home_team), str(row.away_team), tip=resolved_tip)
     model_hit = ""
+    suggestion_hit = ""
+    house_hit = ""
     if status == "Finalizado":
         final_score = f"{_fmt_score(getattr(row, 'home_goals', None))} x {_fmt_score(getattr(row, 'away_goals', None))}"
         actual_result = _actual_market_label(
@@ -534,6 +973,9 @@ def _get_detail_json(
         )
         if actual_result != "-":
             model_hit = "Acertou" if actual_result == model_result else "Errou"
+            suggestion_hit = "Acertou" if actual_result == suggestion_result else "Errou"
+            if house_result != "-":
+                house_hit = "Acertou" if actual_result == house_result else "Errou"
 
     data = {
         "home": str(row.home_team),
@@ -541,6 +983,7 @@ def _get_detail_json(
         "date": display_date,
         "status": status,
         "competition": str(getattr(row, "competition", "")),
+        "bookmakers": int(getattr(row, "bookmakers", 0)) if getattr(row, "bookmakers", None) is not None and not pd.isna(getattr(row, "bookmakers", None)) else 0,
         "date_text_raw": str(getattr(row, "date_text", "")),
         "event_timestamp": str(getattr(row, "event_timestamp", "") or ""),
         "match_url": str(getattr(row, "match_url", "") or ""),
@@ -548,10 +991,16 @@ def _get_detail_json(
         "actual_result": actual_result,
         "model_result": model_result,
         "model_probability": round(model_probability * 100, 1),
-        "model_selection_source": model_selection_source,
+        "model_selection_source": "model",
+        "suggestion_result": suggestion_result,
+        "suggestion_probability": round(suggestion_probability * 100, 1),
+        "suggestion_selection_source": suggestion_selection_source,
+        "house_result": house_result,
         "model_risk_stage": model_risk_stage,
         "model_risk_context": model_risk_context,
         "model_hit": model_hit,
+        "suggestion_hit": suggestion_hit,
+        "house_hit": house_hit,
         "probs": {
             "home": round(probs.home_win * 100, 1),
             "draw": round(probs.draw * 100, 1),
@@ -652,6 +1101,7 @@ def _build_competition_section(
         rows_html.append(
             "<tr "
             "data-filter-scope=\"general\" "
+            f"data-detail-key=\"{escape(detail_key)}\" "
             f"data-date=\"{escape(filter_date)}\" "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
@@ -715,7 +1165,7 @@ def _build_competition_section(
                     }
                 )
             rec_rows.append(
-                f"<tr data-filter-scope=\"model\" data-date=\"{escape(filter_date)}\" data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{selected_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
+                f"<tr data-filter-scope=\"model\" data-detail-key=\"{escape(detail_key)}\" data-date=\"{escape(filter_date)}\" data-odd=\"{tip.best_odd:.2f}\" data-prob=\"{selected_probability:.4f}\" data-ev=\"{tip.expected_value:.4f}\" data-books=\"{bookmakers}\">"
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
@@ -760,13 +1210,8 @@ def _build_competition_section(
                     bankroll=1000.0,
                     kelly_fractional=0.25,
                 )
-            if tip is not None:
-                selected_probability = float(tip.selected_probability or tip.model_probability)
-                model_result = _market_label(str(tip.best_market), str(row.home_team), str(row.away_team))
-                model_probability = f"{selected_probability * 100:.1f}%"
-            else:
-                model_result, best_prob = _best_model_result(probs, str(row.home_team), str(row.away_team))
-                model_probability = f"{best_prob * 100:.1f}%"
+            model_result, best_prob = _best_model_result(probs, str(row.home_team), str(row.away_team))
+            model_probability = f"{best_prob * 100:.1f}%"
             bookmaker_result = _best_bookmaker_result(
                 str(row.home_team),
                 str(row.away_team),
@@ -823,6 +1268,7 @@ def _build_competition_section(
         finished_rows.append(
             "<tr "
             "data-filter-scope=\"general\" "
+            f"data-detail-key=\"{escape(detail_key)}\" "
             f"data-date=\"{escape(filter_date)}\" "
             f"data-odd-home=\"{_fmt_odd(row.odds_home)}\" "
             f"data-odd-draw=\"{_fmt_odd(row.odds_draw)}\" "
@@ -877,7 +1323,7 @@ def _build_competition_section(
             detail_key = register_detail(detail_json)
 
             safe_rows.append(
-                f"<tr data-filter-scope=\"model\" data-date=\"{escape(filter_date)}\" data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
+                f"<tr data-filter-scope=\"model\" data-detail-key=\"{escape(detail_key)}\" data-date=\"{escape(filter_date)}\" data-odd=\"{row.odd:.2f}\" data-prob=\"{row.model_probability:.4f}\" data-ev=\"{row.expected_value:.4f}\" data-books=\"{row.bookmakers}\">"
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(str(row.market), str(row.home_team), str(row.away_team)))}</td>"
@@ -1038,7 +1484,7 @@ def _build_risk_block(title: str, stage: str, description: str, meta: list[str],
     ordered_entries = sorted(entries, key=lambda item: (-float(item["probability"]), -float(item["ev"]), str(item["competition"]), str(item["matchup"])))[:12]
     for entry in ordered_entries:
         rows.append(
-            f"<tr data-filter-scope='model' data-comp='{escape(str(entry.get('competition', '')))}' data-date='{escape(str(entry.get('filter_date', '')))}' data-odd='{float(entry['odd']):.2f}' data-prob='{float(entry['probability']):.4f}' data-ev='{float(entry['ev']):.4f}' data-books='{int(entry['bookmakers'])}'>"
+            f"<tr data-filter-scope='model' data-detail-key='{escape(str(entry.get('detail_key', '')))}' data-comp='{escape(str(entry.get('competition', '')))}' data-date='{escape(str(entry.get('filter_date', '')))}' data-odd='{float(entry['odd']):.2f}' data-prob='{float(entry['probability']):.4f}' data-ev='{float(entry['ev']):.4f}' data-books='{int(entry['bookmakers'])}'>"
             f"<td>{escape(str(entry['competition']))}</td>"
             f"<td>{escape(str(entry['date_text']))}</td>"
             f"<td>{escape(str(entry['matchup']))}</td>"
@@ -1090,13 +1536,16 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         global_risk_entries.extend(section_risk_entries)
         global_match_catalog.extend(section_match_catalog)
 
-    competition_options = "".join(f"<option>{escape(str(item['name']))}</option>" for item in competition_stats)
+    competition_select_options = "".join(
+        f"<option value=\"{escape(str(item['name']))}\">{escape(str(item['name']))}</option>"
+        for item in competition_stats
+    )
     competition_filter_cards = "".join(
         (
             f"<button class=\"competition-filter-card\" type=\"button\" data-comp-filter=\"{escape(str(item['name']))}\">"
             f"<strong>{escape(str(item['name']))}</strong>"
             f"<span>{int(item['fixtures'])} jogos futuros</span>"
-            f"<small>{int(item['safe'])} seguros • {int(item['fixtures_valid'])} com odds</small>"
+            f"<small>{int(item['safe'])} seguros â€¢ {int(item['fixtures_valid'])} com odds</small>"
             "</button>"
         )
         for item in competition_stats
@@ -1140,6 +1589,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     ai_prompt_html = escape(AI_PROMPT_TEMPLATE)
     ai_prompt_js = AI_PROMPT_TEMPLATE
     match_catalog_json = json.dumps(global_match_catalog, ensure_ascii=False)
+    precision_optimizer_store = _build_precision_optimizer_store(detail_registry)
+    precision_optimizer_json = json.dumps(precision_optimizer_store, ensure_ascii=False)
+    reliability_store = _build_reliability_store(detail_registry)
+    reliability_store_json = json.dumps(reliability_store, ensure_ascii=False)
     low_risk_entries = [item for item in global_risk_entries if item["stage"] == "Baixo risco"]
     medium_risk_entries = [item for item in global_risk_entries if item["stage"] == "Medio risco"]
     high_risk_entries = [item for item in global_risk_entries if item["stage"] == "Alto risco"]
@@ -2339,10 +2792,43 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         <section class="rail-card" style="margin-bottom: 14px;">
           <div class="eyebrow">Filtro de Data</div>
           <h3>Busca por data</h3>
-          <p>Reune todos os jogos da data no painel especial.</p>
+          <p>Reune jogos por dia ou por periodo e calcula acerto por data.</p>
           <div class="field" style="margin-top: 14px; padding: 0; background: transparent; border: none;">
             <input id="fdate" type="date" style="width: 100%; border: 1px solid var(--line-strong);" />
           </div>
+          <div class="field" style="margin-top: 10px; padding: 0; background: transparent; border: none;">
+            <label for="fdateFrom" style="font-size:.78rem; font-weight:700; color:var(--muted); margin-bottom:6px; display:block;">Periodo inicial</label>
+            <input id="fdateFrom" type="date" style="width: 100%; border: 1px solid var(--line-strong);" />
+          </div>
+          <div class="field" style="margin-top: 8px; padding: 0; background: transparent; border: none;">
+            <label for="fdateTo" style="font-size:.78rem; font-weight:700; color:var(--muted); margin-bottom:6px; display:block;">Periodo final</label>
+            <input id="fdateTo" type="date" style="width: 100%; border: 1px solid var(--line-strong);" />
+          </div>
+          <div class="field" style="margin-top: 10px; padding: 0; background: transparent; border: none;">
+            <label for="fcompQuick" style="font-size:.78rem; font-weight:700; color:var(--muted); margin-bottom:6px; display:block;">Competicao ativa</label>
+            <select id="fcompQuick" style="width: 100%; border: 1px solid var(--line-strong);">
+              <option value="">Todas as competicoes</option>
+              {competition_select_options}
+            </select>
+          </div>
+        </section>
+
+        <section class="rail-card" style="margin-bottom: 14px;">
+          <div class="eyebrow">Modo Precisao</div>
+          <h3>Mais acerto no filtro</h3>
+          <p>Aplica thresholds com base nos jogos finalizados para elevar o percentual de acerto.</p>
+          <div class="field" style="margin-top: 12px;">
+            <label for="precisionMetric">Objetivo de acerto</label>
+            <select id="precisionMetric">
+              <option value="model">Acerto do modelo</option>
+              <option value="suggestion">Acerto da sugestao</option>
+              <option value="house">Acerto das casas</option>
+            </select>
+          </div>
+          <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="applyPrecisionMode" class="btn primary" type="button">Aplicar modo precisao</button>
+          </div>
+          <div id="precisionOptimizerSummary" class="summary-box" style="margin-top: 10px;">Aguardando leitura dos jogos finalizados para sugerir o melhor filtro.</div>
         </section>
 
         <section class="rail-card">
@@ -2369,21 +2855,46 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             </div>
             <div id="dateFocusMeta" class="summary-box">Sem data aplicada.</div>
           </div>
+          <div style="margin-top: 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px;">
+            <div class="field" style="margin: 0;">
+              <label for="dateBestMetric">Comparar melhor dia por</label>
+              <select id="dateBestMetric">
+                <option value="model">Acerto do modelo</option>
+                <option value="suggestion">Acerto da sugestao</option>
+                <option value="house">Acerto das casas</option>
+              </select>
+            </div>
+            <div class="field" style="margin: 0;">
+              <label for="reliabilityMetric">Confiabilidade por</label>
+              <select id="reliabilityMetric">
+                <option value="model">Modelo</option>
+                <option value="suggestion">Sugestao</option>
+                <option value="house">Casas</option>
+              </select>
+            </div>
+            <div class="field" style="margin: 0;">
+              <label for="freliability">Confiabilidade minima (%)</label>
+              <input id="freliability" type="number" step="1" min="0" max="100" placeholder="70" />
+            </div>
+          </div>
+          <div id="dateAccuracySummary" class="summary-box" style="margin-top: 12px;">Sem jogos finalizados no recorte atual para medir acerto.</div>
+          <div id="dateAccuracyTableWrap" class="table-wrap" style="margin-top: 12px;" hidden>
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Finalizados</th>
+                  <th>Acerto Modelo</th>
+                  <th>Acerto Sugestao</th>
+                  <th>Acerto Casas</th>
+                  <th>Destaque</th>
+                </tr>
+              </thead>
+              <tbody id="dateAccuracyTableBody"></tbody>
+            </table>
+          </div>
           <div id="dateFocusGrid" class="date-focus-grid"></div>
           <div id="dateFocusEmpty" class="date-focus-empty" hidden>Nenhum jogo desta data atende aos filtros atuais de competicao ou busca por time.</div>
-        </section>
-
-        <section class="card risk-strip">
-          <div class="risk-strip-head">
-            <div>
-              <div class="eyebrow">Jogos por risco</div>
-              <h2>Blocos prontos com os jogos que ja se encaixam</h2>
-              <p>Cada bloco abaixo organiza automaticamente os confrontos pelas faixas de risco do portal. Assim voce le o contexto do risco e ja abre o jogo certo sem precisar configurar nada antes.</p>
-            </div>
-            <div id="resultsSummary" class="summary-box">Mostrando todas as competicoes e tabelas disponiveis.</div>
-          </div>
-          <div class="risk-grid">{risk_blocks_html}</div>
-          <p id="riskStripEmpty" class="empty-state" hidden>Nenhum jogo atende aos filtros atuais no bloco por risco.</p>
         </section>
 
         <div class="legend">
@@ -2464,7 +2975,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           <div id="modalDate" class="eyebrow">00/00/0000</div>
           <h2 id="modalTitle">Time A vs Time B</h2>
         </div>
-        <button class="modal-close" onclick="closeMatchDetails()">Ã—</button>
+        <button class="modal-close" onclick="closeMatchDetails()">&times;</button>
       </div>
       <div class="modal-body">
         <div class="modal-grid">
@@ -2593,12 +3104,20 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           <h2>Configurar painel</h2>
           <p class="copy">Ajuste a leitura do portal sem deixar esses controles ocupando a tela principal.</p>
         </div>
-        <button class="modal-close" type="button" onclick="closeFilterModal()">Ã—</button>
+        <button class="modal-close" type="button" onclick="closeFilterModal()">&times;</button>
       </div>
       <div class="modal-body">
         <div class="competition-filter-shell">
           <label>Competicao</label>
           <input id="fcomp" type="hidden" value="" />
+          <div class="field" style="margin: 10px 0 0;">
+            <label for="fcompModalSelect">Competicao ativa</label>
+            <select id="fcompModalSelect">
+              <option value="">Todas as competicoes</option>
+              {competition_select_options}
+            </select>
+            <div class="hint">Use este seletor para trocar de liga rapidamente.</div>
+          </div>
           <div class="competition-filter-grid">
             <button class="competition-filter-card all-card active" type="button" data-comp-filter="">
               <strong>Todas as competicoes</strong>
@@ -2612,12 +3131,16 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         <div class="filters">
           <div class="field"><label for="frisk">Perfil de risco</label><select id="frisk"><option>Baixo risco</option><option>Medio risco</option><option>Alto risco</option><option>Personalizado</option></select><div class="hint">Aplica faixas padrao para as tabelas do modelo, sem esconder os resultados finalizados.</div></div>
           <div class="field"><label for="fdateModal">Data dos jogos</label><input id="fdateModal" type="date" /><div class="hint">Filtra todos os cards e tabelas para a data escolhida.</div></div>
+          <div class="field"><label for="fdateFromModal">Periodo inicial</label><input id="fdateFromModal" type="date" /><div class="hint">Inicio do intervalo para comparar acerto por dia.</div></div>
+          <div class="field"><label for="fdateToModal">Periodo final</label><input id="fdateToModal" type="date" /><div class="hint">Fim do intervalo para comparar acerto por dia.</div></div>
           <div class="field"><label for="fteam">Time</label><input id="fteam" type="text" placeholder="Ex: Flamengo" /><div class="hint">Busca o nome do time em qualquer tabela visivel.</div></div>
           <div class="field"><label for="fbooks">Casas minimas</label><input id="fbooks" type="number" step="1" min="0" placeholder="8" /><div class="hint">Evita linhas com baixa cobertura de bookmakers nas tabelas do modelo.</div></div>
           <div class="field"><label for="foddmin">Odd minima</label><input id="foddmin" type="number" step="0.01" min="1.01" placeholder="1.30" /><div class="hint">Define a base minima da faixa de odd nas leituras recomendadas.</div></div>
           <div class="field"><label for="foddmax">Odd maxima</label><input id="foddmax" type="number" step="0.01" min="1.01" placeholder="2.20" /><div class="hint">Limita selecoes acima de uma odd alvo nas tabelas do modelo.</div></div>
           <div class="field"><label for="fprobmin">Probabilidade minima</label><input id="fprobmin" type="number" step="0.01" min="0" max="1" placeholder="0.55" /><div class="hint">Usada apenas nas tabelas com leitura do modelo.</div></div>
-          <div class="field"><label for="fevmin">EV minimo</label><input id="fevmin" type="number" step="0.005" min="0" max="1" placeholder="0.02" /><div class="hint">Mostra entradas do modelo com vantagem esperada minima.</div></div>
+          <div class="field"><label for="fevmin">EV minimo</label><input id="fevmin" type="number" step="0.005" min="-0.20" max="1" placeholder="0.02" /><div class="hint">Modo precisao pode sugerir EV negativo para priorizar percentual de acerto.</div></div>
+          <div class="field"><label for="reliabilityMetricModal">Confiabilidade por</label><select id="reliabilityMetricModal"><option value="model">Modelo</option><option value="suggestion">Sugestao</option><option value="house">Casas</option></select><div class="hint">Define qual leitura historica sera usada na confiabilidade.</div></div>
+          <div class="field"><label for="freliabilityModal">Confiabilidade minima (%)</label><input id="freliabilityModal" type="number" step="1" min="0" max="100" placeholder="70" /><div class="hint">Mostra apenas jogos acima da confiabilidade estimada.</div></div>
         </div>
         <div class="actions">
           <button id="applyFilter" class="btn primary" type="button">Aplicar filtro</button>
@@ -2638,7 +3161,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           <h2>Prompt institucional</h2>
           <p class="copy">Edite o briefing completo, atualize a data quando precisar e execute a leitura sem poluir a tela principal.</p>
         </div>
-        <button class="modal-close" type="button" onclick="closeAiPromptModal()">Ã—</button>
+        <button class="modal-close" type="button" onclick="closeAiPromptModal()">&times;</button>
       </div>
       <div class="modal-body">
         <div class="ai-module-side">
@@ -2673,7 +3196,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           <h2>Selecione varios jogos e resultados</h2>
           <p class="copy">Escolha os confrontos, defina o resultado esperado de cada um e receba uma leitura consolidada de probabilidade, risco e gestao de banca.</p>
         </div>
-        <button class="modal-close" type="button" onclick="closeMultiAnalysisModal()">Ã—</button>
+        <button class="modal-close" type="button" onclick="closeMultiAnalysisModal()">&times;</button>
       </div>
       <div class="modal-body">
         <div class="ai-module-side">
@@ -2941,6 +3464,315 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     let activeMatchStatsRequest = 0;
     const matchDetailsStore = {json.dumps(detail_registry, ensure_ascii=False)};
     const dateMatchCatalog = {match_catalog_json};
+    const precisionOptimizerStore = {precision_optimizer_json};
+    const reliabilityStore = {reliability_store_json};
+    const precisionFallbackThresholds = (precisionOptimizerStore && precisionOptimizerStore.fallback_thresholds) || {{
+      oddMin: 1.20,
+      oddMax: 1.95,
+      probMin: 0.62,
+      evMin: 0.03,
+      booksMin: 10,
+    }};
+
+    function normalizeCompetitionKey(value) {{
+      return String(value || '').trim().toLowerCase();
+    }}
+
+    function getPrecisionMetricConfig(metricKey) {{
+      if (metricKey === 'suggestion') {{
+        return {{ label: 'sugestao', title: 'Acerto da sugestao' }};
+      }}
+      if (metricKey === 'house') {{
+        return {{ label: 'casas', title: 'Acerto das casas' }};
+      }}
+      return {{ label: 'modelo', title: 'Acerto do modelo' }};
+    }}
+
+    function getReliabilityMetricLabel(metricKey) {{
+      if (metricKey === 'suggestion') return 'sugestao';
+      if (metricKey === 'house') return 'casas';
+      return 'modelo';
+    }}
+
+    function normalizePercentValue(value) {{
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) return null;
+      return Math.max(0, Math.min(100, numericValue));
+    }}
+
+    function normalizeProbabilityValue(value) {{
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) return null;
+      if (numericValue > 1.0) {{
+        return Math.max(0, Math.min(1, numericValue / 100));
+      }}
+      return Math.max(0, Math.min(1, numericValue));
+    }}
+
+    function marketKeyFromResultLabel(resultLabel, detail) {{
+      const label = String(resultLabel || '').trim().toLowerCase();
+      if (!label) return '';
+      if (label === 'empate') return 'draw';
+      const homeTeam = String((detail && detail.home) || '').trim().toLowerCase();
+      const awayTeam = String((detail && detail.away) || '').trim().toLowerCase();
+      if (homeTeam && label === 'vitoria ' + homeTeam) return 'home';
+      if (awayTeam && label === 'vitoria ' + awayTeam) return 'away';
+      if (label.includes('vitoria') && homeTeam && label.includes(homeTeam)) return 'home';
+      if (label.includes('vitoria') && awayTeam && label.includes(awayTeam)) return 'away';
+      return '';
+    }}
+
+    function resolveMetricProbability(detail, metricKey) {{
+      if (!detail) return null;
+      if (metricKey === 'suggestion') {{
+        return normalizeProbabilityValue(detail.suggestion_probability);
+      }}
+      if (metricKey === 'house') {{
+        const odds = detail.odds && typeof detail.odds === 'object' ? detail.odds : null;
+        const marketKey = marketKeyFromResultLabel(detail.house_result, detail);
+        if (odds && marketKey && Number.isFinite(Number(odds[marketKey])) && Number(odds[marketKey]) > 1.0) {{
+          return Math.max(0, Math.min(1, 1 / Number(odds[marketKey])));
+        }}
+        return null;
+      }}
+      return normalizeProbabilityValue(detail.model_probability);
+    }}
+
+    function resolveReliabilityProfile(metricKey, competitionName) {{
+      const metricsStore = reliabilityStore && reliabilityStore.metrics ? reliabilityStore.metrics : null;
+      if (!metricsStore) return null;
+      const metricStore = metricsStore[metricKey] || metricsStore.model;
+      if (!metricStore) return null;
+      const competitionKey = normalizeCompetitionKey(competitionName);
+      if (competitionKey && metricStore.competitions && metricStore.competitions[competitionKey]) {{
+        return metricStore.competitions[competitionKey];
+      }}
+      return metricStore.global || null;
+    }}
+
+    function findReliabilityBin(profile, probability) {{
+      if (!profile || !Array.isArray(profile.bins)) return null;
+      for (const bin of profile.bins) {{
+        const pMin = Number(bin.p_min);
+        const pMax = Number(bin.p_max);
+        if (!Number.isFinite(pMin) || !Number.isFinite(pMax)) continue;
+        if (probability >= pMin && (probability < pMax || (Math.abs(probability - pMax) < 1e-9 && pMax >= 0.999))) {{
+          return bin;
+        }}
+      }}
+      return null;
+    }}
+
+    function estimateMatchReliability(detail, metricKey) {{
+      if (!detail) return null;
+      const probability = resolveMetricProbability(detail, metricKey);
+      if (probability === null) return null;
+      const profile = resolveReliabilityProfile(metricKey, detail.competition || '');
+      if (!profile) return null;
+      const minBucketSamples = Number((reliabilityStore && reliabilityStore.min_bucket_samples) || 0);
+      const bucket = findReliabilityBin(profile, probability);
+      if (bucket && Number(bucket.samples || 0) >= minBucketSamples) {{
+        const bucketAccuracy = normalizePercentValue(bucket.accuracy_pct);
+        if (bucketAccuracy !== null) {{
+          return {{
+            pct: bucketAccuracy,
+            samples: Number(bucket.samples || 0),
+            source: 'bucket',
+            probability,
+          }};
+        }}
+      }}
+      const overallAccuracy = normalizePercentValue(profile.overall_accuracy_pct);
+      if (overallAccuracy === null) return null;
+      return {{
+        pct: overallAccuracy,
+        samples: Number(profile.total_samples || 0),
+        source: 'overall',
+        probability,
+      }};
+    }}
+
+    function parseReliabilityPercentValue(rawValue) {{
+      const normalizedText = String(rawValue || '').trim().replace(',', '.');
+      if (!normalizedText) return null;
+      const parsed = Number.parseFloat(normalizedText);
+      if (!Number.isFinite(parsed)) return null;
+      return Math.max(0, Math.min(100, parsed));
+    }}
+
+    function normalizeReliabilityMetric(rawMetric) {{
+      const metric = String(rawMetric || '').trim().toLowerCase();
+      return (metric === 'suggestion' || metric === 'house') ? metric : 'model';
+    }}
+
+    function formatReliabilityMinValue(minPct) {{
+      if (minPct === null || !Number.isFinite(minPct)) return '';
+      const rounded = Math.round(minPct * 10) / 10;
+      return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+    }}
+
+    function getReliabilityFilterState(sourcePreference = 'auto') {{
+      const mainMetricField = document.getElementById('reliabilityMetric');
+      const modalMetricField = document.getElementById('reliabilityMetricModal');
+      const mainMetricRaw = mainMetricField && mainMetricField.value ? String(mainMetricField.value).trim() : '';
+      const modalMetricRaw = modalMetricField && modalMetricField.value ? String(modalMetricField.value).trim() : '';
+      let chosenMetricRaw = mainMetricRaw || modalMetricRaw || 'model';
+      if (sourcePreference === 'modal') {{
+        chosenMetricRaw = modalMetricRaw || mainMetricRaw || 'model';
+      }} else if (sourcePreference === 'main') {{
+        chosenMetricRaw = mainMetricRaw || modalMetricRaw || 'model';
+      }}
+
+      const mainReliabilityField = document.getElementById('freliability');
+      const modalReliabilityField = document.getElementById('freliabilityModal');
+      const mainMinRaw = mainReliabilityField && mainReliabilityField.value ? String(mainReliabilityField.value).trim() : '';
+      const modalMinRaw = modalReliabilityField && modalReliabilityField.value ? String(modalReliabilityField.value).trim() : '';
+      let chosenMinRaw = mainMinRaw || modalMinRaw;
+      if (sourcePreference === 'modal') {{
+        chosenMinRaw = modalMinRaw || mainMinRaw;
+      }} else if (sourcePreference === 'main') {{
+        chosenMinRaw = mainMinRaw || modalMinRaw;
+      }}
+
+      return {{
+        metricKey: normalizeReliabilityMetric(chosenMetricRaw),
+        minPct: parseReliabilityPercentValue(chosenMinRaw),
+      }};
+    }}
+
+    function syncReliabilityFilterFields(sourcePreference = 'auto') {{
+      const reliabilityState = getReliabilityFilterState(sourcePreference);
+      const metricValue = reliabilityState.metricKey;
+      const minValue = formatReliabilityMinValue(reliabilityState.minPct);
+      const mainMetricField = document.getElementById('reliabilityMetric');
+      const modalMetricField = document.getElementById('reliabilityMetricModal');
+      const mainReliabilityField = document.getElementById('freliability');
+      const modalReliabilityField = document.getElementById('freliabilityModal');
+
+      if (mainMetricField && mainMetricField.value !== metricValue) {{
+        mainMetricField.value = metricValue;
+      }}
+      if (modalMetricField && modalMetricField.value !== metricValue) {{
+        modalMetricField.value = metricValue;
+      }}
+      if (mainReliabilityField && mainReliabilityField.value !== minValue) {{
+        mainReliabilityField.value = minValue;
+      }}
+      if (modalReliabilityField && modalReliabilityField.value !== minValue) {{
+        modalReliabilityField.value = minValue;
+      }}
+
+      return reliabilityState;
+    }}
+
+    function rowPassesReliabilityFilter(row, reliabilityFilter) {{
+      if (!reliabilityFilter || reliabilityFilter.minPct === null) return true;
+      const detailKey = row.getAttribute('data-detail-key') || '';
+      if (!detailKey) return false;
+      const detail = matchDetailsStore[detailKey];
+      const reliabilityInfo = estimateMatchReliability(detail, reliabilityFilter.metricKey);
+      if (!reliabilityInfo) return false;
+      return reliabilityInfo.pct >= reliabilityFilter.minPct;
+    }}
+
+    function resolvePrecisionPreset(metricKey, competitionName) {{
+      const metricsStore = precisionOptimizerStore && precisionOptimizerStore.metrics ? precisionOptimizerStore.metrics : null;
+      if (!metricsStore) return null;
+      const metricStore = metricsStore[metricKey] || metricsStore.model;
+      if (!metricStore) return null;
+
+      const competitionKey = normalizeCompetitionKey(competitionName);
+      if (competitionKey && metricStore.competitions && metricStore.competitions[competitionKey]) {{
+        return {{ preset: metricStore.competitions[competitionKey], scope: 'competition' }};
+      }}
+      if (metricStore.global) {{
+        return {{ preset: metricStore.global, scope: 'global' }};
+      }}
+      return null;
+    }}
+
+    function formatPrecisionThresholds(thresholds) {{
+      if (!thresholds) return 'sem thresholds';
+      const oddMin = Number(thresholds.oddMin);
+      const oddMax = Number(thresholds.oddMax);
+      const probMin = Number(thresholds.probMin);
+      const evMin = Number(thresholds.evMin);
+      const booksMin = Number(thresholds.booksMin);
+      return 'odd ' + oddMin.toFixed(2) + '-' + oddMax.toFixed(2) +
+        ' | prob >= ' + (probMin * 100).toFixed(1) + '%' +
+        ' | EV >= ' + (evMin * 100).toFixed(1) + '%' +
+        ' | casas >= ' + booksMin.toFixed(0);
+    }}
+
+    function applyPrecisionThresholdInputs(thresholds) {{
+      if (!thresholds) return;
+      document.getElementById('frisk').value = 'Personalizado';
+      document.getElementById('foddmin').value = Number(thresholds.oddMin).toFixed(2);
+      document.getElementById('foddmax').value = Number(thresholds.oddMax).toFixed(2);
+      document.getElementById('fprobmin').value = Number(thresholds.probMin).toFixed(3);
+      document.getElementById('fevmin').value = Number(thresholds.evMin).toFixed(3);
+      document.getElementById('fbooks').value = String(Math.max(0, Math.round(Number(thresholds.booksMin) || 0)));
+    }}
+
+    function refreshPrecisionOptimizerSummary() {{
+      const summary = document.getElementById('precisionOptimizerSummary');
+      if (!summary) return;
+      const metricField = document.getElementById('precisionMetric');
+      const metricKey = metricField && metricField.value ? String(metricField.value).trim().toLowerCase() : 'model';
+      const metricConfig = getPrecisionMetricConfig(metricKey);
+      const competitionField = document.getElementById('fcomp');
+      const selectedCompetition = competitionField ? String(competitionField.value || '').trim() : '';
+      const resolved = resolvePrecisionPreset(metricKey, selectedCompetition);
+      if (!resolved || !resolved.preset || !resolved.preset.thresholds) {{
+        summary.textContent = 'Sem amostra finalizada suficiente para otimizar. O portal usa os limites conservadores padrao.';
+        return;
+      }}
+
+      const stats = resolved.preset.stats || {{}};
+      const selectedGames = Number(stats.selected_games || 0);
+      const hits = Number(stats.hits || 0);
+      const accuracyPct = Number(stats.accuracy_pct || 0);
+      const baseGames = Number(stats.base_games || 0);
+      const coveragePct = Number(stats.coverage_pct || 0);
+      const source = String(resolved.preset.source || '');
+      const sourceLabel = source === 'optimized_relaxed' ? 'com amostra reduzida' : 'com amostra robusta';
+      const scopeLabel = resolved.scope === 'competition'
+        ? 'liga filtrada'
+        : (selectedCompetition ? 'base geral (sem historico suficiente na liga filtrada)' : 'base geral');
+      summary.textContent =
+        metricConfig.title + ': ' +
+        accuracyPct.toFixed(1) + '% (' + hits + '/' + selectedGames + ') ' +
+        '| cobertura ' + coveragePct.toFixed(1) + '% (' + selectedGames + '/' + baseGames + ') ' +
+        '| ' + scopeLabel + ' ' + sourceLabel + ' | ' +
+        formatPrecisionThresholds(resolved.preset.thresholds) + '.';
+    }}
+
+    function applyPrecisionMode() {{
+      const metricField = document.getElementById('precisionMetric');
+      const metricKey = metricField && metricField.value ? String(metricField.value).trim().toLowerCase() : 'model';
+      const competitionField = document.getElementById('fcomp');
+      const selectedCompetition = competitionField ? String(competitionField.value || '').trim() : '';
+      const resolved = resolvePrecisionPreset(metricKey, selectedCompetition);
+      const thresholds = resolved && resolved.preset && resolved.preset.thresholds
+        ? resolved.preset.thresholds
+        : precisionFallbackThresholds;
+      applyPrecisionThresholdInputs(thresholds);
+      const reliabilityMetricField = document.getElementById('reliabilityMetric');
+      if (reliabilityMetricField && reliabilityMetricField.value !== metricKey) {{
+        reliabilityMetricField.value = metricKey;
+      }}
+      const reliabilityMetricModalField = document.getElementById('reliabilityMetricModal');
+      if (reliabilityMetricModalField && reliabilityMetricModalField.value !== metricKey) {{
+        reliabilityMetricModalField.value = metricKey;
+      }}
+      applyFilters();
+      const resultsSummary = document.getElementById('resultsSummary');
+      if (resultsSummary) {{
+        resultsSummary.textContent = 'Modo precisao aplicado com ' + getPrecisionMetricConfig(metricKey).title.toLowerCase() + ': ' + formatPrecisionThresholds(thresholds) + '.';
+      }}
+      refreshPrecisionOptimizerSummary();
+    }}
+
     const multiMatchOptions = (() => {{
       const uniqueMap = new Map();
       dateMatchCatalog.forEach((item) => {{
@@ -3361,15 +4193,37 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (data.status) modalMeta.push(data.status);
       if (data.date) modalMeta.push(data.date);
       if (data.final_score) modalMeta.push('Placar ' + data.final_score);
-      document.getElementById('modalDate').textContent = modalMeta.join(' • ');
+      document.getElementById('modalDate').textContent = modalMeta.join(' â€¢ ');
       
       const stratBox = document.getElementById('strategyBox');
       if (data.tip) {{
+        const suggestionSource = data.tip.selection_source || data.suggestion_selection_source || 'model';
+        const suggestionSourceLabel = suggestionSource === 'house_lock'
+          ? 'Consenso das casas (favorito muito forte)'
+          : suggestionSource === 'house_consensus'
+            ? 'Consenso das casas (confianca do modelo baixa)'
+            : 'Modelo estatistico';
+        const suggestionTitle = suggestionSource === 'model' ? 'Sugestao do modelo' : 'Sugestao operacional';
+        const modelLine = data.model_result
+          ? `<strong>Favorito do modelo:</strong> ${{data.model_result}} (${{data.model_probability}}%)<br>`
+          : '';
+        const houseLine = data.house_result && data.house_result !== '-'
+          ? `<strong>Favorito das casas:</strong> ${{data.house_result}}<br>`
+          : '';
+        const finalActualLine = data.status === 'Finalizado' && data.actual_result && data.actual_result !== '-'
+          ? `<strong>Resultado real:</strong> ${{data.actual_result}}<br>`
+          : '';
+        const hitParts = [];
+        if (data.model_hit) hitParts.push(`Modelo: ${{data.model_hit}}`);
+        if (data.suggestion_hit) hitParts.push(`Sugestao: ${{data.suggestion_hit}}`);
+        if (data.house_hit) hitParts.push(`Casas: ${{data.house_hit}}`);
+        const hitLine = hitParts.length ? `<strong>Quem acertou:</strong> ${{hitParts.join(' | ')}}<br>` : '';
         const riskLine = data.model_risk_stage ? `<br><strong>Estagio de risco:</strong> ${{data.model_risk_stage}}` : '';
         const riskContext = data.model_risk_context ? `<br><strong>Contexto do risco:</strong> ${{data.model_risk_context}}` : '';
-        stratBox.innerHTML = `<strong>Sugestao:</strong> ${{data.tip.market}}<br>
+        stratBox.innerHTML = `${{modelLine}}${{houseLine}}${{finalActualLine}}${{hitLine}}<strong>${{suggestionTitle}}:</strong> ${{data.tip.market}}<br>
           <strong>Odd:</strong> ${{data.tip.odd.toFixed(2)}} | <strong>Prob:</strong> ${{data.tip.prob}}% | <strong>EV:</strong> ${{data.tip.ev}}%<br>
-          <strong>Stake Sugerida:</strong> R$ ${{data.tip.stake.toFixed(2)}}${{riskLine}}${{riskContext}}`;
+          <strong>Stake Sugerida:</strong> R$ ${{data.tip.stake.toFixed(2)}}<br>
+          <strong>Fonte da sugestao:</strong> ${{suggestionSourceLabel}}${{riskLine}}${{riskContext}}`;
       }} else if (data.status === 'Finalizado' && data.model_result) {{
         const actualLine = data.actual_result && data.actual_result !== '-' ? `<br><strong>Resultado real:</strong> ${{data.actual_result}}` : '';
         const hitLine = data.model_hit ? ` | <strong>Modelo:</strong> ${{data.model_hit}}` : '';
@@ -3422,11 +4276,45 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       document.getElementById('matchModal').style.display = 'none';
     }}
 
+    function syncCompetitionSelectors() {{
+      const competitionField = document.getElementById('fcomp');
+      const currentCompetition = competitionField ? String(competitionField.value || '').trim() : '';
+      const quickField = document.getElementById('fcompQuick');
+      if (quickField && quickField.value !== currentCompetition) {{
+        quickField.value = currentCompetition;
+      }}
+      const modalField = document.getElementById('fcompModalSelect');
+      if (modalField && modalField.value !== currentCompetition) {{
+        modalField.value = currentCompetition;
+      }}
+    }}
+
     function openFilterModal() {{
+      syncCompetitionSelectors();
       const mainDateField = document.getElementById('fdate');
       const modalDateField = document.getElementById('fdateModal');
       if (mainDateField && modalDateField) {{
         modalDateField.value = mainDateField.value || '';
+      }}
+      const mainDateFromField = document.getElementById('fdateFrom');
+      const modalDateFromField = document.getElementById('fdateFromModal');
+      if (mainDateFromField && modalDateFromField) {{
+        modalDateFromField.value = mainDateFromField.value || '';
+      }}
+      const mainDateToField = document.getElementById('fdateTo');
+      const modalDateToField = document.getElementById('fdateToModal');
+      if (mainDateToField && modalDateToField) {{
+        modalDateToField.value = mainDateToField.value || '';
+      }}
+      const mainReliabilityMetricField = document.getElementById('reliabilityMetric');
+      const modalReliabilityMetricField = document.getElementById('reliabilityMetricModal');
+      if (mainReliabilityMetricField && modalReliabilityMetricField) {{
+        modalReliabilityMetricField.value = mainReliabilityMetricField.value || 'model';
+      }}
+      const mainReliabilityField = document.getElementById('freliability');
+      const modalReliabilityField = document.getElementById('freliabilityModal');
+      if (mainReliabilityField && modalReliabilityField) {{
+        modalReliabilityField.value = mainReliabilityField.value || '';
       }}
       const modal = document.getElementById('filterModal');
       modal.style.display = 'block';
@@ -3604,65 +4492,284 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
     function resetPortalFilters() {{
       document.getElementById('fcomp').value = '';
+      const quickCompetitionField = document.getElementById('fcompQuick');
+      if (quickCompetitionField) quickCompetitionField.value = '';
+      const modalCompetitionField = document.getElementById('fcompModalSelect');
+      if (modalCompetitionField) modalCompetitionField.value = '';
       document.getElementById('frisk').value = 'Baixo risco';
+      document.getElementById('precisionMetric').value = 'model';
+      document.getElementById('reliabilityMetric').value = 'model';
+      document.getElementById('reliabilityMetricModal').value = 'model';
+      document.getElementById('freliability').value = '';
+      document.getElementById('freliabilityModal').value = '';
       document.getElementById('fdate').value = '';
       document.getElementById('fdateModal').value = '';
+      document.getElementById('fdateFrom').value = '';
+      document.getElementById('fdateFromModal').value = '';
+      document.getElementById('fdateTo').value = '';
+      document.getElementById('fdateToModal').value = '';
       document.getElementById('fteam').value = '';
       document.getElementById('foddmin').value = '';
       document.getElementById('foddmax').value = '';
       document.getElementById('fprobmin').value = '';
       document.getElementById('fevmin').value = '';
       document.getElementById('fbooks').value = '';
+      document.getElementById('dateBestMetric').value = 'model';
       applyRiskPreset();
       applyFilters();
     }}
 
+    function resolveDateFilters() {{
+      const selectedDateInput = (document.getElementById('fdate').value || '').trim();
+      let rangeStart = (document.getElementById('fdateFrom').value || '').trim();
+      let rangeEnd = (document.getElementById('fdateTo').value || '').trim();
+      if (rangeStart && rangeEnd && rangeEnd < rangeStart) {{
+        const tmp = rangeStart;
+        rangeStart = rangeEnd;
+        rangeEnd = tmp;
+      }}
+      const hasRange = Boolean(rangeStart || rangeEnd);
+      return {{
+        selectedDate: hasRange ? '' : selectedDateInput,
+        rangeStart,
+        rangeEnd,
+        hasRange,
+      }};
+    }}
+
+    function isDateWithinFilters(dateValue, dateFilters) {{
+      const rowDate = (dateValue || '').trim();
+      if (!rowDate) return false;
+      if (dateFilters.selectedDate) return rowDate === dateFilters.selectedDate;
+      if (dateFilters.rangeStart && rowDate < dateFilters.rangeStart) return false;
+      if (dateFilters.rangeEnd && rowDate > dateFilters.rangeEnd) return false;
+      return true;
+    }}
+
+    function rowPassesDateFilter(dateValue, dateFilters) {{
+      if (!dateFilters.selectedDate && !dateFilters.hasRange) return true;
+      return isDateWithinFilters(dateValue, dateFilters);
+    }}
+
+    function formatHitRate(hits, total) {{
+      if (!total) return 'n/d';
+      return ((hits / total) * 100).toFixed(1) + '% (' + hits + '/' + total + ')';
+    }}
+
+    function getDateMetricConfig(metricKey) {{
+      if (metricKey === 'suggestion') {{
+        return {{
+          label: 'sugestao',
+          bestLabel: 'melhor dia da sugestao',
+          highlightText: 'Melhor na sugestao',
+          hitsKey: 'suggestionHits',
+          totalKey: 'suggestionTotal',
+        }};
+      }}
+      if (metricKey === 'house') {{
+        return {{
+          label: 'casas',
+          bestLabel: 'melhor dia das casas',
+          highlightText: 'Melhor nas casas',
+          hitsKey: 'houseHits',
+          totalKey: 'houseTotal',
+        }};
+      }}
+      return {{
+        label: 'modelo',
+        bestLabel: 'melhor dia do modelo',
+        highlightText: 'Melhor no modelo',
+        hitsKey: 'modelHits',
+        totalKey: 'modelTotal',
+      }};
+    }}
+
     function renderDateFocusMatches() {{
-      const selectedDate = document.getElementById('fdate').value;
+      const dateFilters = resolveDateFilters();
       const panel = document.getElementById('dateFocusPanel');
       const grid = document.getElementById('dateFocusGrid');
       const empty = document.getElementById('dateFocusEmpty');
+      const emptyDefaultText = 'Nenhum jogo desta data atende aos filtros atuais de competicao ou busca por time.';
       const title = document.getElementById('dateFocusTitle');
       const copy = document.getElementById('dateFocusCopy');
       const meta = document.getElementById('dateFocusMeta');
+      const accuracySummary = document.getElementById('dateAccuracySummary');
+      const accuracyTableWrap = document.getElementById('dateAccuracyTableWrap');
+      const accuracyTableBody = document.getElementById('dateAccuracyTableBody');
+      const metricField = document.getElementById('dateBestMetric');
+      const metricKey = (metricField && metricField.value ? String(metricField.value).trim().toLowerCase() : 'model');
+      const metricConfig = getDateMetricConfig(metricKey);
+      const reliabilityFilter = getReliabilityFilterState();
       const competition = (document.getElementById('fcomp').value || '').trim().toLowerCase();
       const team = (document.getElementById('fteam').value || '').trim().toLowerCase();
 
-      if (!selectedDate) {{
+      if (!dateFilters.selectedDate && !dateFilters.hasRange) {{
         panel.hidden = true;
         grid.innerHTML = '';
-        empty.hidden = true;
+        if (empty) {{
+          empty.textContent = emptyDefaultText;
+          empty.hidden = true;
+        }}
+        if (accuracySummary) {{
+          accuracySummary.textContent = 'Sem jogos finalizados no recorte atual para medir acerto.';
+        }}
+        if (accuracyTableWrap) accuracyTableWrap.hidden = true;
+        if (accuracyTableBody) accuracyTableBody.innerHTML = '';
         return;
       }}
 
       const matches = dateMatchCatalog
-        .filter((item) => item && item.filter_date === selectedDate)
+        .filter((item) => item && isDateWithinFilters(item.filter_date, dateFilters))
         .filter((item) => !competition || (item.competition || '').trim().toLowerCase() === competition)
         .filter((item) => {{
           if (!team) return true;
           const haystack = `${{item.competition || ''}} ${{item.matchup || ''}} ${{item.home || ''}} ${{item.away || ''}}`.toLowerCase();
           return haystack.includes(team);
         }})
+        .filter((item) => {{
+          if (!reliabilityFilter || reliabilityFilter.minPct === null) return true;
+          const detail = matchDetailsStore[item.detail_key];
+          const reliabilityInfo = estimateMatchReliability(detail, reliabilityFilter.metricKey);
+          return !!reliabilityInfo && reliabilityInfo.pct >= reliabilityFilter.minPct;
+        }})
         .sort((a, b) => getEventSortValue(matchDetailsStore[a.detail_key] || a) - getEventSortValue(matchDetailsStore[b.detail_key] || b));
 
       panel.hidden = false;
-      title.textContent = 'Jogos de ' + formatSelectedDate(selectedDate);
-      copy.textContent = 'Todos os confrontos desta data aparecem aqui mesmo quando nao entram nas faixas principais de risco. Abra a analise para ver leitura, placares provaveis e contexto.';
+      if (dateFilters.selectedDate) {{
+        title.textContent = 'Jogos de ' + formatSelectedDate(dateFilters.selectedDate);
+        copy.textContent = 'Todos os confrontos desta data aparecem aqui mesmo quando nao entram nas faixas principais de risco. Abra a analise para ver leitura, placares provaveis e contexto.';
+      }} else {{
+        const fromLabel = dateFilters.rangeStart ? formatSelectedDate(dateFilters.rangeStart) : 'inicio aberto';
+        const toLabel = dateFilters.rangeEnd ? formatSelectedDate(dateFilters.rangeEnd) : 'fim aberto';
+        title.textContent = 'Jogos por periodo';
+        copy.textContent = 'Comparativo por dia no intervalo ' + fromLabel + ' a ' + toLabel + ' para descobrir onde o acerto foi maior.';
+      }}
       meta.textContent = matches.length + (matches.length === 1 ? ' jogo reunido' : ' jogos reunidos') + ' com analise direta.';
+
+      const byDay = new Map();
+      matches.forEach((item) => {{
+        const detail = matchDetailsStore[item.detail_key] || {{}};
+        if (!detail || detail.status !== 'Finalizado') return;
+        const dayKey = String(item.filter_date || '').trim();
+        if (!dayKey) return;
+        const bucket = byDay.get(dayKey) || {{
+          dateKey: dayKey,
+          total: 0,
+          modelHits: 0,
+          modelTotal: 0,
+          suggestionHits: 0,
+          suggestionTotal: 0,
+          houseHits: 0,
+          houseTotal: 0,
+        }};
+        bucket.total += 1;
+        if (detail.model_hit) {{
+          bucket.modelTotal += 1;
+          if (detail.model_hit === 'Acertou') bucket.modelHits += 1;
+        }}
+        if (detail.suggestion_hit) {{
+          bucket.suggestionTotal += 1;
+          if (detail.suggestion_hit === 'Acertou') bucket.suggestionHits += 1;
+        }}
+        if (detail.house_hit) {{
+          bucket.houseTotal += 1;
+          if (detail.house_hit === 'Acertou') bucket.houseHits += 1;
+        }}
+        byDay.set(dayKey, bucket);
+      }});
+
+      const dayRows = Array.from(byDay.values()).sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+      const bestDay = dayRows.reduce((best, current) => {{
+        const currentTotal = Number(current[metricConfig.totalKey] || 0);
+        const currentHits = Number(current[metricConfig.hitsKey] || 0);
+        const currentRate = currentTotal ? (currentHits / currentTotal) : -1;
+        if (!best) return current;
+        const bestTotal = Number(best[metricConfig.totalKey] || 0);
+        const bestHits = Number(best[metricConfig.hitsKey] || 0);
+        const bestRate = bestTotal ? (bestHits / bestTotal) : -1;
+        if (currentRate > bestRate) return current;
+        if (currentRate < bestRate) return best;
+        if (currentTotal > bestTotal) return current;
+        return best;
+      }}, null);
+
+      if (accuracySummary) {{
+        if (!dayRows.length) {{
+          accuracySummary.textContent = 'Sem jogos finalizados no recorte atual para medir acerto.';
+        }} else {{
+          const totalFinalizados = dayRows.reduce((acc, item) => acc + item.total, 0);
+          const bestLabel = bestDay
+            ? formatSelectedDate(bestDay.dateKey) + ' (' + formatHitRate(bestDay[metricConfig.hitsKey], bestDay[metricConfig.totalKey]) + ' em ' + metricConfig.label + ')'
+            : 'n/d';
+          accuracySummary.textContent =
+            'Comparativo por dia: ' + dayRows.length + (dayRows.length === 1 ? ' data' : ' datas') +
+            ' | ' + totalFinalizados + (totalFinalizados === 1 ? ' jogo finalizado' : ' jogos finalizados') +
+            ' | ' + metricConfig.bestLabel + ': ' + bestLabel + '.';
+        }}
+      }}
+
+      if (accuracyTableWrap && accuracyTableBody) {{
+        if (!dayRows.length) {{
+          accuracyTableWrap.hidden = true;
+          accuracyTableBody.innerHTML = '';
+        }} else {{
+          accuracyTableWrap.hidden = false;
+          accuracyTableBody.innerHTML = dayRows.map((row) => {{
+            const isBest = bestDay && bestDay.dateKey === row.dateKey;
+            return `
+              <tr>
+                <td>${{formatSelectedDate(row.dateKey)}}</td>
+                <td>${{row.total}}</td>
+                <td>${{formatHitRate(row.modelHits, row.modelTotal)}}</td>
+                <td>${{formatHitRate(row.suggestionHits, row.suggestionTotal)}}</td>
+                <td>${{formatHitRate(row.houseHits, row.houseTotal)}}</td>
+                <td>${{isBest ? metricConfig.highlightText : '-'}}</td>
+              </tr>
+            `;
+          }}).join('');
+        }}
+      }}
 
       if (!matches.length) {{
         grid.innerHTML = '';
-        empty.hidden = false;
+        if (empty) {{
+          if (reliabilityFilter && reliabilityFilter.minPct !== null) {{
+            const metricLabel = getReliabilityMetricLabel(reliabilityFilter.metricKey).toLowerCase();
+            empty.textContent =
+              'Nenhum jogo no recorte atual atingiu a confiabilidade minima de ' +
+              formatReliabilityMinValue(reliabilityFilter.minPct) +
+              '% (' +
+              metricLabel +
+              ').';
+          }} else {{
+            empty.textContent = emptyDefaultText;
+          }}
+          empty.hidden = false;
+        }}
         return;
       }}
 
-      empty.hidden = true;
+      if (empty) {{
+        empty.textContent = emptyDefaultText;
+        empty.hidden = true;
+      }}
       grid.innerHTML = matches.map((item) => {{
         const detail = matchDetailsStore[item.detail_key] || {{}};
         const probability = Number(item.model_probability || 0);
+        const tipSource = (detail.tip && detail.tip.selection_source) || detail.suggestion_selection_source || 'model';
+        const tipSourceLabel = tipSource === 'house_lock'
+          ? 'consenso das casas'
+          : tipSource === 'house_consensus'
+            ? 'consenso das casas'
+            : 'modelo';
+        const tipLabel = tipSource === 'model' ? 'Sugestao do modelo' : 'Sugestao operacional';
         const tipLine = detail.tip
-          ? `Sugestao do modelo: ${{detail.tip.market}} | Odd ${{detail.tip.odd.toFixed(2)}} | EV ${{detail.tip.ev}}%`
+          ? `${{tipLabel}}: ${{detail.tip.market}} | Odd ${{detail.tip.odd.toFixed(2)}} | EV ${{detail.tip.ev}}% | Fonte: ${{tipSourceLabel}}`
           : `Leitura principal: ${{item.model_result || 'Sem leitura'}}${{probability ? ' | ' + probability.toFixed(1) + '%' : ''}}`;
+        const reliabilityInfo = estimateMatchReliability(detail, reliabilityFilter.metricKey);
+        const reliabilityLine = reliabilityInfo
+          ? `Confiabilidade estimada (${{getReliabilityMetricLabel(reliabilityFilter.metricKey)}}): ${{reliabilityInfo.pct.toFixed(1)}}%`
+          : `Confiabilidade estimada: n/d`;
         const statusLabel = item.status || 'Agendado';
         const matchupLabel = item.matchup || ((item.home || '') + ' x ' + (item.away || ''));
         return `
@@ -3674,11 +4781,12 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
               </div>
               <div class="date-match-meta">
                 <span>${{statusLabel}}</span>
-                <span>${{item.date_label || formatSelectedDate(selectedDate)}}</span>
+                <span>${{item.date_label || formatSelectedDate(item.filter_date || '')}}</span>
               </div>
             </div>
             <div class="date-match-note">${{item.model_risk_stage || 'Fora dos criterios'}}</div>
             <div class="date-match-copy">${{tipLine}}</div>
+            <div class="date-match-copy">${{reliabilityLine}}</div>
             <div class="date-match-actions">
               <button class="btn secondary" type="button" data-detail-key="${{item.detail_key}}" onclick="showMatchDetails(this)">Abrir analise</button>
             </div>
@@ -3709,17 +4817,34 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     function updateResultsSummary(shownCards, visibleRows) {{
       const competition = document.getElementById('fcomp').value || 'todas as competicoes';
       const risk = document.getElementById('frisk').value;
-      const selectedDate = document.getElementById('fdate').value;
+      const dateFilters = resolveDateFilters();
       const team = (document.getElementById('fteam').value || '').trim();
+      const reliabilityFilter = getReliabilityFilterState();
       const summary = document.getElementById('resultsSummary');
+      if (!summary) return;
       const parts = [
         shownCards + (shownCards === 1 ? ' competicao visivel' : ' competicoes visiveis'),
         visibleRows + (visibleRows === 1 ? ' linha encontrada' : ' linhas encontradas'),
         'perfil ' + risk.toLowerCase(),
       ];
       if (team) parts.push('busca por "' + team + '"');
-      if (selectedDate) parts.push('data ' + formatSelectedDate(selectedDate));
-      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' • ') + '.';
+      if (reliabilityFilter.minPct !== null) {{
+        parts.push(
+          'confiabilidade >= ' +
+          formatReliabilityMinValue(reliabilityFilter.minPct) +
+          '% (' +
+          getReliabilityMetricLabel(reliabilityFilter.metricKey) +
+          ')'
+        );
+      }}
+      if (dateFilters.selectedDate) {{
+        parts.push('data ' + formatSelectedDate(dateFilters.selectedDate));
+      }} else if (dateFilters.hasRange) {{
+        const fromLabel = dateFilters.rangeStart ? formatSelectedDate(dateFilters.rangeStart) : 'inicio aberto';
+        const toLabel = dateFilters.rangeEnd ? formatSelectedDate(dateFilters.rangeEnd) : 'fim aberto';
+        parts.push('periodo ' + fromLabel + ' a ' + toLabel);
+      }}
+      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' â€¢ ') + '.';
     }}
 
     function updateCompetitionNavState() {{
@@ -3738,6 +4863,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           card.classList.toggle('active', cardCompetition === activeCompetition);
         }}
       }});
+      syncCompetitionSelectors();
     }}
 
     function toggleCompetitionFilter(compName) {{
@@ -3876,7 +5002,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
                 <input class="multi-pick-toggle" type="checkbox" value="${{item.detail_key}}" />
                 <div>
                   <strong>${{item.home}} x ${{item.away}}</strong>
-                  <span>${{item.competition}} • ${{item.date_label || 'Data nao informada'}}</span>
+                  <span>${{item.competition}} â€¢ ${{item.date_label || 'Data nao informada'}}</span>
                 </div>
               </label>
               <div class="multi-pick-controls">
@@ -4389,7 +5515,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
     function applyFilters() {{
       const comp = (document.getElementById('fcomp').value || '').trim().toLowerCase();
-      const selectedDate = document.getElementById('fdate').value || '';
+      const dateFilters = resolveDateFilters();
+      const reliabilityFilter = syncReliabilityFilterFields();
       const team = (document.getElementById('fteam').value || '').toLowerCase().trim();
       const oddMinRaw = document.getElementById('foddmin').value;
       const oddMaxRaw = document.getElementById('foddmax').value;
@@ -4421,7 +5548,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           const txt = (row.textContent || '').toLowerCase();
           const rowDate = row.getAttribute('data-date') || '';
           const teamOk = !team || txt.includes(team);
-          const dateOk = !selectedDate || rowDate === selectedDate;
+          const dateOk = rowPassesDateFilter(rowDate, dateFilters);
+          const reliabilityOk = rowPassesReliabilityFilter(row, reliabilityFilter);
           let oddOk = true;
           const filterScope = row.getAttribute('data-filter-scope') || 'general';
           const oneOdd = row.getAttribute('data-odd');
@@ -4438,7 +5566,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             if (evMin !== null && !Number.isNaN(rowEv) && rowEv < evMin) oddOk = false;
             if (booksMin !== null && !Number.isNaN(rowBooks) && rowBooks < booksMin) oddOk = false;
           }}
-          row.style.display = teamOk && oddOk && dateOk ? '' : 'none';
+          row.style.display = teamOk && oddOk && dateOk && reliabilityOk ? '' : 'none';
         }});
 
         const cardVisibleRows = rows.filter(row => row.style.display !== 'none').length;
@@ -4462,8 +5590,9 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           const rowDate = row.getAttribute('data-date') || '';
           const rowComp = (row.getAttribute('data-comp') || '').trim().toLowerCase();
           const teamOk = !team || txt.includes(team);
-          const dateOk = !selectedDate || rowDate === selectedDate;
+          const dateOk = rowPassesDateFilter(rowDate, dateFilters);
           const compOk = !comp || rowComp === comp;
+          const reliabilityOk = rowPassesReliabilityFilter(row, reliabilityFilter);
           let oddOk = true;
           const filterScope = row.getAttribute('data-filter-scope') || 'general';
           const oneOdd = row.getAttribute('data-odd');
@@ -4480,7 +5609,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             if (evMin !== null && !Number.isNaN(rowEv) && rowEv < evMin) oddOk = false;
             if (booksMin !== null && !Number.isNaN(rowBooks) && rowBooks < booksMin) oddOk = false;
           }}
-          row.style.display = teamOk && oddOk && dateOk && compOk ? '' : 'none';
+          row.style.display = teamOk && oddOk && dateOk && compOk && reliabilityOk ? '' : 'none';
         }});
 
         const riskVisibleRows = rows.filter((row) => row.style.display !== 'none').length;
@@ -4496,6 +5625,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       renderDateFocusMatches();
       updateResultsSummary(shownCards, visibleRows);
       updateCompetitionNavState();
+      refreshPrecisionOptimizerSummary();
       const multiModal = document.getElementById('multiAnalysisModal');
       if (multiModal && multiModal.style.display !== 'none') {{
         renderMultiPickList();
@@ -4504,6 +5634,48 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
     document.getElementById('openFilterModal').addEventListener('click', openFilterModal);
     document.getElementById('applyFilter').addEventListener('click', applyFilters);
+    document.getElementById('applyPrecisionMode').addEventListener('click', applyPrecisionMode);
+    document.getElementById('precisionMetric').addEventListener('change', refreshPrecisionOptimizerSummary);
+    document.getElementById('reliabilityMetric').addEventListener('change', () => {{
+      syncReliabilityFilterFields('main');
+      applyFilters();
+    }});
+    document.getElementById('reliabilityMetricModal').addEventListener('change', () => {{
+      syncReliabilityFilterFields('modal');
+      applyFilters();
+    }});
+    document.getElementById('freliability').addEventListener('input', () => {{
+      syncReliabilityFilterFields('main');
+      applyFilters();
+    }});
+    document.getElementById('freliability').addEventListener('change', () => {{
+      syncReliabilityFilterFields('main');
+      applyFilters();
+    }});
+    document.getElementById('freliabilityModal').addEventListener('input', () => {{
+      syncReliabilityFilterFields('modal');
+      applyFilters();
+    }});
+    document.getElementById('freliabilityModal').addEventListener('change', () => {{
+      syncReliabilityFilterFields('modal');
+      applyFilters();
+    }});
+    document.getElementById('fcompQuick').addEventListener('change', () => {{
+      const competitionField = document.getElementById('fcomp');
+      const selectedCompetition = document.getElementById('fcompQuick').value || '';
+      if (competitionField && competitionField.value !== selectedCompetition) {{
+        competitionField.value = selectedCompetition;
+      }}
+      applyFilters();
+    }});
+    document.getElementById('fcompModalSelect').addEventListener('change', () => {{
+      const competitionField = document.getElementById('fcomp');
+      const selectedCompetition = document.getElementById('fcompModalSelect').value || '';
+      if (competitionField && competitionField.value !== selectedCompetition) {{
+        competitionField.value = selectedCompetition;
+      }}
+      applyFilters();
+    }});
     document.querySelectorAll('.competition-filter-card[data-comp-filter]').forEach((card) => {{
       card.addEventListener('click', () => toggleCompetitionFilter(card.getAttribute('data-comp-filter') || ''));
     }});
@@ -4523,7 +5695,40 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       }}
       applyFilters();
     }});
+    document.getElementById('fdateFrom').addEventListener('change', () => {{
+      const mainDate = document.getElementById('fdateFrom').value || '';
+      const modalDateField = document.getElementById('fdateFromModal');
+      if (modalDateField && modalDateField.value !== mainDate) {{
+        modalDateField.value = mainDate;
+      }}
+      applyFilters();
+    }});
+    document.getElementById('fdateFromModal').addEventListener('change', () => {{
+      const modalDate = document.getElementById('fdateFromModal').value || '';
+      const mainDateField = document.getElementById('fdateFrom');
+      if (mainDateField && mainDateField.value !== modalDate) {{
+        mainDateField.value = modalDate;
+      }}
+      applyFilters();
+    }});
+    document.getElementById('fdateTo').addEventListener('change', () => {{
+      const mainDate = document.getElementById('fdateTo').value || '';
+      const modalDateField = document.getElementById('fdateToModal');
+      if (modalDateField && modalDateField.value !== mainDate) {{
+        modalDateField.value = mainDate;
+      }}
+      applyFilters();
+    }});
+    document.getElementById('fdateToModal').addEventListener('change', () => {{
+      const modalDate = document.getElementById('fdateToModal').value || '';
+      const mainDateField = document.getElementById('fdateTo');
+      if (mainDateField && mainDateField.value !== modalDate) {{
+        mainDateField.value = modalDate;
+      }}
+      applyFilters();
+    }});
     document.getElementById('fteam').addEventListener('input', applyFilters);
+    document.getElementById('dateBestMetric').addEventListener('change', renderDateFocusMatches);
     document.getElementById('frisk').addEventListener('change', () => {{ applyRiskPreset(); applyFilters(); }});
     document.getElementById('clearFilter').addEventListener('click', resetPortalFilters);
     document.getElementById('clearFilterLauncher').addEventListener('click', resetPortalFilters);
@@ -4632,4 +5837,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 

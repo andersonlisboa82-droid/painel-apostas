@@ -41,21 +41,21 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
         "league_away_default": 1.10,
         "min_expected_home": 0.15,
         "min_expected_away": 0.10,
-        "shrink_sample_size": 6.0,
+        "shrink_sample_size": 8.0,
     },
     "calibration": {
         "enabled": True,
         "bins": PROBABILITY_CALIBRATION_BINS,
-        "min_history_matches": 40,
-        "min_bucket_matches": 8,
-        "baseline_weight": 0.20,
-        "max_adjustment_weight": 0.70,
-        "weight_sample_size": 30.0,
+        "min_history_matches": 80,
+        "min_bucket_matches": 12,
+        "baseline_weight": 0.30,
+        "max_adjustment_weight": 0.55,
+        "weight_sample_size": 45.0,
     },
     "betting": {
         "kelly_fractional": 0.25,
-        "accuracy_threshold": 0.65,
-        "house_favorite_lock_threshold": 0.72,
+        "accuracy_threshold": 0.68,
+        "house_favorite_lock_threshold": 0.70,
     },
     "safe_score": {
         "prob_weight": 0.55,
@@ -125,7 +125,7 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 2.5,
             )
             poisson_cfg["shrink_sample_size"] = _clamp(
-                _safe_float(poisson_raw.get("shrink_sample_size"), _safe_float(poisson_default.get("shrink_sample_size"), 6.0)),
+                _safe_float(poisson_raw.get("shrink_sample_size"), _safe_float(poisson_default.get("shrink_sample_size"), 8.0)),
                 0.0,
                 80.0,
             )
@@ -157,27 +157,27 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
             calibration_cfg["bins"] = bins_candidate
             calibration_cfg["min_history_matches"] = max(
                 10,
-                _safe_int(calibration_raw.get("min_history_matches"), _safe_int(calibration_default.get("min_history_matches"), 40)),
+                _safe_int(calibration_raw.get("min_history_matches"), _safe_int(calibration_default.get("min_history_matches"), 80)),
             )
             calibration_cfg["min_bucket_matches"] = max(
                 1,
-                _safe_int(calibration_raw.get("min_bucket_matches"), _safe_int(calibration_default.get("min_bucket_matches"), 8)),
+                _safe_int(calibration_raw.get("min_bucket_matches"), _safe_int(calibration_default.get("min_bucket_matches"), 12)),
             )
             calibration_cfg["baseline_weight"] = _clamp(
-                _safe_float(calibration_raw.get("baseline_weight"), _safe_float(calibration_default.get("baseline_weight"), 0.20)),
+                _safe_float(calibration_raw.get("baseline_weight"), _safe_float(calibration_default.get("baseline_weight"), 0.30)),
                 0.0,
                 1.0,
             )
             calibration_cfg["max_adjustment_weight"] = _clamp(
                 _safe_float(
                     calibration_raw.get("max_adjustment_weight"),
-                    _safe_float(calibration_default.get("max_adjustment_weight"), 0.70),
+                    _safe_float(calibration_default.get("max_adjustment_weight"), 0.55),
                 ),
                 0.0,
                 1.0,
             )
             calibration_cfg["weight_sample_size"] = _clamp(
-                _safe_float(calibration_raw.get("weight_sample_size"), _safe_float(calibration_default.get("weight_sample_size"), 30.0)),
+                _safe_float(calibration_raw.get("weight_sample_size"), _safe_float(calibration_default.get("weight_sample_size"), 45.0)),
                 1.0,
                 500.0,
             )
@@ -193,14 +193,14 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 1.0,
             )
             betting_cfg["accuracy_threshold"] = _clamp(
-                _safe_float(betting_raw.get("accuracy_threshold"), _safe_float(betting_default.get("accuracy_threshold"), 0.65)),
+                _safe_float(betting_raw.get("accuracy_threshold"), _safe_float(betting_default.get("accuracy_threshold"), 0.68)),
                 0.0,
                 1.0,
             )
             betting_cfg["house_favorite_lock_threshold"] = _clamp(
                 _safe_float(
                     betting_raw.get("house_favorite_lock_threshold"),
-                    _safe_float(betting_default.get("house_favorite_lock_threshold"), 0.72),
+                    _safe_float(betting_default.get("house_favorite_lock_threshold"), 0.70),
                 ),
                 0.0,
                 1.0,
@@ -412,14 +412,14 @@ def build_probability_calibration(
     calibration_cfg = cfg["calibration"] if isinstance(cfg.get("calibration"), dict) else {}
     poisson_cfg = cfg["poisson"] if isinstance(cfg.get("poisson"), dict) else {}
     resolved_min_history = (
-        max(10, _safe_int(min_history_matches, 40))
+        max(10, _safe_int(min_history_matches, 80))
         if min_history_matches is not None
-        else max(10, _safe_int(calibration_cfg.get("min_history_matches"), 40))
+        else max(10, _safe_int(calibration_cfg.get("min_history_matches"), 80))
     )
     resolved_min_bucket = (
-        max(1, _safe_int(min_bucket_matches, 8))
+        max(1, _safe_int(min_bucket_matches, 12))
         if min_bucket_matches is not None
-        else max(1, _safe_int(calibration_cfg.get("min_bucket_matches"), 8))
+        else max(1, _safe_int(calibration_cfg.get("min_bucket_matches"), 12))
     )
     resolved_max_goals = (
         max(3, min(10, _safe_int(max_goals, 5)))
@@ -539,9 +539,9 @@ def _apply_probability_calibration(
     min_bucket_matches = int(calibration.get("min_bucket_matches", 0))
     calibration_markets = calibration.get("markets", {})
     market_base = calibration.get("market_base", {})
-    baseline_weight = _clamp(_safe_float(calibration_cfg.get("baseline_weight"), 0.20), 0.0, 1.0)
-    max_adjustment_weight = _clamp(_safe_float(calibration_cfg.get("max_adjustment_weight"), 0.70), 0.0, 1.0)
-    weight_sample_size = max(1.0, _safe_float(calibration_cfg.get("weight_sample_size"), 30.0))
+    baseline_weight = _clamp(_safe_float(calibration_cfg.get("baseline_weight"), 0.30), 0.0, 1.0)
+    max_adjustment_weight = _clamp(_safe_float(calibration_cfg.get("max_adjustment_weight"), 0.55), 0.0, 1.0)
+    weight_sample_size = max(1.0, _safe_float(calibration_cfg.get("weight_sample_size"), 45.0))
 
     adjusted: dict[str, float] = {}
     for market, raw_probability in market_map.items():
@@ -599,14 +599,14 @@ def calculate_match_probabilities(
         else max(3, min(10, _safe_int(poisson_cfg.get("max_goals"), 5)))
     )
     resolved_min_history = (
-        max(10, _safe_int(min_calibration_history, 40))
+        max(10, _safe_int(min_calibration_history, 80))
         if min_calibration_history is not None
-        else max(10, _safe_int(calibration_cfg.get("min_history_matches"), 40))
+        else max(10, _safe_int(calibration_cfg.get("min_history_matches"), 80))
     )
     resolved_min_bucket = (
-        max(1, _safe_int(min_calibration_bucket, 8))
+        max(1, _safe_int(min_calibration_bucket, 12))
         if min_calibration_bucket is not None
-        else max(1, _safe_int(calibration_cfg.get("min_bucket_matches"), 8))
+        else max(1, _safe_int(calibration_cfg.get("min_bucket_matches"), 12))
     )
     bins = calibration_cfg.get("bins", PROBABILITY_CALIBRATION_BINS)
     if not isinstance(bins, list):
@@ -722,8 +722,8 @@ def suggest_bet_strategy(
         if kelly_fractional is not None
         else _clamp(_safe_float(betting_cfg.get("kelly_fractional"), 0.25), 0.0, 1.0)
     )
-    accuracy_threshold = _clamp(_safe_float(betting_cfg.get("accuracy_threshold"), 0.65), 0.0, 1.0)
-    house_favorite_lock_threshold = _clamp(_safe_float(betting_cfg.get("house_favorite_lock_threshold"), 0.72), 0.0, 1.0)
+    accuracy_threshold = _clamp(_safe_float(betting_cfg.get("accuracy_threshold"), 0.68), 0.0, 1.0)
+    house_favorite_lock_threshold = _clamp(_safe_float(betting_cfg.get("house_favorite_lock_threshold"), 0.70), 0.0, 1.0)
 
     markets = [
         ("Casa", probs.home_win, odd_home),
@@ -795,10 +795,10 @@ def build_safe_bets_table(
     matches_df: pd.DataFrame,
     bankroll: float,
     kelly_fractional: float | None = None,
-    min_model_prob: float = 0.55,
+    min_model_prob: float = 0.60,
     min_expected_value: float = 0.02,
-    max_odd: float = 2.20,
-    min_bookmakers: int = 8,
+    max_odd: float = 2.30,
+    min_bookmakers: int = 10,
     *,
     model_config: dict[str, object] | None = None,
 ) -> pd.DataFrame:
@@ -946,7 +946,7 @@ def build_backtest_table(
     *,
     bankroll: float = 1000.0,
     kelly_fractional: float | None = None,
-    min_history_matches: int = 30,
+    min_history_matches: int = 40,
     max_evaluated_matches: int = 120,
     model_config: dict[str, object] | None = None,
 ) -> pd.DataFrame:
