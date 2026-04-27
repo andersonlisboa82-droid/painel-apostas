@@ -2813,24 +2813,6 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           </div>
         </section>
 
-        <section class="rail-card" style="margin-bottom: 14px;">
-          <div class="eyebrow">Modo Precisao</div>
-          <h3>Mais acerto no filtro</h3>
-          <p>Aplica thresholds com base nos jogos finalizados para elevar o percentual de acerto.</p>
-          <div class="field" style="margin-top: 12px;">
-            <label for="precisionMetric">Objetivo de acerto</label>
-            <select id="precisionMetric">
-              <option value="model">Acerto do modelo</option>
-              <option value="suggestion">Acerto da sugestao</option>
-              <option value="house">Acerto das casas</option>
-            </select>
-          </div>
-          <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
-            <button id="applyPrecisionMode" class="btn primary" type="button">Aplicar modo precisao</button>
-          </div>
-          <div id="precisionOptimizerSummary" class="summary-box" style="margin-top: 10px;">Aguardando leitura dos jogos finalizados para sugerir o melhor filtro.</div>
-        </section>
-
         <section class="rail-card">
           <div class="eyebrow">Radar lateral</div>
           <h3>Focos por competicao</h3>
@@ -4497,7 +4479,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const modalCompetitionField = document.getElementById('fcompModalSelect');
       if (modalCompetitionField) modalCompetitionField.value = '';
       document.getElementById('frisk').value = 'Baixo risco';
-      document.getElementById('precisionMetric').value = 'model';
+      const precisionMetricField = document.getElementById('precisionMetric');
+      if (precisionMetricField) precisionMetricField.value = 'model';
       document.getElementById('reliabilityMetric').value = 'model';
       document.getElementById('reliabilityMetricModal').value = 'model';
       document.getElementById('freliability').value = '';
@@ -5634,8 +5617,14 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
     document.getElementById('openFilterModal').addEventListener('click', openFilterModal);
     document.getElementById('applyFilter').addEventListener('click', applyFilters);
-    document.getElementById('applyPrecisionMode').addEventListener('click', applyPrecisionMode);
-    document.getElementById('precisionMetric').addEventListener('change', refreshPrecisionOptimizerSummary);
+    const applyPrecisionModeBtn = document.getElementById('applyPrecisionMode');
+    if (applyPrecisionModeBtn) {{
+      applyPrecisionModeBtn.addEventListener('click', applyPrecisionMode);
+    }}
+    const precisionMetricField = document.getElementById('precisionMetric');
+    if (precisionMetricField) {{
+      precisionMetricField.addEventListener('change', refreshPrecisionOptimizerSummary);
+    }}
     document.getElementById('reliabilityMetric').addEventListener('change', () => {{
       syncReliabilityFilterFields('main');
       applyFilters();
