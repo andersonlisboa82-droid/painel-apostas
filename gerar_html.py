@@ -1993,9 +1993,9 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     .competition-filter-card.all-card {{
       border-style: dashed;
     }}
-    .field {{ display: grid; gap: 8px; padding: 14px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.76)); border: 1px solid var(--line); }}
+    .field {{ display: grid; gap: 8px; min-width: 0; padding: 14px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.96), rgba(241,245,249,.76)); border: 1px solid var(--line); }}
     .field label {{ font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #334155; }}
-    .field input, .field select {{ height: 44px; border-radius: 12px; border: 1px solid var(--line-strong); padding: 0 14px; font: inherit; color: var(--text); background: rgba(255,255,255,.98); outline: none; }}
+    .field input, .field select {{ width: 100%; min-width: 0; max-width: 100%; height: 44px; border-radius: 12px; border: 1px solid var(--line-strong); padding: 0 14px; font: inherit; color: var(--text); background: rgba(255,255,255,.98); outline: none; }}
     .field input:focus, .field select:focus {{ border-color: rgba(29,78,216,.48); box-shadow: 0 0 0 4px rgba(29,78,216,.08); }}
     .hint {{ font-size: 12px; color: var(--muted); line-height: 1.45; }}
     .actions {{ display: flex; flex-wrap: wrap; gap: 10px; }}
@@ -2858,6 +2858,16 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
               <label for="freliability">Confiabilidade minima (%)</label>
               <input id="freliability" type="number" step="1" min="0" max="100" placeholder="70" />
             </div>
+            <div class="field" style="margin: 0;">
+              <label for="dateMatchFilter">Filtro dos jogos</label>
+              <select id="dateMatchFilter">
+                <option value="all">Todos os jogos</option>
+                <option value="highHit">Alta taxa: modelo >= 48% e odd <= 2.00</option>
+                <option value="strict">Conservador: modelo >= 50% e odd <= 2.00</option>
+                <option value="dayConsensus">Consenso do dia: entrada >= 50%, odd <= 1.85 e casas concordam</option>
+                <option value="hideDiscard">Ocultar zona de descarte</option>
+              </select>
+            </div>
           </div>
           <div id="dateAccuracySummary" class="summary-box" style="margin-top: 12px;">Sem jogos finalizados no recorte atual para medir acerto.</div>
           <div id="dateAccuracyTableWrap" class="table-wrap" style="margin-top: 12px;" hidden>
@@ -3489,6 +3499,72 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         return Math.max(0, Math.min(1, numericValue / 100));
       }}
       return Math.max(0, Math.min(1, numericValue));
+    }}
+
+    function resolveOddForResultLabel(detail, resultLabel) {{
+      if (!detail || !detail.odds) return null;
+      const marketKey = marketKeyFromResultLabel(resultLabel, detail);
+      if (!marketKey) return null;
+      const odd = Number(detail.odds[marketKey]);
+      return Number.isFinite(odd) && odd > 1.0 ? odd : null;
+    }}
+
+    function modelAgreesWithHouse(detail) {{
+      if (!detail) return false;
+      const modelResult = String(detail.model_result || '').trim();
+      const houseResult = String(detail.house_result || '').trim();
+      return Boolean(modelResult && houseResult && houseResult !== '-' && modelResult === houseResult);
+    }}
+
+    function getDateMatchFilterMode() {{
+      const field = document.getElementById('dateMatchFilter');
+      return field && field.value ? String(field.value).trim() : 'all';
+    }}
+
+    function getDateMatchFilterLabel(mode) {{
+      if (mode === 'highHit') return 'alta taxa';
+      if (mode === 'strict') return 'conservador';
+      if (mode === 'dayConsensus') return 'consenso do dia';
+      if (mode === 'hideDiscard') return 'sem zona de descarte';
+      return 'todos os jogos';
+    }}
+
+    function detailPassesDateMatchFilter(detail, mode) {{
+      if (!mode || mode === 'all') return true;
+      if (!detail) return false;
+
+      const modelProb = normalizeProbabilityValue(detail.model_probability);
+      const modelOdd = resolveOddForResultLabel(detail, detail.model_result);
+      const tip = detail.tip && typeof detail.tip === 'object' ? detail.tip : null;
+      const tipProb = tip ? normalizeProbabilityValue(tip.prob) : normalizeProbabilityValue(detail.suggestion_probability);
+      const tipOdd = tip && Number.isFinite(Number(tip.odd)) ? Number(tip.odd) : resolveOddForResultLabel(detail, detail.suggestion_result);
+      const hasModelProb = modelProb !== null;
+      const hasModelOdd = modelOdd !== null;
+      const hasTipProb = tipProb !== null;
+      const hasTipOdd = Number.isFinite(Number(tipOdd)) && Number(tipOdd) > 1.0;
+
+      if (mode === 'highHit') {{
+        return hasModelProb && hasModelOdd && modelProb >= 0.48 && modelOdd <= 2.00;
+      }}
+      if (mode === 'strict') {{
+        return hasModelProb && hasModelOdd && modelProb >= 0.50 && modelOdd <= 2.00;
+      }}
+      if (mode === 'dayConsensus') {{
+        return (
+          hasTipProb &&
+          hasTipOdd &&
+          tipProb >= 0.50 &&
+          Number(tipOdd) <= 1.85 &&
+          modelAgreesWithHouse(detail)
+        );
+      }}
+      if (mode === 'hideDiscard') {{
+        if (!hasModelProb) return false;
+        if (modelProb <= 0.40) return false;
+        if (hasModelOdd && modelOdd > 2.50) return false;
+        return true;
+      }}
+      return true;
     }}
 
     function marketKeyFromResultLabel(resultLabel, detail) {{
@@ -4498,6 +4574,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       document.getElementById('fevmin').value = '';
       document.getElementById('fbooks').value = '';
       document.getElementById('dateBestMetric').value = 'model';
+      const dateMatchFilterField = document.getElementById('dateMatchFilter');
+      if (dateMatchFilterField) dateMatchFilterField.value = 'all';
       applyRiskPreset();
       applyFilters();
     }}
@@ -4583,6 +4661,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       const metricKey = (metricField && metricField.value ? String(metricField.value).trim().toLowerCase() : 'model');
       const metricConfig = getDateMetricConfig(metricKey);
       const reliabilityFilter = getReliabilityFilterState();
+      const dateMatchFilterMode = getDateMatchFilterMode();
+      const dateMatchFilterLabel = getDateMatchFilterLabel(dateMatchFilterMode);
       const competition = (document.getElementById('fcomp').value || '').trim().toLowerCase();
       const team = (document.getElementById('fteam').value || '').trim().toLowerCase();
 
@@ -4615,6 +4695,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           const reliabilityInfo = estimateMatchReliability(detail, reliabilityFilter.metricKey);
           return !!reliabilityInfo && reliabilityInfo.pct >= reliabilityFilter.minPct;
         }})
+        .filter((item) => {{
+          const detail = matchDetailsStore[item.detail_key];
+          return detailPassesDateMatchFilter(detail, dateMatchFilterMode);
+        }})
         .sort((a, b) => getEventSortValue(matchDetailsStore[a.detail_key] || a) - getEventSortValue(matchDetailsStore[b.detail_key] || b));
 
       panel.hidden = false;
@@ -4627,7 +4711,12 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         title.textContent = 'Jogos por periodo';
         copy.textContent = 'Comparativo por dia no intervalo ' + fromLabel + ' a ' + toLabel + ' para descobrir onde o acerto foi maior.';
       }}
-      meta.textContent = matches.length + (matches.length === 1 ? ' jogo reunido' : ' jogos reunidos') + ' com analise direta.';
+      meta.textContent =
+        matches.length +
+        (matches.length === 1 ? ' jogo reunido' : ' jogos reunidos') +
+        ' com analise direta | filtro: ' +
+        dateMatchFilterLabel +
+        '.';
 
       const byDay = new Map();
       matches.forEach((item) => {{
@@ -4724,6 +4813,11 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
               '% (' +
               metricLabel +
               ').';
+          }} else if (dateMatchFilterMode && dateMatchFilterMode !== 'all') {{
+            empty.textContent =
+              'Nenhum jogo no recorte atual passou no filtro "' +
+              dateMatchFilterLabel +
+              '". Troque para "Todos os jogos" para ver a lista completa.';
           }} else {{
             empty.textContent = emptyDefaultText;
           }}
@@ -5718,6 +5812,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }});
     document.getElementById('fteam').addEventListener('input', applyFilters);
     document.getElementById('dateBestMetric').addEventListener('change', renderDateFocusMatches);
+    const dateMatchFilterField = document.getElementById('dateMatchFilter');
+    if (dateMatchFilterField) {{
+      dateMatchFilterField.addEventListener('change', renderDateFocusMatches);
+    }}
     document.getElementById('frisk').addEventListener('change', () => {{ applyRiskPreset(); applyFilters(); }});
     document.getElementById('clearFilter').addEventListener('click', resetPortalFilters);
     document.getElementById('clearFilterLauncher').addEventListener('click', resetPortalFilters);
