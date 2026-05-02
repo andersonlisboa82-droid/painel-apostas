@@ -419,6 +419,59 @@ def _best_bookmaker_result(
     return min(options, key=lambda item: item[1])[0]
 
 
+def _calculate_competition_accuracy(df: pd.DataFrame) -> dict[str, int]:
+    finished = df[df["status"] == "Finalizado"].copy()
+    finished = finished.dropna(subset=["home_goals", "away_goals"])
+    model_hits = 0
+    model_evaluated = 0
+    market_hits = 0
+    market_evaluated = 0
+    prob_cache: dict[str, object] = {}
+
+    for row in finished.itertuples(index=False):
+        actual_result = _actual_market_label(
+            getattr(row, "home_goals", None),
+            getattr(row, "away_goals", None),
+            str(row.home_team),
+            str(row.away_team),
+        )
+        if actual_result == "-":
+            continue
+
+        try:
+            match_key = f"{row.home_team}_{row.away_team}"
+            if match_key not in prob_cache:
+                prob_cache[match_key] = calculate_match_probabilities(df, row.home_team, row.away_team)
+            model_result, _ = _best_model_result(prob_cache[match_key], str(row.home_team), str(row.away_team))
+        except Exception:
+            continue
+
+        model_evaluated += 1
+        if actual_result == model_result:
+            model_hits += 1
+
+        bookmaker_result = _best_bookmaker_result(
+            str(row.home_team),
+            str(row.away_team),
+            getattr(row, "odds_home", None),
+            getattr(row, "odds_draw", None),
+            getattr(row, "odds_away", None),
+        )
+        if bookmaker_result != "-":
+            market_evaluated += 1
+            if actual_result == bookmaker_result:
+                market_hits += 1
+
+    return {
+        "finished_hits": model_hits,
+        "finished_evaluated": model_evaluated,
+        "finished_hit_rate": round((model_hits / model_evaluated) * 100) if model_evaluated else 0,
+        "finished_market_hits": market_hits,
+        "finished_market_evaluated": market_evaluated,
+        "finished_market_hit_rate": round((market_hits / market_evaluated) * 100) if market_evaluated else 0,
+    }
+
+
 def _risk_stage_from_metrics(probability: float, expected_value: float, odd: float, bookmakers: int) -> str:
     if probability >= 0.62 and expected_value >= 0.03 and 1.0 < odd <= 1.95 and bookmakers >= 10:
         return "Baixo risco"
@@ -1051,11 +1104,12 @@ def _build_competition_section(
     risk_entries: list[dict[str, object]] = []
     match_catalog: list[dict[str, object]] = []
     detail_index = 0
-    finished_hits = 0
+    accuracy_stats = _calculate_competition_accuracy(df)
+    finished_hits = int(accuracy_stats["finished_hits"])
     prob_cache: dict[str, object] = {}
-    finished_evaluated = 0
-    finished_market_hits = 0
-    finished_market_evaluated = 0
+    finished_evaluated = int(accuracy_stats["finished_evaluated"])
+    finished_market_hits = int(accuracy_stats["finished_market_hits"])
+    finished_market_evaluated = int(accuracy_stats["finished_market_evaluated"])
 
     def register_detail(detail_json: str) -> str:
         nonlocal detail_index
@@ -1226,16 +1280,10 @@ def _build_competition_section(
                 str(row.away_team),
             )
             if actual_result != "-":
-                finished_evaluated += 1
                 if actual_result == model_result:
-                    finished_hits += 1
                     model_hit_label = "Acertou"
                 else:
                     model_hit_label = "Errou"
-                if bookmaker_result != "-":
-                    finished_market_evaluated += 1
-                    if actual_result == bookmaker_result:
-                        finished_market_hits += 1
             detail_json = _get_detail_json(
                 df,
                 row,
@@ -1342,10 +1390,10 @@ def _build_competition_section(
         "finished": len(finished),
         "finished_hits": finished_hits,
         "finished_evaluated": finished_evaluated,
-        "finished_hit_rate": round((finished_hits / finished_evaluated) * 100) if finished_evaluated else 0,
+        "finished_hit_rate": int(accuracy_stats["finished_hit_rate"]),
         "finished_market_hits": finished_market_hits,
         "finished_market_evaluated": finished_market_evaluated,
-        "finished_market_hit_rate": round((finished_market_hits / finished_market_evaluated) * 100) if finished_market_evaluated else 0,
+        "finished_market_hit_rate": int(accuracy_stats["finished_market_hit_rate"]),
         "fixtures": len(fixtures),
         "fixtures_valid": len(fixtures_valid),
         "safe": len(safe_rows),
