@@ -5,6 +5,10 @@ Projeto em Python para acompanhar jogos e odds de:
 - Copa do Brasil
 - La Liga
 - Premier League
+- Bundesliga
+- Ligue 1
+- Saudi Professional League
+- Liga Portugal
 - Copa do Mundo (rota 2026)
 
 Sem uso de API com chave. Os dados sao raspados de paginas publicas do BetExplorer.

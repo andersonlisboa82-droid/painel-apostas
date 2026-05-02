@@ -14,7 +14,7 @@ if /I not "%AI_SERVER_UP%"=="True" (
 )
 for /f %%i in ('powershell -NoProfile -Command "(Test-NetConnection -ComputerName 127.0.0.1 -Port 8503 -WarningAction SilentlyContinue).TcpTestSucceeded"') do set APP_SERVER_UP=%%i
 if /I not "%APP_SERVER_UP%"=="True" (
-  start "Portal App" /min cmd /c "cd /d %~dp0 && streamlit run app.py --server.port 8503 --server.headless true"
+  start "Portal App" /min cmd /c "cd /d %~dp0 && python -m streamlit run app.py --server.port 8503 --server.headless true"
   timeout /t 2 /nobreak >nul
 )
 start "" "http://127.0.0.1:8503/?view=app"
