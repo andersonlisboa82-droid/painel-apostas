@@ -1091,14 +1091,19 @@ def render_public_model_criteria_help() -> None:
 
 
 @st.cache_data(show_spinner=False)
-def _read_cached_html_snapshot(path_str: str, modified_at: float) -> str:
+def _read_cached_html_snapshot(path_str: str, modified_at: float, release_hash: str) -> str:
     del modified_at
+    del release_hash
     return Path(path_str).read_text(encoding="utf-8")
 
 
 def _load_index_portal_html() -> str:
     if INDEX_HTML_FILE.exists():
-        cached_html = _read_cached_html_snapshot(str(INDEX_HTML_FILE), INDEX_HTML_FILE.stat().st_mtime)
+        cached_html = _read_cached_html_snapshot(
+            str(INDEX_HTML_FILE),
+            INDEX_HTML_FILE.stat().st_mtime,
+            CURRENT_GIT_SHORT_HASH,
+        )
         embedded_hash = _extract_portal_git_hash(cached_html)
         if CURRENT_GIT_SHORT_HASH != "sem-git" and embedded_hash != CURRENT_GIT_SHORT_HASH:
             refreshed_html = build_index_html()
@@ -1115,7 +1120,11 @@ def _load_index_portal_html() -> str:
 
 def _load_world_cup_portal_html() -> str:
     if WORLD_CUP_HTML_FILE.exists():
-        return _read_cached_html_snapshot(str(WORLD_CUP_HTML_FILE), WORLD_CUP_HTML_FILE.stat().st_mtime)
+        return _read_cached_html_snapshot(
+            str(WORLD_CUP_HTML_FILE),
+            WORLD_CUP_HTML_FILE.stat().st_mtime,
+            CURRENT_GIT_SHORT_HASH,
+        )
 
     html = build_world_cup_schedule_html()
     WORLD_CUP_HTML_FILE.write_text(html, encoding="utf-8")
