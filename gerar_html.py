@@ -472,6 +472,155 @@ def _calculate_competition_accuracy(df: pd.DataFrame) -> dict[str, int]:
     }
 
 
+def _collect_today_performance_entries(name: str, df: pd.DataFrame) -> list[dict[str, object]]:
+    today_key = datetime.now(APP_TIMEZONE).date().isoformat()
+    finished = df[df["status"] == "Finalizado"].copy()
+    entries: list[dict[str, object]] = []
+
+    for row in finished.itertuples(index=False):
+        filter_date = _match_filter_date(
+            getattr(row, "date_text", ""),
+            getattr(row, "event_timestamp", None),
+            str(getattr(row, "status", "")),
+        )
+        if filter_date != today_key:
+            continue
+
+        actual_result = _actual_market_label(
+            getattr(row, "home_goals", None),
+            getattr(row, "away_goals", None),
+            str(row.home_team),
+            str(row.away_team),
+        )
+        if actual_result == "-":
+            continue
+
+        try:
+            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
+        except Exception:
+            continue
+
+        house_result = _best_bookmaker_result(
+            str(row.home_team),
+            str(row.away_team),
+            getattr(row, "odds_home", None),
+            getattr(row, "odds_draw", None),
+            getattr(row, "odds_away", None),
+        )
+        entries.append(
+            {
+                "competition": name,
+                "matchup": f"{row.home_team} x {row.away_team}",
+                "score": f"{_fmt_score(getattr(row, 'home_goals', None))} x {_fmt_score(getattr(row, 'away_goals', None))}",
+                "actual": actual_result,
+                "model": model_result,
+                "model_probability": round(float(model_probability) * 100.0, 1),
+                "model_hit": actual_result == model_result,
+                "house": house_result,
+                "house_hit": actual_result == house_result if house_result != "-" else None,
+            }
+        )
+
+    return entries
+
+
+def _format_ratio(hits: int, total: int) -> str:
+    if total <= 0:
+        return "--"
+    return f"{round((hits / total) * 100)}% ({hits}/{total})"
+
+
+def _build_today_performance_html(entries: list[dict[str, object]]) -> str:
+    today_label = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y")
+    if not entries:
+        return f"""
+      <div class="today-panel">
+        <div class="today-head">
+          <span>Resumo de hoje</span>
+          <strong>{today_label}</strong>
+        </div>
+        <p>Nenhum jogo finalizado encontrado hoje para medir acerto do modelo e das casas.</p>
+      </div>
+"""
+
+    model_total = len(entries)
+    model_hits = sum(1 for item in entries if item.get("model_hit") is True)
+    house_entries = [item for item in entries if item.get("house_hit") is not None]
+    house_total = len(house_entries)
+    house_hits = sum(1 for item in house_entries if item.get("house_hit") is True)
+
+    by_comp: dict[str, dict[str, int]] = {}
+    for item in entries:
+        comp = str(item.get("competition", "Competicao"))
+        bucket = by_comp.setdefault(comp, {"total": 0, "model_hits": 0, "house_hits": 0, "house_total": 0})
+        bucket["total"] += 1
+        if item.get("model_hit") is True:
+            bucket["model_hits"] += 1
+        if item.get("house_hit") is not None:
+            bucket["house_total"] += 1
+            if item.get("house_hit") is True:
+                bucket["house_hits"] += 1
+
+    comp_rows = sorted(
+        by_comp.items(),
+        key=lambda pair: (pair[1]["model_hits"] / max(pair[1]["total"], 1), pair[1]["total"]),
+        reverse=True,
+    )
+    comp_html = "".join(
+        f"<li><strong>{escape(comp)}</strong><span>Modelo {_format_ratio(values['model_hits'], values['total'])} | Casas {_format_ratio(values['house_hits'], values['house_total'])}</span></li>"
+        for comp, values in comp_rows[:6]
+    )
+
+    misses = [item for item in entries if item.get("model_hit") is False]
+    high_conf_misses = sorted(misses, key=lambda item: float(item.get("model_probability", 0.0)), reverse=True)[:5]
+    miss_html = "".join(
+        (
+            f"<li><strong>{escape(str(item['competition']))}</strong>"
+            f"<span>{escape(str(item['matchup']))} ({escape(str(item['score']))}) | "
+            f"Modelo: {escape(str(item['model']))} {float(item.get('model_probability', 0.0)):.1f}% | "
+            f"Real: {escape(str(item['actual']))}</span></li>"
+        )
+        for item in high_conf_misses
+    ) or "<li><strong>Sem alerta</strong><span>Nenhum erro do modelo nos jogos finalizados de hoje.</span></li>"
+
+    draw_misses = [
+        item
+        for item in misses
+        if str(item.get("actual", "")).lower() == "empate" and str(item.get("model", "")).lower() != "empate"
+    ]
+    draw_note = (
+        f"{len(draw_misses)} erro(s) vieram de empates contra uma vitoria projetada."
+        if draw_misses
+        else "Empates nao foram o principal problema do recorte."
+    )
+
+    return f"""
+      <div class="today-panel">
+        <div class="today-head">
+          <span>Resumo de hoje</span>
+          <strong>{today_label}</strong>
+        </div>
+        <div class="today-metrics">
+          <div class="today-chip"><span>Jogos finalizados</span><strong>{model_total}</strong></div>
+          <div class="today-chip"><span>Acerto modelo</span><strong>{_format_ratio(model_hits, model_total)}</strong></div>
+          <div class="today-chip"><span>Acerto casas</span><strong>{_format_ratio(house_hits, house_total)}</strong></div>
+        </div>
+        <div class="today-grid">
+          <div>
+            <h3>Por competicao</h3>
+            <ul>{comp_html}</ul>
+          </div>
+          <div>
+            <h3>Maiores alertas</h3>
+            <ul>{miss_html}</ul>
+          </div>
+        </div>
+        <p class="today-note">{escape(draw_note)} Use esse bloco para reduzir exposicao em ligas ou cenarios que estiverem puxando o acerto para baixo.</p>
+      </div>
+"""
+
+
 def _risk_stage_from_metrics(probability: float, expected_value: float, odd: float, bookmakers: int) -> str:
     if probability >= 0.62 and expected_value >= 0.03 and 1.0 < odd <= 1.95 and bookmakers >= 10:
         return "Baixo risco"
@@ -1566,6 +1715,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     detail_registry: dict[str, object] = {}
     global_risk_entries: list[dict[str, object]] = []
     global_match_catalog: list[dict[str, object]] = []
+    today_performance_entries: list[dict[str, object]] = []
     real_stats_cache = load_real_match_stats_cache()
 
     for comp in COMPETITIONS:
@@ -1573,6 +1723,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             df = competition_frames[comp].copy()
         else:
             df = load_competition_matches(comp)
+        today_performance_entries.extend(_collect_today_performance_entries(comp, df))
         section_html, stats, section_details, section_risk_entries, section_match_catalog = _build_competition_section(
             comp,
             df,
@@ -1634,6 +1785,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         "</div>"
         "</div>"
     )
+    today_performance_html = _build_today_performance_html(today_performance_entries)
     ai_prompt_html = escape(AI_PROMPT_TEMPLATE)
     ai_prompt_js = AI_PROMPT_TEMPLATE
     match_catalog_json = json.dumps(global_match_catalog, ensure_ascii=False)
@@ -1776,7 +1928,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       pointer-events: none;
     }}
     .hero-grid {{ display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 0.9fr); gap: 18px; align-items: end; }}
-    .hero-grid, .accuracy-overview {{ position: relative; z-index: 1; }}
+    .hero-grid, .accuracy-overview, .today-panel {{ position: relative; z-index: 1; }}
     .hero-tag {{ display: inline-flex; padding: 8px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.16); color: #dbeafe; }}
     .hero h1 {{ margin: 14px 0 0; max-width: 12ch; font-size: clamp(2.2rem, 4vw, 3.6rem); line-height: .96; letter-spacing: -.04em; font-family: "Space Grotesk", sans-serif; }}
     .hero p {{ margin: 14px 0 0; max-width: 64ch; color: rgba(226,232,240,.88); line-height: 1.68; }}
@@ -1843,6 +1995,27 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     .accuracy-metric-market .accuracy-track i {{
       background: linear-gradient(90deg, #fde68a, #f59e0b);
     }}
+    .today-panel {{
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.14);
+    }}
+    .today-head {{ display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }}
+    .today-head span {{ color: #bfdbfe; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }}
+    .today-head strong {{ font-family: "Space Grotesk", sans-serif; font-size: 1.2rem; color: #f8fafc; }}
+    .today-metrics {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }}
+    .today-chip {{ padding: 12px; border-radius: 14px; background: rgba(15,23,42,.20); border: 1px solid rgba(255,255,255,.12); }}
+    .today-chip span {{ display: block; color: #cbd5e1; font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }}
+    .today-chip strong {{ display: block; margin-top: 6px; color: #f8fafc; font-size: 1.08rem; font-family: "Space Grotesk", sans-serif; }}
+    .today-grid {{ display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.35fr); gap: 14px; margin-top: 14px; }}
+    .today-grid h3 {{ margin: 0 0 8px; color: #e0f2fe; font-size: .86rem; }}
+    .today-grid ul {{ list-style: none; display: grid; gap: 8px; padding: 0; margin: 0; }}
+    .today-grid li {{ display: grid; gap: 3px; padding: 9px 10px; border-radius: 12px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.10); }}
+    .today-grid li strong {{ color: #f8fafc; font-size: .82rem; }}
+    .today-grid li span {{ color: #cbd5e1; font-size: .78rem; line-height: 1.45; }}
+    .today-note {{ margin: 12px 0 0 !important; color: rgba(226,232,240,.9) !important; font-size: .86rem; }}
     .dashboard-shell {{
       display: grid;
       grid-template-columns: 1fr;
@@ -2771,12 +2944,12 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       .card-head {{ grid-template-columns: 1fr; }}
       .multi-modal-card .modal-body {{ grid-template-columns: 1fr; }}
     }}
-    @media (max-width: 1100px) {{ .hero-grid, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
+    @media (max-width: 1100px) {{ .hero-grid, .today-grid, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
     @media (max-width: 760px) {{
       .container {{ padding: 18px 14px 32px; }}
       .topbar {{ align-items: flex-start; }}
       .hero, .card, .competition-card {{ padding: 18px; }}
-      .hero-grid, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: 1fr; }}
+      .hero-grid, .today-metrics, .today-grid, .filters, .stats-rail, .glossary-grid, .side-rail, .ai-module-grid, .modal-grid, .context-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: 1fr; }}
       .accuracy-row {{ grid-template-columns: 1fr; gap: 8px; }}
       .accuracy-duo {{ grid-template-columns: 1fr; }}
       .accuracy-metric {{ grid-template-columns: 52px 1fr 44px; }}
@@ -2833,6 +3006,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       </div>
 
       <div class="accuracy-overview">{accuracy_overview_rows}</div>
+      {today_performance_html}
     </section>
 
     <div class="dashboard-shell">
