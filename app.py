@@ -1099,18 +1099,11 @@ def _read_cached_html_snapshot(path_str: str, modified_at: float, release_hash: 
 
 def _load_index_portal_html() -> str:
     if INDEX_HTML_FILE.exists():
-        cached_html = _read_cached_html_snapshot(
+        return _read_cached_html_snapshot(
             str(INDEX_HTML_FILE),
             INDEX_HTML_FILE.stat().st_mtime,
             CURRENT_GIT_SHORT_HASH,
         )
-        embedded_hash = _extract_portal_git_hash(cached_html)
-        if CURRENT_GIT_SHORT_HASH != "sem-git" and embedded_hash != CURRENT_GIT_SHORT_HASH:
-            refreshed_html = build_index_html()
-            INDEX_HTML_FILE.write_text(refreshed_html, encoding="utf-8")
-            _read_cached_html_snapshot.clear()
-            return refreshed_html
-        return cached_html
 
     html = build_index_html()
     INDEX_HTML_FILE.write_text(html, encoding="utf-8")
