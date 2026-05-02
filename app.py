@@ -1178,7 +1178,11 @@ def render_portal_refresh_action_button(
         updated_at = str(payload.get("updated_at", "agora"))
         st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Portal atualizado com sucesso em {updated_at}."
     except Exception as exc:
-        st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = f"Falha ao atualizar o portal: {exc}"
+        st.cache_data.clear()
+        st.session_state[PORTAL_REFRESH_FEEDBACK_KEY] = (
+            "Nao foi possivel atualizar dados online agora. "
+            "Mantive o painel publicado no Git/Streamlit sem interromper a visualizacao."
+        )
     st.rerun()
 
 
@@ -1395,8 +1399,13 @@ def _execute_public_portal_refresh(*, refresh_nonce: str) -> str:
         st.session_state["_public_portal_last_updated_at"] = updated_at
         refreshed_updated_at = updated_at
         st.session_state["_public_portal_refresh_feedback"] = f"Portal atualizado com sucesso em {updated_at}."
-    except Exception as exc:
-        st.session_state["_public_portal_refresh_feedback"] = f"Falha ao atualizar o portal: {exc}"
+    except Exception:
+        st.cache_data.clear()
+        refreshed_updated_at = _current_app_timestamp()
+        st.session_state["_public_portal_last_updated_at"] = refreshed_updated_at
+        st.session_state["_public_portal_refresh_feedback"] = (
+            "Nao foi possivel buscar dados online agora; mantive o painel publicado mais recente."
+        )
     finally:
         st.session_state["_public_portal_refresh_nonce"] = refresh_nonce
 
