@@ -140,19 +140,24 @@ def _load_all_matches_parallel(
 
     if failures:
         failed_list = ", ".join(sorted(failures))
+        details = "; ".join(f"{k}: {v}" for k, v in sorted(failures.items()))
         _emit_refresh_progress(
             progress_callback,
             36,
-            f"Coleta parcial concluida. Competicoes com falha: {failed_list}.",
+            f"Atualizacao abortada para evitar painel parcial. Falharam: {failed_list}.",
             "fetch_matches",
         )
-    else:
-        _emit_refresh_progress(
-            progress_callback,
-            36,
-            "Coleta de resultados e odds concluida para todas as competicoes.",
-            "fetch_matches",
+        raise RuntimeError(
+            "Coleta parcial abortada para preservar o ultimo painel completo "
+            f"({details})."
         )
+
+    _emit_refresh_progress(
+        progress_callback,
+        36,
+        "Coleta de resultados e odds concluida para todas as competicoes.",
+        "fetch_matches",
+    )
 
     return frame
 
