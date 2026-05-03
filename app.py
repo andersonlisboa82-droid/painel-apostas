@@ -753,13 +753,7 @@ def get_data_with_fallback(preferred_competition: str) -> tuple[str, pd.DataFram
     for competition_name in ordered_competitions:
         try:
             df = get_data(competition_name)
-            warning = ""
-            if competition_name != preferred_competition:
-                warning = (
-                    f"A competicao selecionada ({preferred_competition}) falhou no scraping agora. "
-                    f"O portal foi carregado com {competition_name} como fallback."
-                )
-            return competition_name, df, warning
+            return competition_name, df, ""
         except Exception as exc:
             failures.append(f"{competition_name}: {exc}")
 
@@ -3470,9 +3464,6 @@ try:
 except Exception as exc:
     st.error(f"Falha ao buscar dados da internet: {exc}")
     st.stop()
-
-if competition_load_warning:
-    st.warning(competition_load_warning)
 
 finished = df[df["status"] == "Finalizado"].copy()
 fixtures = df[df["status"] == "Agendado"].copy()
