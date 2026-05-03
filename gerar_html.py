@@ -472,8 +472,7 @@ def _calculate_competition_accuracy(df: pd.DataFrame) -> dict[str, int]:
     }
 
 
-def _collect_today_performance_entries(name: str, df: pd.DataFrame) -> list[dict[str, object]]:
-    today_key = datetime.now(APP_TIMEZONE).date().isoformat()
+def _collect_daily_performance_entries(name: str, df: pd.DataFrame) -> list[dict[str, object]]:
     finished = df[df["status"] == "Finalizado"].copy()
     entries: list[dict[str, object]] = []
 
@@ -483,7 +482,7 @@ def _collect_today_performance_entries(name: str, df: pd.DataFrame) -> list[dict
             getattr(row, "event_timestamp", None),
             str(getattr(row, "status", "")),
         )
-        if filter_date != today_key:
+        if not filter_date:
             continue
 
         actual_result = _actual_market_label(
@@ -511,6 +510,7 @@ def _collect_today_performance_entries(name: str, df: pd.DataFrame) -> list[dict
         entries.append(
             {
                 "competition": name,
+                "filter_date": filter_date,
                 "matchup": f"{row.home_team} x {row.away_team}",
                 "score": f"{_fmt_score(getattr(row, 'home_goals', None))} x {_fmt_score(getattr(row, 'away_goals', None))}",
                 "actual": actual_result,
@@ -538,9 +538,24 @@ def _build_today_performance_html(entries: list[dict[str, object]]) -> str:
       <div class="today-panel">
         <div class="today-head">
           <span>Resumo de hoje</span>
-          <strong>{today_label}</strong>
+          <strong id="todayPerformanceDate">{today_label}</strong>
         </div>
-        <p>Nenhum jogo finalizado encontrado hoje para medir acerto do modelo e das casas.</p>
+        <div class="today-metrics">
+          <div class="today-chip"><span>Jogos finalizados</span><strong id="todayFinishedCount">0</strong></div>
+          <div class="today-chip"><span>Acerto modelo</span><strong id="todayModelRate">--</strong></div>
+          <div class="today-chip"><span>Acerto casas</span><strong id="todayHouseRate">--</strong></div>
+        </div>
+        <div class="today-grid">
+          <div>
+            <h3>Por competicao</h3>
+            <ul id="todayCompetitionList"><li><strong>Sem jogos</strong><span>Nenhum jogo finalizado encontrado para medir acerto.</span></li></ul>
+          </div>
+          <div>
+            <h3>Maiores alertas</h3>
+            <ul id="todayAlertList"><li><strong>Sem alerta</strong><span>Nenhum jogo finalizado encontrado para medir acerto.</span></li></ul>
+          </div>
+        </div>
+        <p class="today-note" id="todayPerformanceNote">Escolha uma data em Busca por data para acompanhar o resumo daquele dia.</p>
       </div>
 """
 
@@ -599,24 +614,24 @@ def _build_today_performance_html(entries: list[dict[str, object]]) -> str:
       <div class="today-panel">
         <div class="today-head">
           <span>Resumo de hoje</span>
-          <strong>{today_label}</strong>
+          <strong id="todayPerformanceDate">{today_label}</strong>
         </div>
         <div class="today-metrics">
-          <div class="today-chip"><span>Jogos finalizados</span><strong>{model_total}</strong></div>
-          <div class="today-chip"><span>Acerto modelo</span><strong>{_format_ratio(model_hits, model_total)}</strong></div>
-          <div class="today-chip"><span>Acerto casas</span><strong>{_format_ratio(house_hits, house_total)}</strong></div>
+          <div class="today-chip"><span>Jogos finalizados</span><strong id="todayFinishedCount">{model_total}</strong></div>
+          <div class="today-chip"><span>Acerto modelo</span><strong id="todayModelRate">{_format_ratio(model_hits, model_total)}</strong></div>
+          <div class="today-chip"><span>Acerto casas</span><strong id="todayHouseRate">{_format_ratio(house_hits, house_total)}</strong></div>
         </div>
         <div class="today-grid">
           <div>
             <h3>Por competicao</h3>
-            <ul>{comp_html}</ul>
+            <ul id="todayCompetitionList">{comp_html}</ul>
           </div>
           <div>
             <h3>Maiores alertas</h3>
-            <ul>{miss_html}</ul>
+            <ul id="todayAlertList">{miss_html}</ul>
           </div>
         </div>
-        <p class="today-note">{escape(draw_note)} Use esse bloco para reduzir exposicao em ligas ou cenarios que estiverem puxando o acerto para baixo.</p>
+        <p class="today-note" id="todayPerformanceNote">{escape(draw_note)} Use esse bloco para reduzir exposicao em ligas ou cenarios que estiverem puxando o acerto para baixo.</p>
       </div>
 """
 
@@ -1715,7 +1730,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     detail_registry: dict[str, object] = {}
     global_risk_entries: list[dict[str, object]] = []
     global_match_catalog: list[dict[str, object]] = []
-    today_performance_entries: list[dict[str, object]] = []
+    daily_performance_entries: list[dict[str, object]] = []
     real_stats_cache = load_real_match_stats_cache()
 
     for comp in COMPETITIONS:
@@ -1723,7 +1738,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             df = competition_frames[comp].copy()
         else:
             df = load_competition_matches(comp)
-        today_performance_entries.extend(_collect_today_performance_entries(comp, df))
+        daily_performance_entries.extend(_collect_daily_performance_entries(comp, df))
         section_html, stats, section_details, section_risk_entries, section_match_catalog = _build_competition_section(
             comp,
             df,
@@ -1785,7 +1800,11 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         "</div>"
         "</div>"
     )
-    today_performance_html = _build_today_performance_html(today_performance_entries)
+    today_key = datetime.now(APP_TIMEZONE).date().isoformat()
+    today_performance_html = _build_today_performance_html(
+        [item for item in daily_performance_entries if str(item.get("filter_date", "")) == today_key]
+    )
+    daily_performance_json = json.dumps(daily_performance_entries, ensure_ascii=False)
     ai_prompt_html = escape(AI_PROMPT_TEMPLATE)
     ai_prompt_js = AI_PROMPT_TEMPLATE
     match_catalog_json = json.dumps(global_match_catalog, ensure_ascii=False)
@@ -3678,6 +3697,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     let activeMatchStatsRequest = 0;
     const matchDetailsStore = {json.dumps(detail_registry, ensure_ascii=False)};
     const dateMatchCatalog = {match_catalog_json};
+    const dailyPerformanceStore = {daily_performance_json};
     const precisionOptimizerStore = {precision_optimizer_json};
     const reliabilityStore = {reliability_store_json};
     const precisionFallbackThresholds = (precisionOptimizerStore && precisionOptimizerStore.fallback_thresholds) || {{
@@ -4839,6 +4859,109 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       return ((hits / total) * 100).toFixed(1) + '% (' + hits + '/' + total + ')';
     }}
 
+    function formatSummaryHitRate(hits, total) {{
+      if (!total) return '--';
+      return Math.round((hits / total) * 100) + '% (' + hits + '/' + total + ')';
+    }}
+
+    function escapeHtml(value) {{
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }}
+
+    function getPerformanceEntriesForDateFilters(dateFilters) {{
+      const entries = Array.isArray(dailyPerformanceStore) ? dailyPerformanceStore : [];
+      if (dateFilters.selectedDate || dateFilters.hasRange) {{
+        return entries.filter((item) => isDateWithinFilters(String(item.filter_date || ''), dateFilters));
+      }}
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const todayKey = `${{yyyy}}-${{mm}}-${{dd}}`;
+      return entries.filter((item) => String(item.filter_date || '') === todayKey);
+    }}
+
+    function updateDailyPerformanceSummary() {{
+      const dateFilters = resolveDateFilters();
+      const dateLabelElement = document.getElementById('todayPerformanceDate');
+      const finishedElement = document.getElementById('todayFinishedCount');
+      const modelElement = document.getElementById('todayModelRate');
+      const houseElement = document.getElementById('todayHouseRate');
+      const compList = document.getElementById('todayCompetitionList');
+      const alertList = document.getElementById('todayAlertList');
+      const noteElement = document.getElementById('todayPerformanceNote');
+      if (!dateLabelElement || !finishedElement || !modelElement || !houseElement || !compList || !alertList || !noteElement) return;
+
+      const entries = getPerformanceEntriesForDateFilters(dateFilters);
+      if (dateFilters.selectedDate) {{
+        dateLabelElement.textContent = formatSelectedDate(dateFilters.selectedDate);
+      }} else if (dateFilters.hasRange) {{
+        const fromLabel = dateFilters.rangeStart ? formatSelectedDate(dateFilters.rangeStart) : 'inicio aberto';
+        const toLabel = dateFilters.rangeEnd ? formatSelectedDate(dateFilters.rangeEnd) : 'fim aberto';
+        dateLabelElement.textContent = fromLabel + ' a ' + toLabel;
+      }} else {{
+        dateLabelElement.textContent = 'Hoje';
+      }}
+
+      const modelTotal = entries.length;
+      const modelHits = entries.filter((item) => item.model_hit === true).length;
+      const houseEntries = entries.filter((item) => item.house_hit !== null && item.house_hit !== undefined);
+      const houseTotal = houseEntries.length;
+      const houseHits = houseEntries.filter((item) => item.house_hit === true).length;
+      finishedElement.textContent = String(modelTotal);
+      modelElement.textContent = formatSummaryHitRate(modelHits, modelTotal);
+      houseElement.textContent = formatSummaryHitRate(houseHits, houseTotal);
+
+      if (!entries.length) {{
+        compList.innerHTML = '<li><strong>Sem jogos</strong><span>Nenhum jogo finalizado encontrado para medir acerto nesta data.</span></li>';
+        alertList.innerHTML = '<li><strong>Sem alerta</strong><span>Nenhum jogo finalizado encontrado para medir acerto nesta data.</span></li>';
+        noteElement.textContent = 'Escolha outra data em Busca por data para acompanhar o resumo daquele dia.';
+        return;
+      }}
+
+      const byComp = new Map();
+      entries.forEach((item) => {{
+        const comp = String(item.competition || 'Competicao');
+        const bucket = byComp.get(comp) || {{ total: 0, modelHits: 0, houseTotal: 0, houseHits: 0 }};
+        bucket.total += 1;
+        if (item.model_hit === true) bucket.modelHits += 1;
+        if (item.house_hit !== null && item.house_hit !== undefined) {{
+          bucket.houseTotal += 1;
+          if (item.house_hit === true) bucket.houseHits += 1;
+        }}
+        byComp.set(comp, bucket);
+      }});
+      compList.innerHTML = Array.from(byComp.entries())
+        .sort((a, b) => {{
+          const rateA = a[1].total ? a[1].modelHits / a[1].total : -1;
+          const rateB = b[1].total ? b[1].modelHits / b[1].total : -1;
+          if (rateB !== rateA) return rateB - rateA;
+          return b[1].total - a[1].total;
+        }})
+        .slice(0, 6)
+        .map(([comp, values]) => `<li><strong>${{escapeHtml(comp)}}</strong><span>Modelo ${{formatSummaryHitRate(values.modelHits, values.total)}} | Casas ${{formatSummaryHitRate(values.houseHits, values.houseTotal)}}</span></li>`)
+        .join('');
+
+      const misses = entries
+        .filter((item) => item.model_hit === false)
+        .sort((a, b) => Number(b.model_probability || 0) - Number(a.model_probability || 0))
+        .slice(0, 5);
+      alertList.innerHTML = misses.length
+        ? misses.map((item) => `<li><strong>${{escapeHtml(item.competition)}}</strong><span>${{escapeHtml(item.matchup)}} (${{escapeHtml(item.score)}}) | Modelo: ${{escapeHtml(item.model)}} ${{Number(item.model_probability || 0).toFixed(1)}}% | Real: ${{escapeHtml(item.actual)}}</span></li>`).join('')
+        : '<li><strong>Sem alerta</strong><span>Nenhum erro do modelo nos jogos finalizados deste recorte.</span></li>';
+
+      const drawMisses = misses.filter((item) => String(item.actual || '').toLowerCase() === 'empate' && String(item.model || '').toLowerCase() !== 'empate');
+      noteElement.textContent = (drawMisses.length
+        ? drawMisses.length + ' erro(s) de maior alerta vieram de empates contra uma vitoria projetada. '
+        : 'Empates nao foram o principal problema entre os maiores alertas. ') +
+        'Use esse bloco para reduzir exposicao em ligas ou cenarios que estiverem puxando o acerto para baixo.';
+    }}
+
     function getDateMetricConfig(metricKey) {{
       if (metricKey === 'suggestion') {{
         return {{
@@ -4869,6 +4992,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
 
     function renderDateFocusMatches() {{
       const dateFilters = resolveDateFilters();
+      updateDailyPerformanceSummary();
       const panel = document.getElementById('dateFocusPanel');
       const grid = document.getElementById('dateFocusGrid');
       const empty = document.getElementById('dateFocusEmpty');
