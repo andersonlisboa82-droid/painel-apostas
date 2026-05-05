@@ -20,6 +20,9 @@ from analytics import (
     calculate_match_probabilities,
     suggest_bet_strategy,
     get_team_context,
+    market_probability_gap,
+    probability_map,
+    selection_has_clear_edge,
 )
 from real_match_stats import build_match_stats_cache_key, load_real_match_stats_cache
 from scraper import COMPETITIONS, load_competition_matches
@@ -637,11 +640,11 @@ def _build_today_performance_html(entries: list[dict[str, object]]) -> str:
 
 
 def _risk_stage_from_metrics(probability: float, expected_value: float, odd: float, bookmakers: int) -> str:
-    if probability >= 0.62 and expected_value >= 0.03 and 1.0 < odd <= 1.95 and bookmakers >= 10:
+    if probability >= 0.68 and expected_value >= 0.02 and 1.0 < odd <= 1.95 and bookmakers >= 10:
         return "Baixo risco"
-    if probability >= 0.55 and expected_value >= 0.02 and 1.0 < odd <= 2.20 and bookmakers >= 8:
+    if probability >= 0.62 and expected_value >= 0.01 and 1.0 < odd <= 2.20 and bookmakers >= 8:
         return "Medio risco"
-    if probability >= 0.48 and expected_value >= 0.01 and 1.0 < odd <= 2.90 and bookmakers >= 5:
+    if probability >= 0.58 and expected_value >= 0.00 and 1.0 < odd <= 2.60 and bookmakers >= 5:
         return "Alto risco"
     return "Fora dos criterios"
 
@@ -656,6 +659,23 @@ def _risk_stage_context(stage: str, suggested_label: str, has_valid_odd: bool = 
     if not has_valid_odd:
         return "Sem odd valida para enquadrar o jogo na regua principal de risco do portal."
     return f"{suggested_label} existe na leitura, mas ainda fica fora da regua principal de risco do portal."
+
+
+def _entry_rejection_context(probs, selected_market: str, selected_probability: float) -> str:
+    reasons: list[str] = []
+    selected_model_probability = float(probability_map(probs).get(str(selected_market), 0.0))
+    gap = market_probability_gap(probs, str(selected_market))
+    if float(selected_probability) < 0.58:
+        reasons.append("probabilidade abaixo de 58%")
+    if selected_model_probability < 0.58:
+        reasons.append("modelo nao sustenta 58% no mercado escolhido")
+    if gap < 0.08:
+        reasons.append("diferenca pequena para a segunda opcao")
+    if str(selected_market) != "Empate" and float(probs.draw) >= 0.25:
+        reasons.append("empate acima de 25%")
+    if not reasons:
+        reasons.append("criterio conservador de assertividade")
+    return "Sem entrada recomendada: " + ", ".join(reasons) + "."
 
 
 def _classify_model_risk(row, probs, home_team: str, away_team: str, tip=None) -> tuple[str, str]:
@@ -678,6 +698,8 @@ def _classify_model_risk(row, probs, home_team: str, away_team: str, tip=None) -
         selection_source = "model"
 
     bookmakers = int(getattr(row, "bookmakers", 0)) if getattr(row, "bookmakers", None) is not None and not pd.isna(getattr(row, "bookmakers", None)) else 0
+    if not selection_has_clear_edge(probs, best_market, best_prob):
+        return "Fora dos criterios", _entry_rejection_context(probs, best_market, best_prob)
     stage = _risk_stage_from_metrics(best_prob, expected_value, odd_value, bookmakers)
     context = _risk_stage_context(stage, best_label, has_valid_odd=odd_value > 1.0)
     if selection_source == "house_lock":
@@ -1362,6 +1384,10 @@ def _build_competition_section(
                 kelly_fractional=0.25,
             )
             selected_probability = float(tip.selected_probability or tip.model_probability)
+            if not selection_has_clear_edge(probs, str(tip.best_market), selected_probability):
+                continue
+            if float(tip.expected_value) < 0.0:
+                continue
             detail_json = _get_detail_json(df, row, probs, tip)
             detail_key = register_detail(detail_json)
             bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
@@ -1759,7 +1785,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
             f"<button class=\"competition-filter-card\" type=\"button\" data-comp-filter=\"{escape(str(item['name']))}\">"
             f"<strong>{escape(str(item['name']))}</strong>"
             f"<span>{int(item['fixtures'])} jogos futuros</span>"
-            f"<small>{int(item['safe'])} seguros â€¢ {int(item['fixtures_valid'])} com odds</small>"
+            f"<small>{int(item['safe'])} seguros | {int(item['fixtures_valid'])} com odds</small>"
             "</button>"
         )
         for item in competition_stats
@@ -1821,7 +1847,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
                 "Baixo risco",
                 "Baixo risco",
                 "Jogos com leitura mais conservadora, maior estabilidade estatistica e cobertura de mercado mais confiavel.",
-                [f"{len(low_risk_entries)} jogos no radar", "Odds ate 1.95", "Prob. minima 62%", "Casas min. 10"],
+                [f"{len(low_risk_entries)} jogos no radar", "Odds ate 1.95", "Prob. minima 68%", "Casas min. 10"],
                 low_risk_entries,
                 "low",
             ),
@@ -1829,7 +1855,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
                 "Medio risco",
                 "Medio risco",
                 "Faixa equilibrada para buscar bom acerto sem abrir mao de algum retorno potencial nas linhas sugeridas.",
-                [f"{len(medium_risk_entries)} jogos no radar", "Odds ate 2.20", "Prob. minima 55%", "Casas min. 8"],
+                [f"{len(medium_risk_entries)} jogos no radar", "Odds ate 2.20", "Prob. minima 62%", "Casas min. 8"],
                 medium_risk_entries,
                 "medium",
             ),
@@ -1837,7 +1863,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
                 "Alto risco",
                 "Alto risco",
                 "Jogos mais agressivos, com edge maior e oscilacao mais alta. Faz sentido quando a leitura aceita mais variancia.",
-                [f"{len(high_risk_entries)} jogos no radar", "Odds ate 2.90", "Prob. minima 48%", "Casas min. 5"],
+                [f"{len(high_risk_entries)} jogos no radar", "Odds ate 2.60", "Prob. minima 58%", "Casas min. 5"],
                 high_risk_entries,
                 "high",
             ),
@@ -3688,9 +3714,9 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     const riskPresets = {{
-      "Baixo risco": {{ oddMin: 1.20, oddMax: 1.95, probMin: 0.62, evMin: 0.03, booksMin: 10 }},
-      "Medio risco": {{ oddMin: 1.20, oddMax: 2.20, probMin: 0.55, evMin: 0.02, booksMin: 8 }},
-      "Alto risco": {{ oddMin: 1.20, oddMax: 2.90, probMin: 0.48, evMin: 0.01, booksMin: 5 }},
+      "Baixo risco": {{ oddMin: 1.20, oddMax: 1.95, probMin: 0.68, evMin: 0.02, booksMin: 10 }},
+      "Medio risco": {{ oddMin: 1.20, oddMax: 2.20, probMin: 0.62, evMin: 0.01, booksMin: 8 }},
+      "Alto risco": {{ oddMin: 1.20, oddMax: 2.60, probMin: 0.58, evMin: 0.00, booksMin: 5 }},
     }};
 
     let charts = {{}};
@@ -3703,7 +3729,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     const precisionFallbackThresholds = (precisionOptimizerStore && precisionOptimizerStore.fallback_thresholds) || {{
       oddMin: 1.20,
       oddMax: 1.95,
-      probMin: 0.62,
+      probMin: 0.68,
       evMin: 0.03,
       booksMin: 10,
     }};
@@ -4493,7 +4519,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       if (data.status) modalMeta.push(data.status);
       if (data.date) modalMeta.push(data.date);
       if (data.final_score) modalMeta.push('Placar ' + data.final_score);
-      document.getElementById('modalDate').textContent = modalMeta.join(' â€¢ ');
+      document.getElementById('modalDate').textContent = modalMeta.join(' | ');
       
       const stratBox = document.getElementById('strategyBox');
       if (data.tip) {{
@@ -5230,9 +5256,9 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           row.classList.add('risk-none');
           return;
         }}
-        if (prob >= 0.62 && ev >= 0.03 && odd <= 1.95 && books >= 10) row.classList.add('risk-low');
-        else if (prob >= 0.55 && ev >= 0.02 && odd <= 2.20 && books >= 8) row.classList.add('risk-med');
-        else if (prob >= 0.48 && ev >= 0.01 && odd <= 2.90 && books >= 5) row.classList.add('risk-high');
+        if (prob >= 0.68 && ev >= 0.02 && odd <= 1.95 && books >= 10) row.classList.add('risk-low');
+        else if (prob >= 0.62 && ev >= 0.01 && odd <= 2.20 && books >= 8) row.classList.add('risk-med');
+        else if (prob >= 0.58 && ev >= 0.00 && odd <= 2.60 && books >= 5) row.classList.add('risk-high');
         else row.classList.add('risk-none');
       }});
     }}
@@ -5267,7 +5293,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         const toLabel = dateFilters.rangeEnd ? formatSelectedDate(dateFilters.rangeEnd) : 'fim aberto';
         parts.push('periodo ' + fromLabel + ' a ' + toLabel);
       }}
-      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' â€¢ ') + '.';
+      summary.textContent = 'Mostrando ' + competition + ': ' + parts.join(' | ') + '.';
     }}
 
     function updateCompetitionNavState() {{
@@ -5425,7 +5451,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
                 <input class="multi-pick-toggle" type="checkbox" value="${{item.detail_key}}" />
                 <div>
                   <strong>${{item.home}} x ${{item.away}}</strong>
-                  <span>${{item.competition}} â€¢ ${{item.date_label || 'Data nao informada'}}</span>
+                  <span>${{item.competition}} | ${{item.date_label || 'Data nao informada'}}</span>
                 </div>
               </label>
               <div class="multi-pick-controls">

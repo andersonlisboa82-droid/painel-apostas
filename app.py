@@ -3077,9 +3077,9 @@ with st.sidebar:
     st.session_state["risk_profile_input"] = risk_profile
 
     profile_presets = {
-        "Baixo risco": {"min_prob": 0.64, "max_odd": 2.30},
-        "Medio risco": {"min_prob": 0.57, "max_odd": 2.60},
-        "Alto risco": {"min_prob": 0.48, "max_odd": 3.60},
+        "Baixo risco": {"min_prob": 0.68, "max_odd": 1.95},
+        "Medio risco": {"min_prob": 0.62, "max_odd": 2.20},
+        "Alto risco": {"min_prob": 0.58, "max_odd": 2.60},
     }
 
     competition_min_books = {
@@ -3100,7 +3100,7 @@ with st.sidebar:
         min_prob = st.slider("Prob. minima do modelo", min_value=0.40, max_value=0.80, value=0.60, step=0.01)
         max_odd = st.slider("Odd maxima", min_value=1.20, max_value=4.00, value=2.30, step=0.05)
         min_books = st.slider("Minimo de casas (B's)", min_value=1, max_value=20, value=10, step=1)
-        st.caption("EV segue visivel no portal como metrica informativa, mas nao entra no criterio de selecao do modelo.")
+        st.caption("O filtro tambem exige EV nao negativo, margem clara entre mercados e empate controlado.")
     else:
         preset = profile_presets[risk_profile]
         min_prob = preset["min_prob"]
@@ -3108,7 +3108,7 @@ with st.sidebar:
         min_books = competition_min_books.get(competition, {}).get(risk_profile, 3)
         st.caption(
             f"Filtro aplicado: Prob >= {min_prob:.2f} | "
-            f"Odd <= {max_odd:.2f} | Casas >= {min_books}"
+            f"Odd <= {max_odd:.2f} | Casas >= {min_books} | EV >= 0"
         )
 
     runtime_model_config = _get_runtime_model_config()
@@ -3121,7 +3121,7 @@ with st.sidebar:
         st.markdown("**Filtro operacional atual**")
         st.caption(
             f"Perfil `{risk_profile}` | Prob >= `{min_prob:.2f}` | "
-            f"Odd <= `{max_odd:.2f}` | Casas >= `{int(min_books)}`"
+            f"Odd <= `{max_odd:.2f}` | Casas >= `{int(min_books)}` | EV >= `0.00`"
         )
         st.markdown("**Parametros tecnicos em uso**")
         st.markdown(
@@ -3130,7 +3130,7 @@ with st.sidebar:
 - Minimos de gols esperados: `home={float(poisson_cfg.get('min_expected_home', 0.15)):.2f}`, `away={float(poisson_cfg.get('min_expected_away', 0.10)):.2f}`.
 - Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}`, `min_history={int(calibration_cfg.get('min_history_matches', 80))}`, `min_bucket={int(calibration_cfg.get('min_bucket_matches', 12))}`.
 - Ajuste da calibracao: `baseline_weight={float(calibration_cfg.get('baseline_weight', 0.30)):.2f}`, `max_adjustment_weight={float(calibration_cfg.get('max_adjustment_weight', 0.55)):.2f}`, `weight_sample_size={float(calibration_cfg.get('weight_sample_size', 45.0)):.1f}`.
-- Gestao de stake: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`.
+- Gestao de entrada: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`, `min_selection_probability={float(betting_cfg.get('min_selection_probability', 0.58)):.2f}`, `min_market_gap={float(betting_cfg.get('min_market_gap', 0.08)):.2f}`, `max_draw_probability_for_winner={float(betting_cfg.get('max_draw_probability_for_winner', 0.25)):.2f}`.
 - Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}`, `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`, `bookmakers_cap={int(safe_cfg.get('bookmakers_cap', 20))}`, `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
 """
         )
@@ -3504,7 +3504,7 @@ if needs_safe_data:
         bankroll=1000.0,
         kelly_fractional=runtime_kelly,
         min_model_prob=float(min_prob),
-        min_expected_value=-1.0,
+        min_expected_value=0.0,
         max_odd=float(max_odd),
         min_bookmakers=int(min_books),
         model_config=runtime_model_config,
@@ -3525,7 +3525,7 @@ if needs_safe_data:
                 bankroll=1000.0,
                 kelly_fractional=runtime_kelly,
                 min_model_prob=float(rp),
-                min_expected_value=-1.0,
+                min_expected_value=0.0,
                 max_odd=float(rodd),
                 min_bookmakers=int(rbooks),
                 model_config=runtime_model_config,
@@ -3537,7 +3537,7 @@ if needs_safe_data:
             if not safe_df.empty:
                 relaxed_note = (
                     f"Filtro do perfil foi relaxado automaticamente para exibir opcoes: "
-                    f"Prob >= {rp:.2f} | Odd <= {rodd:.2f} | Casas >= {rbooks}."
+                    f"Prob >= {rp:.2f} | Odd <= {rodd:.2f} | Casas >= {rbooks} | EV >= 0."
                 )
                 break
 
@@ -3839,7 +3839,7 @@ elif page == "Configuracoes":
         title="Criterios em uso agora",
         copy="Estes sao os valores ativos do modelo neste momento para previsao, calibracao e score de seguranca.",
         items=[
-            f"Filtro operacional: Perfil {risk_profile} | Prob >= {min_prob:.2f} | Odd <= {max_odd:.2f} | Casas >= {int(min_books)}.",
+            f"Filtro operacional: Perfil {risk_profile} | Prob >= {min_prob:.2f} | Odd <= {max_odd:.2f} | Casas >= {int(min_books)} | EV >= 0 | margem >= 8 p.p. | empate < 25%.",
             f"Poisson: max_goals={int(config_poisson.get('max_goals', 5))}, home_default={float(config_poisson.get('league_home_default', 1.35)):.2f}, away_default={float(config_poisson.get('league_away_default', 1.10)):.2f}.",
             f"Calibracao: enabled={bool(config_calib.get('enabled', True))}, min_history={int(config_calib.get('min_history_matches', 80))}, min_bucket={int(config_calib.get('min_bucket_matches', 12))}.",
             f"Stake (Kelly): {float(config_betting.get('kelly_fractional', 0.25)):.2f} | Safe score prob={float(config_safe.get('prob_weight', 0.55)):.2f}, books={float(config_safe.get('bookmakers_weight', 0.20)):.2f}, odd={float(config_safe.get('odd_weight', 0.05)):.2f}.",

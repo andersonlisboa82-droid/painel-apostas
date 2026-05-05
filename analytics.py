@@ -56,6 +56,9 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
         "kelly_fractional": 0.25,
         "accuracy_threshold": 0.68,
         "house_favorite_lock_threshold": 0.70,
+        "min_selection_probability": 0.58,
+        "min_market_gap": 0.08,
+        "max_draw_probability_for_winner": 0.25,
     },
     "safe_score": {
         "prob_weight": 0.55,
@@ -201,6 +204,30 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 _safe_float(
                     betting_raw.get("house_favorite_lock_threshold"),
                     _safe_float(betting_default.get("house_favorite_lock_threshold"), 0.70),
+                ),
+                0.0,
+                1.0,
+            )
+            betting_cfg["min_selection_probability"] = _clamp(
+                _safe_float(
+                    betting_raw.get("min_selection_probability"),
+                    _safe_float(betting_default.get("min_selection_probability"), 0.58),
+                ),
+                0.0,
+                1.0,
+            )
+            betting_cfg["min_market_gap"] = _clamp(
+                _safe_float(
+                    betting_raw.get("min_market_gap"),
+                    _safe_float(betting_default.get("min_market_gap"), 0.08),
+                ),
+                0.0,
+                1.0,
+            )
+            betting_cfg["max_draw_probability_for_winner"] = _clamp(
+                _safe_float(
+                    betting_raw.get("max_draw_probability_for_winner"),
+                    _safe_float(betting_default.get("max_draw_probability_for_winner"), 0.25),
                 ),
                 0.0,
                 1.0,
@@ -802,7 +829,6 @@ def build_safe_bets_table(
     *,
     model_config: dict[str, object] | None = None,
 ) -> pd.DataFrame:
-    del min_expected_value
     cfg = normalize_model_config(model_config)
     betting_cfg = cfg["betting"] if isinstance(cfg.get("betting"), dict) else {}
     safe_cfg = cfg["safe_score"] if isinstance(cfg.get("safe_score"), dict) else {}
@@ -817,6 +843,9 @@ def build_safe_bets_table(
     odd_weight = _safe_float(safe_cfg.get("odd_weight"), 0.05)
     odd_reference = max(1.01, _safe_float(safe_cfg.get("odd_reference"), 1.20))
     odd_span = max(0.01, _safe_float(safe_cfg.get("odd_span"), 1.20))
+    min_selection_probability = _safe_float(betting_cfg.get("min_selection_probability"), 0.58)
+    min_market_gap = _safe_float(betting_cfg.get("min_market_gap"), 0.08)
+    max_draw_probability_for_winner = _safe_float(betting_cfg.get("max_draw_probability_for_winner"), 0.25)
 
     fixtures = matches_df[matches_df["status"] == "Agendado"].copy()
     fixtures = fixtures.dropna(subset=["odds_home", "odds_draw", "odds_away"])
@@ -838,8 +867,19 @@ def build_safe_bets_table(
             continue
 
         bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
+        selected_probability = float(tip.selected_probability or tip.model_probability)
+        selected_market_probability = float(probability_map(probs).get(str(tip.best_market), 0.0))
+        selected_gap = market_probability_gap(probs, str(tip.best_market))
+        clear_edge = selection_has_clear_edge(
+            probs,
+            str(tip.best_market),
+            selected_probability,
+            min_probability=min_selection_probability,
+            min_gap=min_market_gap,
+            max_draw_probability_for_winner=max_draw_probability_for_winner,
+        )
         safety_score = (
-            tip.model_probability * prob_weight
+            selected_probability * prob_weight
             + max(0, min(bookmakers, bookmakers_cap)) / bookmakers_cap * bookmakers_weight
             + max(0.0, 1.0 - (tip.best_odd - odd_reference) / odd_span) * odd_weight
         )
@@ -852,7 +892,11 @@ def build_safe_bets_table(
                 "away_team": row.away_team,
                 "market": tip.best_market,
                 "odd": tip.best_odd,
-                "model_probability": tip.model_probability,
+                "model_probability": selected_probability,
+                "selected_market_probability": selected_market_probability,
+                "market_gap": selected_gap,
+                "draw_probability": float(probs.draw),
+                "clear_edge": clear_edge,
                 "implied_probability": tip.implied_probability,
                 "expected_value": tip.expected_value,
                 "stake": tip.suggested_stake,
@@ -869,6 +913,11 @@ def build_safe_bets_table(
     out = pd.DataFrame(rows)
     filtered = out[
         (out["model_probability"] >= min_model_prob)
+        & (out["selected_market_probability"] >= min_selection_probability)
+        & (out["market_gap"] >= min_market_gap)
+        & ((out["market"] == "Empate") | (out["draw_probability"] < max_draw_probability_for_winner))
+        & (out["expected_value"] >= float(min_expected_value))
+        & (out["clear_edge"])
         & (out["odd"] <= max_odd)
         & (out["bookmakers"] >= min_bookmakers)
     ].copy()
@@ -913,6 +962,39 @@ def normalized_implied_probabilities(odd_home: float, odd_draw: float, odd_away:
 
 def pick_highest_probability_market(probs: MatchProbabilities) -> tuple[str, float]:
     return max(probability_map(probs).items(), key=lambda item: item[1])
+
+
+def market_probability_gap(probs: MatchProbabilities, selected_market: str) -> float:
+    market_probs = probability_map(probs)
+    selected_probability = float(market_probs.get(str(selected_market), 0.0))
+    other_probabilities = [
+        float(probability)
+        for market, probability in market_probs.items()
+        if str(market) != str(selected_market)
+    ]
+    second_probability = max(other_probabilities) if other_probabilities else 0.0
+    return max(0.0, selected_probability - second_probability)
+
+
+def selection_has_clear_edge(
+    probs: MatchProbabilities,
+    selected_market: str,
+    selected_probability: float,
+    *,
+    min_probability: float = 0.58,
+    min_gap: float = 0.08,
+    max_draw_probability_for_winner: float = 0.25,
+) -> bool:
+    selected_model_probability = float(probability_map(probs).get(str(selected_market), 0.0))
+    if float(selected_probability) < float(min_probability):
+        return False
+    if selected_model_probability < float(min_probability):
+        return False
+    if market_probability_gap(probs, selected_market) < float(min_gap):
+        return False
+    if str(selected_market) != "Empate" and float(probs.draw) >= float(max_draw_probability_for_winner):
+        return False
+    return True
 
 
 def get_market_odd(row: pd.Series | dict, market: str) -> float | None:
