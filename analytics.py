@@ -884,6 +884,12 @@ def build_safe_bets_table(
             + max(0.0, 1.0 - (tip.best_odd - odd_reference) / odd_span) * odd_weight
         )
 
+        risk_level = "Alto"
+        if safety_score >= 0.75:
+            risk_level = "Baixo"
+        elif safety_score >= 0.65:
+            risk_level = "Medio"
+
         rows.append(
             {
                 "date_text": row.date_text,
@@ -892,6 +898,9 @@ def build_safe_bets_table(
                 "away_team": row.away_team,
                 "market": tip.best_market,
                 "odd": tip.best_odd,
+                "odds_home": float(row.odds_home),
+                "odds_draw": float(row.odds_draw),
+                "odds_away": float(row.odds_away),
                 "model_probability": selected_probability,
                 "selected_market_probability": selected_market_probability,
                 "market_gap": selected_gap,
@@ -903,6 +912,7 @@ def build_safe_bets_table(
                 "kelly_fraction": tip.kelly_fraction,
                 "bookmakers": bookmakers,
                 "safety_score": safety_score,
+                "risk_level": risk_level,
                 "match_url": row.match_url,
             }
         )

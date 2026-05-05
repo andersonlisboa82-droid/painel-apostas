@@ -2983,10 +2983,52 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       from {{ transform: rotate(0deg); }}
       to {{ transform: rotate(360deg); }}
     }}
-    
+    .btn-help {{ 
+      background: #f1f5f9; 
+      border: 1px solid var(--line-strong); 
+      color: var(--text); 
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: .76rem;
+      font-weight: 700;
+      transition: all .2s;
+    }}
+    .btn-help:hover {{ background: var(--blue); color: #fff; border-color: var(--blue); }}
+
+    /* Modal styles */
+    .modal-overlay {{
+      position: fixed; inset: 0; background: rgba(15,23,42,0.6); 
+      backdrop-filter: blur(4px); z-index: 2000; 
+      display: none; place-items: center; padding: 20px;
+    }}
+    .modal-content {{
+      background: #fff; width: 100%; max-width: 600px; 
+      border-radius: 24px; padding: 32px; box-shadow: 0 30px 60px rgba(0,0,0,0.3);
+      position: relative; animation: modalIn 0.3s ease-out;
+    }}
+    @keyframes modalIn {{ from {{ opacity: 0; transform: translateY(20px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+    .modal-close {{ position: absolute; top: 20px; right: 20px; cursor: pointer; color: var(--muted); }}
+    .modal-content h2 {{ margin-bottom: 20px; }}
+    .glossary-item {{ margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }}
+    .glossary-item strong {{ display: block; color: var(--blue); margin-bottom: 4px; }}
+    .glossary-item p {{ margin: 0; font-size: .9rem; color: var(--muted); line-height: 1.5; }}
+
+    .interpreted-badge {{
+      display: inline-flex; padding: 2px 8px; border-radius: 4px; 
+      font-size: 10px; font-weight: 800; text-transform: uppercase;
+      margin-left: 6px; vertical-align: middle;
+    }}
+    .badge-value {{ background: #dcfce7; color: #166534; }}
+    .badge-risk {{ background: #fee2e2; color: #991b1b; }}
+
     @media (max-width: 1180px) {{
       .side-rail {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .card-head {{ grid-template-columns: 1fr; }}
+    }}
       .multi-modal-card .modal-body {{ grid-template-columns: 1fr; }}
     }}
     @media (max-width: 1100px) {{ .hero-grid, .today-grid, .filters, .glossary-grid, .ai-module-grid, .modal-grid, .launcher-grid, .risk-grid, .real-stats-grid, .projection-grid, .competition-filter-grid, .date-focus-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }} }}
@@ -3031,6 +3073,10 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         <div class="meta-pill"><span class="status-dot"></span><strong>Atualizado</strong> <span id="portalUpdatedAt">{_current_app_timestamp()}</span></div>
         <div class="meta-pill"><strong>Release</strong> {PORTAL_RELEASE_LABEL}</div>
         <div class="meta-pill"><strong>Git</strong> {portal_git_hash}</div>
+        <button class="btn-help" onclick="openGlossaryModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          Como interpretar
+        </button>
       </div>
     </section>
 
@@ -6274,6 +6320,19 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       }});
     }});
 
+    function openGlossaryModal() {{
+      const modal = document.getElementById('glossaryModal');
+      if (modal) modal.style.display = 'grid';
+    }}
+    function closeGlossaryModal() {{
+      const modal = document.getElementById('glossaryModal');
+      if (modal) modal.style.display = 'none';
+    }}
+
+    window.addEventListener('click', (event) => {{
+      if (event.target.id === 'glossaryModal') closeGlossaryModal();
+    }});
+
     const today = new Date();
     document.getElementById('aiSelectedDate').value = today.toISOString().slice(0, 10);
     applyRiskPreset();
@@ -6281,6 +6340,35 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     classifyRowsByRisk();
     updateAiPrompt();
   </script>
+  
+  <div id="glossaryModal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="modal-close" onclick="closeGlossaryModal()">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+      <h2>📚 Guia de Interpretacao</h2>
+      <div class="glossary-item">
+        <strong>Score FD (0-100)</strong>
+        <p>Nossa pontuacao de confianca. Combina probabilidade do modelo, convergencia das casas e odds. Scores > 75 sao considerados altamente seguros.</p>
+      </div>
+      <div class="glossary-item">
+        <strong>Niveis de Risco</strong>
+        <p><span class="interpreted-badge badge-value">Baixo</span>: Alta probabilidade e odds controladas. Ideal para banca conservadora.<br>
+           <span class="interpreted-badge badge-risk">Alto</span>: Maior retorno potencial, mas com volatilidade elevada. Exige gestao rigorosa.</p>
+      </div>
+      <div class="glossary-item">
+        <strong>Margem (Edge)</strong>
+        <p>A vantagem percentual do nosso modelo sobre a probabilidade implicita da casa de apostas. Quanto maior, mais "valor" a aposta tem.</p>
+      </div>
+      <div class="glossary-item">
+        <strong>EV (Valor Esperado)</strong>
+        <p>Calculo matematico que indica se uma aposta e lucrativa no longo prazo. Focamos em EV positivo (> 0%).</p>
+      </div>
+      <div style="margin-top: 20px; font-size: 0.8rem; color: var(--muted);">
+        * Lembre-se: Apostas envolvem risco. Use os dados para embasar sua decisao, nunca aposte o que nao pode perder.
+      </div>
+    </div>
+  </div>
 </body>
 </html>
 """

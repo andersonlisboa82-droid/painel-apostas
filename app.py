@@ -3657,6 +3657,8 @@ if not safe_df.empty:
             "odd",
             "model_probability",
             "expected_value",
+            "market_gap",
+            "risk_level",
             "bookmakers",
             "safety_score",
             "match_url",
@@ -3666,16 +3668,19 @@ if not safe_df.empty:
         "Data",
         "Mandante",
         "Visitante",
-        "Resultado sugerido",
+        "Palpite",
         "Odd",
         "Prob. Modelo",
         "EV",
+        "Margem",
+        "Risco",
         "Casas",
         "Score",
         "Link",
     ]
-    show_safe["Prob. Modelo"] = (show_safe["Prob. Modelo"] * 100).round(2).astype(str) + "%"
-    show_safe["EV"] = (show_safe["EV"] * 100).round(2).astype(str) + "%"
+    show_safe["Prob. Modelo"] = (show_safe["Prob. Modelo"] * 100).round(1).astype(str) + "%"
+    show_safe["EV"] = (show_safe["EV"] * 100).round(1).astype(str) + "%"
+    show_safe["Margem"] = (show_safe["Margem"] * 100).round(1).astype(str) + "%"
     show_safe["Score"] = (show_safe["Score"] * 100).round(1)
 
 if "institutional_ai_prompt" not in st.session_state:
@@ -3955,40 +3960,61 @@ elif page == "Jogos Seguros":
   <div class="section-header">
     <div>
       <div class="section-title">Ranking de Jogos Mais Seguros</div>
-      <p>Visao conservadora, combinando probabilidade, odd e numero de casas para priorizar entradas mais limpas.</p>
+      <p>Prioridade para entradas com alta convergência estatística, odds controladas e volume de liquidez (casas).</p>
     </div>
-    <div class="section-badge">Filtro ativo</div>
+    <div class="section-badge">Filtro operacional ativo</div>
   </div>
 </section>
 """,
         unsafe_allow_html=True,
     )
+    
+    with st.expander("📚 Como interpretar este painel", expanded=False):
+        st.markdown("""
+        <div class="explainer-box">
+            <strong>Indicadores Principais:</strong><br>
+            • <b>Score FD (0-100):</b> Pontuação proprietária. Acima de 75 indica alta segurança.<br>
+            • <b>Margem:</b> Diferença de probabilidade entre o palpite principal e o segundo resultado mais provável.<br>
+            • <b>Risco:</b> Classificação automática baseada na volatilidade da odd e confiança do modelo.<br>
+            • <b>Casas:</b> Indica a liquidez. Quanto mais casas oferecem a linha, maior a confiabilidade da odd.<br><br>
+            <strong>Dica Pro:</strong> Foque em jogos com <b>Score > 70</b> e <b>Risco Baixo</b> para uma gestão de banca conservadora.
+        </div>
+        """, unsafe_allow_html=True)
+
     if relaxed_note:
         st.info(relaxed_note)
     
     if show_safe.empty:
-        st.warning("Nenhum jogo passou no filtro atual.")
+        st.warning("Nenhum jogo passou no filtro atual. Tente alterar o perfil de risco no menu lateral.")
     else:
-        render_card_grid([
-            {"eyebrow": "Jogos elegiveis", "value": safe_count, "copy": "Partidas que passaram no filtro atual."},
-            {"eyebrow": "Taxa segura", "value": f"{safe_rate}%", "copy": "Percentual dos jogos com odds que viram selecao segura."},
-            {"eyebrow": "Perfil", "value": risk_profile, "copy": "Preset ativo no menu lateral."},
-        ])
+        # Dashboard de métricas no topo
+        m1, m2, m3, m4 = st.columns(4)
+        with m1:
+            st.metric("Oportunidades", safe_count, help="Jogos que atendem aos critérios rigorosos de segurança.")
+        with m2:
+            st.metric("Taxa Segura", f"{safe_rate}%", help="Percentual de cobertura do mercado que atende aos requisitos.")
+        with m3:
+            st.metric("Acurácia (Hist.)", f"{model_accuracy:.1f}%", help="Taxa de acerto histórica do modelo nesta competição.")
+        with m4:
+            st.metric("ROI Sugerido", f"{value_roi:.1f}%", help="Retorno médio esperado para este perfil de risco.")
 
         # Adicionar coluna de ação (Visualizar)
         display_df = format_date_column_for_display(show_safe)
         display_df.insert(0, "Acao", False)
         
+        # Configuração do Editor com cores e progresso
         selected_safe = st.data_editor(
             display_df.drop(columns=["Link"]),
             column_config={
-                "Acao": st.column_config.CheckboxColumn("Detalhes", help="Clique para ver os gráficos deste jogo", default=False),
-                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=100, format="%.1f"),
+                "Acao": st.column_config.CheckboxColumn("Analisar", help="Ver gráficos e detalhes do confronto", default=False),
+                "Score": st.column_config.ProgressColumn("Confiança", min_value=0, max_value=100, format="%.0f"),
+                "Odd": st.column_config.NumberColumn("Odd", format="%.2f"),
+                "Risco": st.column_config.SelectboxColumn("Risco", options=["Baixo", "Medio", "Alto"]),
             },
             disabled=display_df.columns.drop("Acao"),
             hide_index=True,
             use_container_width=True,
-            key="safe_data_editor_new"
+            key="safe_data_editor_v2"
         )
 
         # Verificar se alguma linha foi marcada
