@@ -3998,18 +3998,82 @@ elif page == "Jogos Seguros":
         with m4:
             st.metric("ROI Sugerido", f"{value_roi:.1f}%", help="Retorno médio esperado para este perfil de risco.")
 
-        # Adicionar coluna de ação (Visualizar)
-        display_df = format_date_column_for_display(show_safe)
-        display_df.insert(0, "Acao", False)
+        # Seção de Cards de Destaque (Melhores Escolhas)
+        st.write("### 🏆 Melhores Escolhas (Destaques)")
+        top_picks = show_safe.sort_values("Score", ascending=False).head(3)
+        t_cols = st.columns(len(top_picks) if not top_picks.empty else 1)
         
+        for i, (idx, row) in enumerate(top_picks.iterrows()):
+            with t_cols[i]:
+                # Sistema de Cores Semântico (Heatmap)
+                score_val = row["Score"]
+                prob_val = float(row["Prob. Modelo"].replace('%',''))
+                ev_val = float(row["EV"].replace('%',''))
+                
+                # Cor baseada na Probabilidade (Heatmap conforme pedido)
+                if prob_val >= 75:
+                    prob_color = "#1e3a8a" # Azul escuro
+                    prob_bg = "#dbeafe"
+                elif prob_val >= 60:
+                    prob_color = "#3b82f6" # Azul claro
+                    prob_bg = "#eff6ff"
+                else:
+                    prob_color = "#64748b"
+                    prob_bg = "#f8fafc"
+
+                card_border = "#1e40af" if score_val >= 80 else "#3b82f6"
+                ev_color = "#16a34a" if ev_val > 5 else "#2563eb"
+                
+                st.markdown(f"""
+                <div style="background: white; padding: 20px; border-radius: 15px; border-top: 5px solid {card_border}; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 20px; position: relative; overflow: hidden;">
+                    <div style="font-size: 0.8rem; color: #64748b; font-weight: 600; margin-bottom: 5px;">{row['Data']}</div>
+                    <div style="font-size: 1.1rem; font-weight: 800; color: #1e293b; margin-bottom: 10px;">{row['Mandante']} x {row['Visitante']}</div>
+                    
+                    <div style="background: #f8fafc; padding: 12px; border-radius: 10px; margin-bottom: 15px;">
+                        <span style="font-size: 0.7rem; color: #64748b; font-weight: 700; text-transform: uppercase; display: block; margin-bottom: 4px;">Palpite Sugerido</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: 800; color: #1e40af; font-size: 1rem;">{row['Palpite']}</span>
+                            <span style="font-weight: 900; font-size: 1.3rem; color: #0f172a;">@ {row['Odd']:.2f}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="background: {prob_bg}; padding: 6px 12px; border-radius: 8px; border: 1px solid {prob_color}33;">
+                            <span style="font-size: 0.65rem; color: {prob_color}; font-weight: 800; display: block; text-transform: uppercase;">Probabilidade</span>
+                            <span style="font-weight: 800; color: {prob_color}; font-size: 1.1rem;">{row['Prob. Modelo']}</span>
+                        </div>
+                        <div style="text-align: right;">
+                            <span style="font-size: 0.65rem; color: #16a34a; font-weight: 800; display: block; text-transform: uppercase;">Valor (EV)</span>
+                            <span style="font-weight: 800; color: #16a34a; font-size: 1.1rem;">{row['EV']}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px; background: #f1f5f9; height: 6px; border-radius: 3px; width: 100%;">
+                        <div style="background: {card_border}; height: 100%; width: {row['Score']}%; border-radius: 3px;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                        <span style="font-size: 0.7rem; color: #64748b; font-weight: 600;">Confiança do Modelo</span>
+                        <span style="font-size: 0.7rem; color: #1e293b; font-weight: 800;">{row['Score']:.0f}%</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.write("---")
+        st.write("### 📋 Lista Completa de Oportunidades")
         # Configuração do Editor com cores e progresso
         selected_safe = st.data_editor(
             display_df.drop(columns=["Link"]),
             column_config={
-                "Acao": st.column_config.CheckboxColumn("Analisar", help="Ver gráficos e detalhes do confronto", default=False),
-                "Score": st.column_config.ProgressColumn("Confiança", min_value=0, max_value=100, format="%.0f"),
-                "Odd": st.column_config.NumberColumn("Odd", format="%.2f"),
-                "Risco": st.column_config.SelectboxColumn("Risco", options=["Baixo", "Medio", "Alto"]),
+                "Acao": st.column_config.CheckboxColumn("Analisar", help="Selecione para ver graficos e detalhes aprofundados do confronto", default=False),
+                "Data": st.column_config.TextColumn("Data", help="Horario previsto para o inicio da partida"),
+                "Palpite": st.column_config.TextColumn("Palpite", help="Mercado selecionado pela IA como o de maior valor esperado"),
+                "Odd": st.column_config.NumberColumn("Odd", format="%.2f", help="Cotacao atual da casa de apostas (payout)"),
+                "Prob. Modelo": st.column_config.TextColumn("Prob. Modelo", help="Probabilidade calculada pelo nosso algoritmo estatistico"),
+                "EV": st.column_config.TextColumn("EV", help="Valor Esperado: Lucratividade estimada no longo prazo. Acima de 0% e matematicamente lucrativo"),
+                "Margem": st.column_config.TextColumn("Margem", help="Diferenca de probabilidade entre o palpite principal e o segundo resultado mais provavel"),
+                "Risco": st.column_config.SelectboxColumn("Risco", options=["Baixo", "Medio", "Alto"], help="Nivel de volatilidade da entrada baseado em liquidez e variancia da odd"),
+                "Casas": st.column_config.NumberColumn("Casas", help="Quantidade de casas de aposta (Bookmakers) que validam esta linha de odd"),
+                "Score": st.column_config.ProgressColumn("Confiança", min_value=0, max_value=100, format="%.0f", help="Score FD: Pontuacao de 0 a 100 que resume a seguranca da entrada"),
             },
             disabled=display_df.columns.drop("Acao"),
             hide_index=True,

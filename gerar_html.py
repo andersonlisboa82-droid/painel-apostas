@@ -3025,6 +3025,38 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     .badge-value {{ background: #dcfce7; color: #166534; }}
     .badge-risk {{ background: #fee2e2; color: #991b1b; }}
 
+    .date-match-card {{
+      background: #fff; border-radius: 16px; padding: 20px;
+      border: 1px solid var(--line); transition: all .2s ease;
+      display: flex; flex-direction: column; gap: 12px;
+      position: relative; overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }}
+    .date-match-card:hover {{ transform: translateY(-3px); box-shadow: 0 12px 24px rgba(0,0,0,0.1); border-color: var(--blue-soft); }}
+    
+    .heatmap-prob-high {{ background: #dbeafe !important; color: #1e3a8a !important; border: 1px solid #bfdbfe !important; }}
+    .heatmap-prob-mid {{ background: #eff6ff !important; color: #3b82f6 !important; border: 1px solid #dbeafe !important; }}
+    .heatmap-ev-high {{ color: #16a34a !important; font-weight: 800; }}
+    
+    .tooltip-icon {{
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; background: #e2e8f0; color: #64748b;
+      border-radius: 50%; font-size: 10px; font-weight: 800; cursor: help;
+      margin-left: 4px; vertical-align: middle;
+    }}
+    
+    .card-stat-grid {{
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;
+    }}
+    .card-stat-item {{
+      background: #f8fafc; padding: 10px; border-radius: 10px;
+    }}
+    .card-stat-item label {{
+      display: block; font-size: 0.65rem; color: var(--muted); 
+      font-weight: 700; text-transform: uppercase; margin-bottom: 2px;
+    }}
+    .card-stat-item strong {{ font-size: 1rem; color: var(--text); }}
+
     @media (max-width: 1180px) {{
       .side-rail {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .card-head {{ grid-template-columns: 1fr; }}
@@ -5250,40 +5282,62 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
       }}
       grid.innerHTML = matches.map((item) => {{
         const detail = matchDetailsStore[item.detail_key] || {{}};
-        const probability = Number(item.model_probability || 0);
+        const probRaw = Number(item.model_probability || 0);
+        const probPct = probRaw.toFixed(1);
+        
+        // Heatmap logic for Probability
+        let probClass = '';
+        if (probRaw >= 75) probClass = 'heatmap-prob-high';
+        else if (probRaw >= 60) probClass = 'heatmap-prob-mid';
+        
         const tipSource = (detail.tip && detail.tip.selection_source) || detail.suggestion_selection_source || 'model';
-        const tipSourceLabel = tipSource === 'house_lock'
-          ? 'consenso das casas'
-          : tipSource === 'house_consensus'
-            ? 'consenso das casas'
-            : 'modelo';
-        const tipLabel = tipSource === 'model' ? 'Sugestao do modelo' : 'Sugestao operacional';
-        const tipLine = detail.tip
-          ? `${{tipLabel}}: ${{detail.tip.market}} | Odd ${{detail.tip.odd.toFixed(2)}} | EV ${{detail.tip.ev}}% | Fonte: ${{tipSourceLabel}}`
-          : `Leitura principal: ${{item.model_result || 'Sem leitura'}}${{probability ? ' | ' + probability.toFixed(1) + '%' : ''}}`;
+        const tipSourceLabel = tipSource === 'house_lock' ? 'consenso casas' : tipSource === 'house_consensus' ? 'consenso casas' : 'modelo';
+        const tipLabel = tipSource === 'model' ? 'Sugestao modelo' : 'Sugestao IA';
+        
+        let tipLine = 'Sem leitura disponivel';
+        let evClass = '';
+        if (detail.tip) {{
+          const evRaw = Number(detail.tip.ev);
+          if (evRaw > 5) evClass = 'heatmap-ev-high';
+          tipLine = `<strong>${{detail.tip.market}}</strong> @ ${{detail.tip.odd.toFixed(2)}}`;
+        }} else if (item.model_result) {{
+          tipLine = `<strong>${{item.model_result}}</strong>`;
+        }}
+
         const reliabilityInfo = estimateMatchReliability(detail, reliabilityFilter.metricKey);
-        const reliabilityLine = reliabilityInfo
-          ? `Confiabilidade estimada (${{getReliabilityMetricLabel(reliabilityFilter.metricKey)}}): ${{reliabilityInfo.pct.toFixed(1)}}%`
-          : `Confiabilidade estimada: n/d`;
-        const statusLabel = item.status || 'Agendado';
+        const relPct = reliabilityInfo ? reliabilityInfo.pct.toFixed(1) + '%' : 'n/d';
+        
         const matchupLabel = item.matchup || ((item.home || '') + ' x ' + (item.away || ''));
+        
         return `
-          <article class="date-match-card">
+          <article class="date-match-card ${{probClass}}">
             <div class="date-match-top">
               <div>
                 <span class="eyebrow">${{item.competition || 'Competicao'}}</span>
                 <strong>${{matchupLabel}}</strong>
               </div>
               <div class="date-match-meta">
-                <span>${{statusLabel}}</span>
-                <span>${{item.date_label || formatSelectedDate(item.filter_date || '')}}</span>
+                <span>${{item.status || 'Agendado'}}</span>
               </div>
             </div>
-            <div class="date-match-note">${{item.model_risk_stage || 'Fora dos criterios'}}</div>
-            <div class="date-match-copy">${{tipLine}}</div>
-            <div class="date-match-copy">${{reliabilityLine}}</div>
-            <div class="date-match-actions">
-              <button class="btn secondary" type="button" data-detail-key="${{item.detail_key}}" onclick="showMatchDetails(this)">Abrir analise</button>
+            
+            <div class="card-badges">
+              <span class="badge-card ${{probRaw >= 75 ? 'badge-prob-high' : 'badge-prob-mid'}}">Prob: ${{probPct}}%</span>
+              ${{detail.tip && detail.tip.ev > 0 ? `<span class="badge-card badge-ev-high">EV: ${{detail.tip.ev}}%</span>` : ''}}
+              <span class="badge-card" style="background:#f1f5f9;">Conf: ${{relPct}}</span>
+            </div>
+
+            <div class="card-stat-item" style="background: rgba(255,255,255,0.5); border: 1px solid rgba(0,0,0,0.05);">
+              <label>${{tipLabel}} <span class="tooltip-help" title="Palpite gerado pelo algoritmo com maior valor esperado">?</span></label>
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span>${{tipLine}}</span>
+                <small style="font-size:0.65rem; color:var(--muted); text-transform:uppercase;">${{tipSourceLabel}}</small>
+              </div>
+            </div>
+
+            <div class="card-footer">
+              <span style="font-size:0.75rem; color:var(--muted); font-weight:600;">${{item.date_label || formatSelectedDate(item.filter_date)}}</span>
+              <button class="btn secondary" style="height:32px; padding:0 12px; font-size:0.75rem;" type="button" data-detail-key="${{item.detail_key}}" onclick="showMatchDetails(this)">Detalhes</button>
             </div>
           </article>
         `;
