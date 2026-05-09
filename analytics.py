@@ -51,6 +51,17 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
         "baseline_weight": 0.30,
         "max_adjustment_weight": 0.55,
         "weight_sample_size": 45.0,
+        "max_evaluated_matches": 80,
+    },
+    "market_anchor": {
+        "enabled": True,
+        "min_bookmakers": 6,
+        "bookmakers_for_max_weight": 18,
+        "base_weight": 0.10,
+        "max_weight": 0.32,
+        "agreement_boost": 0.08,
+        "favorite_gap_boost": 0.06,
+        "favorite_gap_threshold": 0.12,
     },
     "betting": {
         "kelly_fractional": 0.25,
@@ -183,6 +194,57 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 _safe_float(calibration_raw.get("weight_sample_size"), _safe_float(calibration_default.get("weight_sample_size"), 45.0)),
                 1.0,
                 500.0,
+            )
+            calibration_cfg["max_evaluated_matches"] = max(
+                20,
+                _safe_int(
+                    calibration_raw.get("max_evaluated_matches"),
+                    _safe_int(calibration_default.get("max_evaluated_matches"), 80),
+                ),
+            )
+
+    anchor_default = DEFAULT_MODEL_CONFIG["market_anchor"] if isinstance(DEFAULT_MODEL_CONFIG["market_anchor"], dict) else {}
+    anchor_raw = model_config.get("market_anchor", {})
+    if isinstance(anchor_raw, dict):
+        anchor_cfg = normalized["market_anchor"]
+        if isinstance(anchor_cfg, dict):
+            enabled_raw = anchor_raw.get("enabled")
+            anchor_cfg["enabled"] = bool(enabled_raw) if enabled_raw is not None else bool(anchor_default.get("enabled", True))
+            anchor_cfg["min_bookmakers"] = max(
+                0,
+                _safe_int(anchor_raw.get("min_bookmakers"), _safe_int(anchor_default.get("min_bookmakers"), 6)),
+            )
+            anchor_cfg["bookmakers_for_max_weight"] = max(
+                1,
+                _safe_int(
+                    anchor_raw.get("bookmakers_for_max_weight"),
+                    _safe_int(anchor_default.get("bookmakers_for_max_weight"), 18),
+                ),
+            )
+            anchor_cfg["base_weight"] = _clamp(
+                _safe_float(anchor_raw.get("base_weight"), _safe_float(anchor_default.get("base_weight"), 0.10)),
+                0.0,
+                1.0,
+            )
+            anchor_cfg["max_weight"] = _clamp(
+                _safe_float(anchor_raw.get("max_weight"), _safe_float(anchor_default.get("max_weight"), 0.32)),
+                0.0,
+                1.0,
+            )
+            anchor_cfg["agreement_boost"] = _clamp(
+                _safe_float(anchor_raw.get("agreement_boost"), _safe_float(anchor_default.get("agreement_boost"), 0.08)),
+                0.0,
+                1.0,
+            )
+            anchor_cfg["favorite_gap_boost"] = _clamp(
+                _safe_float(anchor_raw.get("favorite_gap_boost"), _safe_float(anchor_default.get("favorite_gap_boost"), 0.06)),
+                0.0,
+                1.0,
+            )
+            anchor_cfg["favorite_gap_threshold"] = _clamp(
+                _safe_float(anchor_raw.get("favorite_gap_threshold"), _safe_float(anchor_default.get("favorite_gap_threshold"), 0.12)),
+                0.0,
+                1.0,
             )
 
     betting_default = DEFAULT_MODEL_CONFIG["betting"] if isinstance(DEFAULT_MODEL_CONFIG["betting"], dict) else {}
@@ -448,6 +510,7 @@ def build_probability_calibration(
         if min_bucket_matches is not None
         else max(1, _safe_int(calibration_cfg.get("min_bucket_matches"), 12))
     )
+    max_evaluated_matches = max(20, _safe_int(calibration_cfg.get("max_evaluated_matches"), 80))
     resolved_max_goals = (
         max(3, min(10, _safe_int(max_goals, 5)))
         if max_goals is not None
@@ -474,7 +537,8 @@ def build_probability_calibration(
         }
 
     rows: list[dict[str, object]] = []
-    for idx in range(resolved_min_history, len(finished)):
+    start_idx = max(resolved_min_history, len(finished) - max_evaluated_matches)
+    for idx in range(start_idx, len(finished)):
         row = finished.iloc[idx]
         history = finished.iloc[:idx].copy()
         try:
@@ -531,6 +595,21 @@ def build_probability_calibration(
     }
 
 
+def _model_config_cache_signature(model_config: dict[str, object] | None) -> tuple[tuple[str, str], ...]:
+    cfg = normalize_model_config(model_config)
+    flattened: dict[str, str] = {}
+    for section, values in cfg.items():
+        if isinstance(values, dict):
+            for key, value in values.items():
+                if isinstance(value, list):
+                    flattened[f"{section}.{key}"] = ",".join(f"{float(item):.6f}" for item in value)
+                else:
+                    flattened[f"{section}.{key}"] = str(value)
+        else:
+            flattened[str(section)] = str(values)
+    return tuple(sorted(flattened.items()))
+
+
 def _get_probability_calibration(
     matches_df: pd.DataFrame,
     *,
@@ -541,7 +620,14 @@ def _get_probability_calibration(
     model_config: dict[str, object] | None = None,
 ) -> dict[str, object]:
     cache = matches_df.attrs.setdefault("_probability_calibration_cache", {})
-    cache_key = (min_history_matches, min_bucket_matches, max_goals, tuple(round(float(item), 6) for item in bins), len(matches_df))
+    cache_key = (
+        min_history_matches,
+        min_bucket_matches,
+        max_goals,
+        tuple(round(float(item), 6) for item in bins),
+        _model_config_cache_signature(model_config),
+        len(matches_df),
+    )
     if cache_key not in cache:
         cache[cache_key] = build_probability_calibration(
             matches_df,
@@ -607,12 +693,90 @@ def _apply_probability_calibration(
     )
 
 
+def apply_market_anchor(
+    probs: MatchProbabilities,
+    *,
+    odd_home: float | None = None,
+    odd_draw: float | None = None,
+    odd_away: float | None = None,
+    bookmakers: int | None = None,
+    model_config: dict[str, object] | None = None,
+) -> MatchProbabilities:
+    cfg = normalize_model_config(model_config)
+    anchor_cfg = cfg["market_anchor"] if isinstance(cfg.get("market_anchor"), dict) else {}
+    if not bool(anchor_cfg.get("enabled", True)):
+        return probs
+
+    try:
+        house_probs = normalized_implied_probabilities(float(odd_home), float(odd_draw), float(odd_away))
+    except (TypeError, ValueError):
+        return probs
+
+    if sum(house_probs.values()) <= 0:
+        return probs
+
+    resolved_bookmakers = max(0, _safe_int(bookmakers, 0))
+    min_bookmakers = max(0, _safe_int(anchor_cfg.get("min_bookmakers"), 6))
+    if resolved_bookmakers < min_bookmakers:
+        return probs
+
+    model_probs = probability_map(probs)
+    model_market, _ = max(model_probs.items(), key=lambda item: item[1])
+    house_market, house_probability = max(house_probs.items(), key=lambda item: item[1])
+    second_house_probability = max(
+        [probability for market, probability in house_probs.items() if market != house_market],
+        default=0.0,
+    )
+    house_gap = max(0.0, float(house_probability) - float(second_house_probability))
+
+    base_weight = _clamp(_safe_float(anchor_cfg.get("base_weight"), 0.10), 0.0, 1.0)
+    max_weight = _clamp(_safe_float(anchor_cfg.get("max_weight"), 0.32), 0.0, 1.0)
+    agreement_boost = _clamp(_safe_float(anchor_cfg.get("agreement_boost"), 0.08), 0.0, 1.0)
+    favorite_gap_boost = _clamp(_safe_float(anchor_cfg.get("favorite_gap_boost"), 0.06), 0.0, 1.0)
+    favorite_gap_threshold = _clamp(_safe_float(anchor_cfg.get("favorite_gap_threshold"), 0.12), 0.0, 1.0)
+    bookmakers_for_max_weight = max(1, _safe_int(anchor_cfg.get("bookmakers_for_max_weight"), 18))
+
+    liquidity_ratio = min(1.0, resolved_bookmakers / float(bookmakers_for_max_weight))
+    weight = base_weight * liquidity_ratio
+    if model_market == house_market:
+        weight += agreement_boost * liquidity_ratio
+    if house_gap >= favorite_gap_threshold:
+        weight += favorite_gap_boost * min(1.0, house_gap / max(favorite_gap_threshold, 0.01))
+    weight = min(max_weight, max(0.0, weight))
+    if weight <= 0:
+        return probs
+
+    adjusted = {
+        market: (float(model_probs[market]) * (1.0 - weight)) + (float(house_probs[market]) * weight)
+        for market in model_probs
+    }
+    normalizer = sum(adjusted.values())
+    if normalizer <= 0:
+        return probs
+
+    return MatchProbabilities(
+        home_win=adjusted["Casa"] / normalizer,
+        draw=adjusted["Empate"] / normalizer,
+        away_win=adjusted["Fora"] / normalizer,
+        expected_home_goals=probs.expected_home_goals,
+        expected_away_goals=probs.expected_away_goals,
+        btts_yes=probs.btts_yes,
+        under_25=probs.under_25,
+        over_25=probs.over_25,
+        top_scorelines=probs.top_scorelines,
+    )
+
+
 def calculate_match_probabilities(
     matches_df: pd.DataFrame,
     home_team: str,
     away_team: str,
     max_goals: int | None = None,
     *,
+    odd_home: float | None = None,
+    odd_draw: float | None = None,
+    odd_away: float | None = None,
+    bookmakers: int | None = None,
     min_calibration_history: int | None = None,
     min_calibration_bucket: int | None = None,
     model_config: dict[str, object] | None = None,
@@ -652,7 +816,14 @@ def calculate_match_probabilities(
         model_config=cfg,
     )
     if not bool(calibration_cfg.get("enabled", True)):
-        return raw_probs
+        return apply_market_anchor(
+            raw_probs,
+            odd_home=odd_home,
+            odd_draw=odd_draw,
+            odd_away=odd_away,
+            bookmakers=bookmakers,
+            model_config=cfg,
+        )
 
     calibration = _get_probability_calibration(
         matches_df,
@@ -663,8 +834,17 @@ def calculate_match_probabilities(
         model_config=cfg,
     )
     if not calibration.get("markets"):
-        return raw_probs
-    return _apply_probability_calibration(raw_probs, calibration, model_config=cfg)
+        calibrated_probs = raw_probs
+    else:
+        calibrated_probs = _apply_probability_calibration(raw_probs, calibration, model_config=cfg)
+    return apply_market_anchor(
+        calibrated_probs,
+        odd_home=odd_home,
+        odd_draw=odd_draw,
+        odd_away=odd_away,
+        bookmakers=bookmakers,
+        model_config=cfg,
+    )
 
 
 def get_team_context(matches_df: pd.DataFrame, team: str, recent_n: int = 5) -> dict:
@@ -854,6 +1034,14 @@ def build_safe_bets_table(
     for row in fixtures.itertuples(index=False):
         try:
             probs = calculate_match_probabilities(matches_df, row.home_team, row.away_team, model_config=cfg)
+            probs = apply_market_anchor(
+                probs,
+                odd_home=float(row.odds_home),
+                odd_draw=float(row.odds_draw),
+                odd_away=float(row.odds_away),
+                bookmakers=_safe_int(row.bookmakers, 0),
+                model_config=cfg,
+            )
             tip = suggest_bet_strategy(
                 probs=probs,
                 odd_home=float(row.odds_home),
@@ -866,7 +1054,7 @@ def build_safe_bets_table(
         except Exception:
             continue
 
-        bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
+        bookmakers = _safe_int(row.bookmakers, 0)
         selected_probability = float(tip.selected_probability or tip.model_probability)
         selected_market_probability = float(probability_map(probs).get(str(tip.best_market), 0.0))
         selected_gap = market_probability_gap(probs, str(tip.best_market))
@@ -1065,7 +1253,16 @@ def build_backtest_table(
             continue
 
         try:
-            probs = calculate_match_probabilities(history, str(row["home_team"]), str(row["away_team"]), model_config=cfg)
+            probs = calculate_match_probabilities(
+                history,
+                str(row["home_team"]),
+                str(row["away_team"]),
+                odd_home=float(row["odds_home"]),
+                odd_draw=float(row["odds_draw"]),
+                odd_away=float(row["odds_away"]),
+                bookmakers=int(row["bookmakers"]) if "bookmakers" in row and not pd.isna(row["bookmakers"]) else 0,
+                model_config=cfg,
+            )
             tip = suggest_bet_strategy(
                 probs=probs,
                 odd_home=float(row["odds_home"]),

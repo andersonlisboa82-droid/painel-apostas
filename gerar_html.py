@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from html import escape
 import json
@@ -29,6 +30,8 @@ from scraper import COMPETITIONS, load_competition_matches
 
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
+MAX_ACCURACY_MATCHES_PER_COMPETITION = 20
+MAX_FIXTURE_DETAILS_PER_COMPETITION = 30
 
 
 def _current_git_short_hash() -> str:
@@ -422,14 +425,47 @@ def _best_bookmaker_result(
     return min(options, key=lambda item: item[1])[0]
 
 
+def _row_probability_cache_key(row: object) -> tuple[object, ...]:
+    return (
+        str(getattr(row, "home_team", "")),
+        str(getattr(row, "away_team", "")),
+        str(getattr(row, "date_text", "")),
+        str(getattr(row, "event_timestamp", "")),
+        str(getattr(row, "odds_home", "")),
+        str(getattr(row, "odds_draw", "")),
+        str(getattr(row, "odds_away", "")),
+        str(getattr(row, "bookmakers", "")),
+    )
+
+
+def _get_cached_match_probabilities(
+    df: pd.DataFrame,
+    row: object,
+    prob_cache: dict[tuple[object, ...], object],
+) -> object:
+    cache_key = _row_probability_cache_key(row)
+    if cache_key not in prob_cache:
+        prob_cache[cache_key] = calculate_match_probabilities(
+            df,
+            getattr(row, "home_team"),
+            getattr(row, "away_team"),
+            odd_home=getattr(row, "odds_home", None),
+            odd_draw=getattr(row, "odds_draw", None),
+            odd_away=getattr(row, "odds_away", None),
+            bookmakers=getattr(row, "bookmakers", 0),
+        )
+    return prob_cache[cache_key]
+
+
 def _calculate_competition_accuracy(df: pd.DataFrame) -> dict[str, int]:
     finished = df[df["status"] == "Finalizado"].copy()
     finished = finished.dropna(subset=["home_goals", "away_goals"])
+    finished = _sort_matches_for_display(finished, ascending=False).head(MAX_ACCURACY_MATCHES_PER_COMPETITION)
     model_hits = 0
     model_evaluated = 0
     market_hits = 0
     market_evaluated = 0
-    prob_cache: dict[str, object] = {}
+    prob_cache: dict[tuple[object, ...], object] = {}
 
     for row in finished.itertuples(index=False):
         actual_result = _actual_market_label(
@@ -442,10 +478,8 @@ def _calculate_competition_accuracy(df: pd.DataFrame) -> dict[str, int]:
             continue
 
         try:
-            match_key = f"{row.home_team}_{row.away_team}"
-            if match_key not in prob_cache:
-                prob_cache[match_key] = calculate_match_probabilities(df, row.home_team, row.away_team)
-            model_result, _ = _best_model_result(prob_cache[match_key], str(row.home_team), str(row.away_team))
+            probs = _get_cached_match_probabilities(df, row, prob_cache)
+            model_result, _ = _best_model_result(probs, str(row.home_team), str(row.away_team))
         except Exception:
             continue
 
@@ -475,9 +509,15 @@ def _calculate_competition_accuracy(df: pd.DataFrame) -> dict[str, int]:
     }
 
 
-def _collect_daily_performance_entries(name: str, df: pd.DataFrame) -> list[dict[str, object]]:
+def _collect_daily_performance_entries(
+    name: str,
+    df: pd.DataFrame,
+    prob_cache: dict[tuple[object, ...], object] | None = None,
+) -> list[dict[str, object]]:
     finished = df[df["status"] == "Finalizado"].copy()
     entries: list[dict[str, object]] = []
+    resolved_prob_cache = prob_cache if prob_cache is not None else {}
+    today_key = datetime.now(APP_TIMEZONE).date().isoformat()
 
     for row in finished.itertuples(index=False):
         filter_date = _match_filter_date(
@@ -486,6 +526,8 @@ def _collect_daily_performance_entries(name: str, df: pd.DataFrame) -> list[dict
             str(getattr(row, "status", "")),
         )
         if not filter_date:
+            continue
+        if filter_date != today_key:
             continue
 
         actual_result = _actual_market_label(
@@ -498,7 +540,7 @@ def _collect_daily_performance_entries(name: str, df: pd.DataFrame) -> list[dict
             continue
 
         try:
-            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            probs = _get_cached_match_probabilities(df, row, resolved_prob_cache)
             model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
         except Exception:
             continue
@@ -1290,9 +1332,10 @@ def _build_competition_section(
     risk_entries: list[dict[str, object]] = []
     match_catalog: list[dict[str, object]] = []
     detail_index = 0
+    fixture_details_built = 0
     accuracy_stats = _calculate_competition_accuracy(df)
     finished_hits = int(accuracy_stats["finished_hits"])
-    prob_cache: dict[str, object] = {}
+    prob_cache: dict[tuple[object, ...], object] = {}
     finished_evaluated = int(accuracy_stats["finished_evaluated"])
     finished_market_hits = int(accuracy_stats["finished_market_hits"])
     finished_market_evaluated = int(accuracy_stats["finished_market_evaluated"])
@@ -1314,11 +1357,14 @@ def _build_competition_section(
         display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         filter_date = _match_filter_date(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         detail_json = "{}"
-        try:
-            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
-            detail_json = _get_detail_json(df, row, probs)
-        except Exception:
-            pass
+        should_build_detail = _can_build_tip_from_row(row) or fixture_details_built < MAX_FIXTURE_DETAILS_PER_COMPETITION
+        if should_build_detail:
+            try:
+                probs = _get_cached_match_probabilities(df, row, prob_cache)
+                detail_json = _get_detail_json(df, row, probs)
+                fixture_details_built += 1
+            except Exception:
+                pass
         detail_key = register_detail(detail_json)
         if detail_key:
             detail_data = detail_store.get(detail_key, {})
@@ -1354,14 +1400,14 @@ def _build_competition_section(
             f"<td>{escape(_fmt_odd(row.odds_draw))}</td>"
             f"<td>{escape(_fmt_odd(row.odds_away))}</td>"
             f"<td>{escape(str(row.bookmakers) if row.bookmakers is not None else '-')}</td>"
-            f"<td><button class='btn-mini' data-detail-key='{escape(detail_key)}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
+            f"<td>{f'<button class=\"btn-mini\" data-detail-key=\"{escape(detail_key)}\" onclick=\"showMatchDetails(this)\">Visualizar</button>' if detail_key else '<span class=\"muted-cell\">Sem odds</span>'}</td>"
             "</tr>"
         )
 
     for row in fixtures_valid.head(20).itertuples(index=False):
         display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         try:
-            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            probs = _get_cached_match_probabilities(df, row, prob_cache)
             detail_json = _get_detail_json(df, row, probs)
         except Exception:
             detail_json = "{}"
@@ -1374,7 +1420,7 @@ def _build_competition_section(
         display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         filter_date = _match_filter_date(row.date_text, getattr(row, "event_timestamp", None), str(row.status))
         try:
-            probs = calculate_match_probabilities(df, row.home_team, row.away_team)
+            probs = _get_cached_match_probabilities(df, row, prob_cache)
             tip = suggest_bet_strategy(
                 probs,
                 odd_home=float(row.odds_home),
@@ -1440,10 +1486,7 @@ def _build_competition_section(
             )
             cached_real_stats_payload = real_stats_cache.get(cache_key)
         try:
-            m_key = f"{row.home_team}_{row.away_team}"
-            if m_key not in prob_cache:
-                prob_cache[m_key] = calculate_match_probabilities(df, row.home_team, row.away_team)
-            probs = prob_cache[m_key]
+            probs = _get_cached_match_probabilities(df, row, prob_cache)
             tip = None
             if _can_build_tip_from_row(row):
                 tip = suggest_bet_strategy(
@@ -1544,9 +1587,9 @@ def _build_competition_section(
             display_date = _format_match_datetime(row.date_text, getattr(row, "event_timestamp", None), "Agendado")
             filter_date = _match_filter_date(row.date_text, getattr(row, "event_timestamp", None), "Agendado")
             try:
-                probs = calculate_match_probabilities(df, row.home_team, row.away_team)
                 # Find original odds for detail view
                 match_orig = fixtures_valid[(fixtures_valid["home_team"] == row.home_team) & (fixtures_valid["away_team"] == row.away_team)].iloc[0]
+                probs = _get_cached_match_probabilities(df, match_orig, prob_cache)
                 tip = suggest_bet_strategy(
                     probs,
                     odd_home=float(match_orig.odds_home),
@@ -1758,18 +1801,71 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     global_match_catalog: list[dict[str, object]] = []
     daily_performance_entries: list[dict[str, object]] = []
     real_stats_cache = load_real_match_stats_cache()
+    competitions = list(COMPETITIONS.keys())
+    resolved_frames: dict[str, pd.DataFrame] = {}
 
-    for comp in COMPETITIONS:
-        if competition_frames and comp in competition_frames:
-            df = competition_frames[comp].copy()
-        else:
-            df = load_competition_matches(comp)
-        daily_performance_entries.extend(_collect_daily_performance_entries(comp, df))
+    if competition_frames:
+        for comp in competitions:
+            if comp in competition_frames:
+                resolved_frames[comp] = competition_frames[comp].copy()
+
+    missing_competitions = [comp for comp in competitions if comp not in resolved_frames]
+    if missing_competitions:
+        max_load_workers = min(6, len(missing_competitions))
+        with ThreadPoolExecutor(max_workers=max_load_workers, thread_name_prefix="html-load-comp") as executor:
+            future_to_comp = {
+                executor.submit(load_competition_matches, comp): comp
+                for comp in missing_competitions
+            }
+            for future in as_completed(future_to_comp):
+                comp = future_to_comp[future]
+                resolved_frames[comp] = future.result()
+
+    def build_competition_payload(comp: str) -> tuple[
+        list[dict[str, object]],
+        str,
+        dict[str, int | str],
+        dict[str, object],
+        list[dict[str, object]],
+        list[dict[str, object]],
+    ]:
+        df = resolved_frames[comp].copy()
+        daily_entries = _collect_daily_performance_entries(comp, df)
         section_html, stats, section_details, section_risk_entries, section_match_catalog = _build_competition_section(
             comp,
             df,
             real_stats_cache=real_stats_cache,
         )
+        return daily_entries, section_html, stats, section_details, section_risk_entries, section_match_catalog
+
+    payloads: dict[str, tuple[
+        list[dict[str, object]],
+        str,
+        dict[str, int | str],
+        dict[str, object],
+        list[dict[str, object]],
+        list[dict[str, object]],
+    ]] = {}
+    max_build_workers = min(6, len(competitions))
+    with ThreadPoolExecutor(max_workers=max_build_workers, thread_name_prefix="html-build-comp") as executor:
+        future_to_comp = {
+            executor.submit(build_competition_payload, comp): comp
+            for comp in competitions
+        }
+        for future in as_completed(future_to_comp):
+            comp = future_to_comp[future]
+            payloads[comp] = future.result()
+
+    for comp in competitions:
+        (
+            section_daily_entries,
+            section_html,
+            stats,
+            section_details,
+            section_risk_entries,
+            section_match_catalog,
+        ) = payloads[comp]
+        daily_performance_entries.extend(section_daily_entries)
         sections.append(section_html)
         competition_stats.append(stats)
         detail_registry.update(section_details)
@@ -1826,9 +1922,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         "</div>"
         "</div>"
     )
-    today_key = datetime.now(APP_TIMEZONE).date().isoformat()
     today_performance_html = _build_today_performance_html(
-        [item for item in daily_performance_entries if str(item.get("filter_date", "")) == today_key]
+        daily_performance_entries
     )
     daily_performance_json = json.dumps(daily_performance_entries, ensure_ascii=False)
     ai_prompt_html = escape(AI_PROMPT_TEMPLATE)

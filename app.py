@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import importlib
@@ -249,10 +249,22 @@ def _build_match_detail_data(
     *,
     model_config: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    odd_h = float(row_data.get("odds_home", row_data.get("Odd Casa", row_data.get("odd", 0))))
+    odd_d = float(row_data.get("odds_draw", row_data.get("Odd Empate", 0)))
+    odd_a = float(row_data.get("odds_away", row_data.get("Odd Fora", 0)))
+    bookmakers_value = row_data.get("bookmakers", row_data.get("Casas", 0))
+    try:
+        bookmakers = int(bookmakers_value) if not pd.isna(bookmakers_value) else 0
+    except (TypeError, ValueError):
+        bookmakers = 0
     probs = calculate_match_probabilities(
         matches_df,
         row_data["home_team"],
         row_data["away_team"],
+        odd_home=odd_h,
+        odd_draw=odd_d,
+        odd_away=odd_a,
+        bookmakers=bookmakers,
         model_config=model_config,
     )
     home_ctx = get_team_context(matches_df, str(row_data["home_team"]))
@@ -265,10 +277,6 @@ def _build_match_detail_data(
     
     # Se vier da tabela de safe_df, as odds já estão no row_data
     # Se vier da tabela de valid (futuros), também
-    odd_h = float(row_data.get("odds_home", row_data.get("Odd Casa", row_data.get("odd", 0))))
-    odd_d = float(row_data.get("odds_draw", row_data.get("Odd Empate", 0)))
-    odd_a = float(row_data.get("odds_away", row_data.get("Odd Fora", 0)))
-
     tip = suggest_bet_strategy(
         probs,
         odd_home=odd_h,
@@ -1720,6 +1728,11 @@ def build_ai_analysis_for_fixture(
     *,
     model_config: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    fixture_bookmakers = fixture_row.get("bookmakers", 0)
+    try:
+        fixture_bookmakers = int(fixture_bookmakers) if not pd.isna(fixture_bookmakers) else 0
+    except (TypeError, ValueError):
+        fixture_bookmakers = 0
     display_date = format_match_datetime(
         fixture_row.get("date_text"),
         fixture_row.get("event_timestamp"),
@@ -1729,6 +1742,10 @@ def build_ai_analysis_for_fixture(
         matches_df,
         fixture_row["home_team"],
         fixture_row["away_team"],
+        odd_home=float(fixture_row["odds_home"]),
+        odd_draw=float(fixture_row["odds_draw"]),
+        odd_away=float(fixture_row["odds_away"]),
+        bookmakers=fixture_bookmakers,
         model_config=model_config,
     )
     tip = suggest_bet_strategy(
@@ -3114,6 +3131,7 @@ with st.sidebar:
     runtime_model_config = _get_runtime_model_config()
     poisson_cfg = runtime_model_config["poisson"] if isinstance(runtime_model_config.get("poisson"), dict) else {}
     calibration_cfg = runtime_model_config["calibration"] if isinstance(runtime_model_config.get("calibration"), dict) else {}
+    market_anchor_cfg = runtime_model_config["market_anchor"] if isinstance(runtime_model_config.get("market_anchor"), dict) else {}
     betting_cfg = runtime_model_config["betting"] if isinstance(runtime_model_config.get("betting"), dict) else {}
     safe_cfg = runtime_model_config["safe_score"] if isinstance(runtime_model_config.get("safe_score"), dict) else {}
 
@@ -3129,7 +3147,8 @@ with st.sidebar:
 - Poisson: `max_goals={int(poisson_cfg.get('max_goals', 5))}`, `league_home_default={float(poisson_cfg.get('league_home_default', 1.35)):.2f}`, `league_away_default={float(poisson_cfg.get('league_away_default', 1.10)):.2f}`.
 - Minimos de gols esperados: `home={float(poisson_cfg.get('min_expected_home', 0.15)):.2f}`, `away={float(poisson_cfg.get('min_expected_away', 0.10)):.2f}`.
 - Calibracao: `enabled={bool(calibration_cfg.get('enabled', True))}`, `min_history={int(calibration_cfg.get('min_history_matches', 80))}`, `min_bucket={int(calibration_cfg.get('min_bucket_matches', 12))}`.
-- Ajuste da calibracao: `baseline_weight={float(calibration_cfg.get('baseline_weight', 0.30)):.2f}`, `max_adjustment_weight={float(calibration_cfg.get('max_adjustment_weight', 0.55)):.2f}`, `weight_sample_size={float(calibration_cfg.get('weight_sample_size', 45.0)):.1f}`.
+- Ajuste da calibracao: `baseline_weight={float(calibration_cfg.get('baseline_weight', 0.30)):.2f}`, `max_adjustment_weight={float(calibration_cfg.get('max_adjustment_weight', 0.55)):.2f}`, `weight_sample_size={float(calibration_cfg.get('weight_sample_size', 45.0)):.1f}`, `max_eval={int(calibration_cfg.get('max_evaluated_matches', 80))}`.
+- Ancora de mercado: `enabled={bool(market_anchor_cfg.get('enabled', True))}`, `min_bookmakers={int(market_anchor_cfg.get('min_bookmakers', 6))}`, `max_weight={float(market_anchor_cfg.get('max_weight', 0.32)):.2f}`.
 - Gestao de entrada: `kelly_fractional={float(betting_cfg.get('kelly_fractional', 0.25)):.2f}`, `min_selection_probability={float(betting_cfg.get('min_selection_probability', 0.58)):.2f}`, `min_market_gap={float(betting_cfg.get('min_market_gap', 0.08)):.2f}`, `max_draw_probability_for_winner={float(betting_cfg.get('max_draw_probability_for_winner', 0.25)):.2f}`.
 - Safe score: `prob_weight={float(safe_cfg.get('prob_weight', 0.55)):.2f}`, `bookmakers_weight={float(safe_cfg.get('bookmakers_weight', 0.20)):.2f}`, `bookmakers_cap={int(safe_cfg.get('bookmakers_cap', 20))}`, `odd_weight={float(safe_cfg.get('odd_weight', 0.05)):.2f}`.
 """
@@ -3254,6 +3273,80 @@ with st.sidebar:
             step=1.0,
             key="model_cfg_weight_sample_size",
         )
+        max_calibration_evaluated_input = st.number_input(
+            "Max. jogos recentes avaliados na calibracao",
+            min_value=20,
+            max_value=1000,
+            value=int(calibration_cfg.get("max_evaluated_matches", 80)),
+            step=10,
+            key="model_cfg_max_calibration_evaluated",
+        )
+
+        st.markdown("**Ancora de Mercado (odds + casas)**")
+        market_anchor_enabled_input = st.checkbox(
+            "Misturar probabilidade do modelo com consenso das odds",
+            value=bool(market_anchor_cfg.get("enabled", True)),
+            key="model_cfg_market_anchor_enabled",
+        )
+        col_anchor_a, col_anchor_b = st.columns(2)
+        with col_anchor_a:
+            market_anchor_min_books_input = st.number_input(
+                "Min. casas para usar ancora",
+                min_value=0,
+                max_value=100,
+                value=int(market_anchor_cfg.get("min_bookmakers", 6)),
+                step=1,
+                key="model_cfg_market_anchor_min_books",
+            )
+            market_anchor_base_weight_input = st.slider(
+                "Peso base das odds",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(market_anchor_cfg.get("base_weight", 0.10)),
+                step=0.01,
+                key="model_cfg_market_anchor_base_weight",
+            )
+            market_anchor_agreement_boost_input = st.slider(
+                "Bonus quando modelo e odds concordam",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(market_anchor_cfg.get("agreement_boost", 0.08)),
+                step=0.01,
+                key="model_cfg_market_anchor_agreement_boost",
+            )
+        with col_anchor_b:
+            market_anchor_books_max_input = st.number_input(
+                "Casas para peso maximo",
+                min_value=1,
+                max_value=100,
+                value=int(market_anchor_cfg.get("bookmakers_for_max_weight", 18)),
+                step=1,
+                key="model_cfg_market_anchor_books_max",
+            )
+            market_anchor_max_weight_input = st.slider(
+                "Peso maximo das odds",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(market_anchor_cfg.get("max_weight", 0.32)),
+                step=0.01,
+                key="model_cfg_market_anchor_max_weight",
+            )
+            market_anchor_gap_boost_input = st.slider(
+                "Bonus de favorito claro nas odds",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(market_anchor_cfg.get("favorite_gap_boost", 0.06)),
+                step=0.01,
+                key="model_cfg_market_anchor_gap_boost",
+            )
+        market_anchor_gap_threshold_input = st.slider(
+            "Margem minima para favorito claro nas odds",
+            min_value=0.00,
+            max_value=0.50,
+            value=float(market_anchor_cfg.get("favorite_gap_threshold", 0.12)),
+            step=0.01,
+            key="model_cfg_market_anchor_gap_threshold",
+        )
 
         st.markdown("**Gestao de Entrada e Score de Seguranca**")
         kelly_fractional_input = st.slider(
@@ -3263,6 +3356,49 @@ with st.sidebar:
             value=float(betting_cfg.get("kelly_fractional", 0.25)),
             step=0.01,
             key="model_cfg_kelly_fractional",
+        )
+        col_bet_a, col_bet_b = st.columns(2)
+        with col_bet_a:
+            accuracy_threshold_input = st.slider(
+                "Prob. minima para confiar no modelo",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(betting_cfg.get("accuracy_threshold", 0.68)),
+                step=0.01,
+                key="model_cfg_accuracy_threshold",
+            )
+            min_selection_probability_input = st.slider(
+                "Prob. minima da entrada",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(betting_cfg.get("min_selection_probability", 0.58)),
+                step=0.01,
+                key="model_cfg_min_selection_probability",
+            )
+        with col_bet_b:
+            house_favorite_lock_threshold_input = st.slider(
+                "Trava favorito forte das casas",
+                min_value=0.00,
+                max_value=1.00,
+                value=float(betting_cfg.get("house_favorite_lock_threshold", 0.70)),
+                step=0.01,
+                key="model_cfg_house_favorite_lock_threshold",
+            )
+            min_market_gap_input = st.slider(
+                "Margem minima entre resultados",
+                min_value=0.00,
+                max_value=0.50,
+                value=float(betting_cfg.get("min_market_gap", 0.08)),
+                step=0.01,
+                key="model_cfg_min_market_gap",
+            )
+        max_draw_probability_for_winner_input = st.slider(
+            "Max. prob. de empate para escolher vencedor",
+            min_value=0.00,
+            max_value=1.00,
+            value=float(betting_cfg.get("max_draw_probability_for_winner", 0.25)),
+            step=0.01,
+            key="model_cfg_max_draw_probability_for_winner",
         )
         col_safe_a, col_safe_b = st.columns(2)
         with col_safe_a:
@@ -3347,7 +3483,21 @@ with st.sidebar:
             "model_cfg_min_bucket",
             "model_cfg_max_adjust_weight",
             "model_cfg_weight_sample_size",
+            "model_cfg_max_calibration_evaluated",
+            "model_cfg_market_anchor_enabled",
+            "model_cfg_market_anchor_min_books",
+            "model_cfg_market_anchor_base_weight",
+            "model_cfg_market_anchor_agreement_boost",
+            "model_cfg_market_anchor_books_max",
+            "model_cfg_market_anchor_max_weight",
+            "model_cfg_market_anchor_gap_boost",
+            "model_cfg_market_anchor_gap_threshold",
             "model_cfg_kelly_fractional",
+            "model_cfg_accuracy_threshold",
+            "model_cfg_min_selection_probability",
+            "model_cfg_house_favorite_lock_threshold",
+            "model_cfg_min_market_gap",
+            "model_cfg_max_draw_probability_for_winner",
             "model_cfg_safe_prob_weight",
             "model_cfg_safe_ev_weight",
             "model_cfg_safe_ev_cap",
@@ -3380,9 +3530,25 @@ with st.sidebar:
                             "baseline_weight": float(baseline_weight_input),
                             "max_adjustment_weight": float(max_adjust_weight_input),
                             "weight_sample_size": float(weight_sample_size_input),
+                            "max_evaluated_matches": int(max_calibration_evaluated_input),
+                        },
+                        "market_anchor": {
+                            "enabled": bool(market_anchor_enabled_input),
+                            "min_bookmakers": int(market_anchor_min_books_input),
+                            "bookmakers_for_max_weight": int(market_anchor_books_max_input),
+                            "base_weight": float(market_anchor_base_weight_input),
+                            "max_weight": float(market_anchor_max_weight_input),
+                            "agreement_boost": float(market_anchor_agreement_boost_input),
+                            "favorite_gap_boost": float(market_anchor_gap_boost_input),
+                            "favorite_gap_threshold": float(market_anchor_gap_threshold_input),
                         },
                         "betting": {
                             "kelly_fractional": float(kelly_fractional_input),
+                            "accuracy_threshold": float(accuracy_threshold_input),
+                            "house_favorite_lock_threshold": float(house_favorite_lock_threshold_input),
+                            "min_selection_probability": float(min_selection_probability_input),
+                            "min_market_gap": float(min_market_gap_input),
+                            "max_draw_probability_for_winner": float(max_draw_probability_for_winner_input),
                         },
                         "safe_score": {
                             "prob_weight": float(safe_prob_weight_input),
@@ -3648,22 +3814,22 @@ if not safe_df.empty:
         lambda r: market_label(str(r["market"]), str(r["home_team"]), str(r["away_team"])),
         axis=1,
     )
-    show_safe = safe_df[
-        [
-            "date_text",
-            "home_team",
-            "away_team",
-            "market_label",
-            "odd",
-            "model_probability",
-            "expected_value",
-            "market_gap",
-            "risk_level",
-            "bookmakers",
-            "safety_score",
-            "match_url",
-        ]
-    ].copy()
+    # Use reindex to safely select columns, inserting NaN when a column is missing.
+    expected_cols = [
+        "date_text",
+        "home_team",
+        "away_team",
+        "market_label",
+        "odd",
+        "model_probability",
+        "expected_value",
+        "market_gap",
+        "risk_level",
+        "bookmakers",
+        "safety_score",
+        "match_url",
+    ]
+    show_safe = safe_df.reindex(columns=expected_cols).copy()
     show_safe.columns = [
         "Data",
         "Mandante",
@@ -3834,10 +4000,12 @@ elif page == "Configuracoes":
     )
     config_poisson = runtime_model_config.get("poisson", {}) if isinstance(runtime_model_config, dict) else {}
     config_calib = runtime_model_config.get("calibration", {}) if isinstance(runtime_model_config, dict) else {}
+    config_anchor = runtime_model_config.get("market_anchor", {}) if isinstance(runtime_model_config, dict) else {}
     config_betting = runtime_model_config.get("betting", {}) if isinstance(runtime_model_config, dict) else {}
     config_safe = runtime_model_config.get("safe_score", {}) if isinstance(runtime_model_config, dict) else {}
     config_poisson = config_poisson if isinstance(config_poisson, dict) else {}
     config_calib = config_calib if isinstance(config_calib, dict) else {}
+    config_anchor = config_anchor if isinstance(config_anchor, dict) else {}
     config_betting = config_betting if isinstance(config_betting, dict) else {}
     config_safe = config_safe if isinstance(config_safe, dict) else {}
     render_split_highlight(
@@ -3846,7 +4014,8 @@ elif page == "Configuracoes":
         items=[
             f"Filtro operacional: Perfil {risk_profile} | Prob >= {min_prob:.2f} | Odd <= {max_odd:.2f} | Casas >= {int(min_books)} | EV >= 0 | margem >= 8 p.p. | empate < 25%.",
             f"Poisson: max_goals={int(config_poisson.get('max_goals', 5))}, home_default={float(config_poisson.get('league_home_default', 1.35)):.2f}, away_default={float(config_poisson.get('league_away_default', 1.10)):.2f}.",
-            f"Calibracao: enabled={bool(config_calib.get('enabled', True))}, min_history={int(config_calib.get('min_history_matches', 80))}, min_bucket={int(config_calib.get('min_bucket_matches', 12))}.",
+            f"Calibracao: enabled={bool(config_calib.get('enabled', True))}, min_history={int(config_calib.get('min_history_matches', 80))}, min_bucket={int(config_calib.get('min_bucket_matches', 12))}, max_eval={int(config_calib.get('max_evaluated_matches', 80))}.",
+            f"Ancora de mercado: enabled={bool(config_anchor.get('enabled', True))}, min_casas={int(config_anchor.get('min_bookmakers', 6))}, peso_max={float(config_anchor.get('max_weight', 0.32)):.2f}.",
             f"Stake (Kelly): {float(config_betting.get('kelly_fractional', 0.25)):.2f} | Safe score prob={float(config_safe.get('prob_weight', 0.55)):.2f}, books={float(config_safe.get('bookmakers_weight', 0.20)):.2f}, odd={float(config_safe.get('odd_weight', 0.05)):.2f}.",
         ],
         tone="neutral",
@@ -4293,6 +4462,11 @@ elif page == "Analise de Jogo":
                     option_id = str(selected["match_option_id"])
                     try:
                         selected_status = str(selected.get("status", "")).strip() or "Desconhecido"
+                        selected_bookmakers = selected.get("bookmakers")
+                        try:
+                            selected_bookmakers = int(selected_bookmakers) if not pd.isna(selected_bookmakers) else 0
+                        except (TypeError, ValueError):
+                            selected_bookmakers = 0
                         selected_display_date = format_match_datetime(
                             selected.get("date_text"),
                             selected.get("event_timestamp"),
@@ -4302,6 +4476,10 @@ elif page == "Analise de Jogo":
                             df,
                             selected["home_team"],
                             selected["away_team"],
+                            odd_home=float(selected["odds_home"]),
+                            odd_draw=float(selected["odds_draw"]),
+                            odd_away=float(selected["odds_away"]),
+                            bookmakers=selected_bookmakers,
                             model_config=runtime_model_config,
                         )
                         tip = suggest_bet_strategy(

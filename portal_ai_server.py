@@ -314,7 +314,7 @@ def refresh_portal_snapshot() -> dict[str, object]:
 def refresh_portal_snapshot_with_progress(
     progress_callback: Callable[[int, str, str], None] | None = None,
     *,
-    prefetch_real_stats: bool = True,
+    prefetch_real_stats: bool = False,
 ) -> dict[str, object]:
     global _matches_cache
     _emit_refresh_progress(progress_callback, 5, "Limpando cache local de partidas...", "cache")
