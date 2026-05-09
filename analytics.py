@@ -46,22 +46,22 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
     "calibration": {
         "enabled": True,
         "bins": PROBABILITY_CALIBRATION_BINS,
-        "min_history_matches": 80,
-        "min_bucket_matches": 12,
-        "baseline_weight": 0.30,
-        "max_adjustment_weight": 0.55,
+        "min_history_matches": 100,
+        "min_bucket_matches": 18,
+        "baseline_weight": 0.45,
+        "max_adjustment_weight": 0.35,
         "weight_sample_size": 45.0,
         "max_evaluated_matches": 80,
     },
     "market_anchor": {
         "enabled": True,
-        "min_bookmakers": 6,
+        "min_bookmakers": 4,
         "bookmakers_for_max_weight": 18,
-        "base_weight": 0.10,
-        "max_weight": 0.32,
-        "agreement_boost": 0.08,
-        "favorite_gap_boost": 0.06,
-        "favorite_gap_threshold": 0.12,
+        "base_weight": 0.18,
+        "max_weight": 0.52,
+        "agreement_boost": 0.10,
+        "favorite_gap_boost": 0.10,
+        "favorite_gap_threshold": 0.10,
     },
     "betting": {
         "kelly_fractional": 0.25,
@@ -70,6 +70,10 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
         "min_selection_probability": 0.58,
         "min_market_gap": 0.08,
         "max_draw_probability_for_winner": 0.25,
+        "double_chance_enabled": True,
+        "double_chance_draw_threshold": 0.25,
+        "double_chance_gap_threshold": 0.08,
+        "double_chance_min_probability": 0.62,
     },
     "safe_score": {
         "prob_weight": 0.55,
@@ -290,6 +294,36 @@ def normalize_model_config(model_config: dict[str, object] | None) -> dict[str, 
                 _safe_float(
                     betting_raw.get("max_draw_probability_for_winner"),
                     _safe_float(betting_default.get("max_draw_probability_for_winner"), 0.25),
+                ),
+                0.0,
+                1.0,
+            )
+            double_chance_enabled_raw = betting_raw.get("double_chance_enabled")
+            betting_cfg["double_chance_enabled"] = (
+                bool(double_chance_enabled_raw)
+                if double_chance_enabled_raw is not None
+                else bool(betting_default.get("double_chance_enabled", True))
+            )
+            betting_cfg["double_chance_draw_threshold"] = _clamp(
+                _safe_float(
+                    betting_raw.get("double_chance_draw_threshold"),
+                    _safe_float(betting_default.get("double_chance_draw_threshold"), 0.25),
+                ),
+                0.0,
+                1.0,
+            )
+            betting_cfg["double_chance_gap_threshold"] = _clamp(
+                _safe_float(
+                    betting_raw.get("double_chance_gap_threshold"),
+                    _safe_float(betting_default.get("double_chance_gap_threshold"), 0.08),
+                ),
+                0.0,
+                1.0,
+            )
+            betting_cfg["double_chance_min_probability"] = _clamp(
+                _safe_float(
+                    betting_raw.get("double_chance_min_probability"),
+                    _safe_float(betting_default.get("double_chance_min_probability"), 0.62),
                 ),
                 0.0,
                 1.0,
@@ -931,6 +965,24 @@ def suggest_bet_strategy(
     )
     accuracy_threshold = _clamp(_safe_float(betting_cfg.get("accuracy_threshold"), 0.68), 0.0, 1.0)
     house_favorite_lock_threshold = _clamp(_safe_float(betting_cfg.get("house_favorite_lock_threshold"), 0.70), 0.0, 1.0)
+    min_selection_probability = _clamp(_safe_float(betting_cfg.get("min_selection_probability"), 0.58), 0.0, 1.0)
+    min_market_gap = _clamp(_safe_float(betting_cfg.get("min_market_gap"), 0.08), 0.0, 1.0)
+    double_chance_enabled = bool(betting_cfg.get("double_chance_enabled", True))
+    double_chance_draw_threshold = _clamp(
+        _safe_float(betting_cfg.get("double_chance_draw_threshold"), 0.25),
+        0.0,
+        1.0,
+    )
+    double_chance_gap_threshold = _clamp(
+        _safe_float(betting_cfg.get("double_chance_gap_threshold"), 0.08),
+        0.0,
+        1.0,
+    )
+    double_chance_min_probability = _clamp(
+        _safe_float(betting_cfg.get("double_chance_min_probability"), 0.62),
+        0.0,
+        1.0,
+    )
 
     markets = [
         ("Casa", probs.home_win, odd_home),
@@ -977,7 +1029,33 @@ def suggest_bet_strategy(
         selected_probability = float(house_best_probability)
         selection_source = "house_consensus"
 
+    if double_chance_enabled and chosen_market in {"Casa", "Fora"}:
+        double_chance_market = f"{chosen_market} ou Empate"
+        double_chance_probability = market_probability(probs, double_chance_market)
+        is_uncertain_winner = (
+            float(probs.draw) >= double_chance_draw_threshold
+            or market_probability_gap(probs, chosen_market) < double_chance_gap_threshold
+            or selected_probability < min_selection_probability
+        )
+        if is_uncertain_winner and double_chance_probability >= double_chance_min_probability:
+            chosen_market = double_chance_market
+            selected_probability = double_chance_probability
+            selection_source = "double_chance"
+
     best = by_market.get(chosen_market, model_best)
+    if is_double_chance_market(chosen_market):
+        return BettingSuggestion(
+            best_market=chosen_market,
+            best_odd=0.0,
+            model_probability=selected_probability,
+            implied_probability=0.0,
+            expected_value=0.0,
+            kelly_fraction=0.0,
+            suggested_stake=0.0,
+            selection_source=selection_source,
+            selected_probability=selected_probability,
+        )
+
     odd = float(best[1])
     implied_probability = float(best[3])
     expected_value = selected_probability * odd - 1.0
@@ -1056,7 +1134,7 @@ def build_safe_bets_table(
 
         bookmakers = _safe_int(row.bookmakers, 0)
         selected_probability = float(tip.selected_probability or tip.model_probability)
-        selected_market_probability = float(probability_map(probs).get(str(tip.best_market), 0.0))
+        selected_market_probability = market_probability(probs, str(tip.best_market))
         selected_gap = market_probability_gap(probs, str(tip.best_market))
         clear_edge = selection_has_clear_edge(
             probs,
@@ -1113,7 +1191,7 @@ def build_safe_bets_table(
         (out["model_probability"] >= min_model_prob)
         & (out["selected_market_probability"] >= min_selection_probability)
         & (out["market_gap"] >= min_market_gap)
-        & ((out["market"] == "Empate") | (out["draw_probability"] < max_draw_probability_for_winner))
+        & ((out["market"] == "Empate") | (out["market"].map(is_double_chance_market)) | (out["draw_probability"] < max_draw_probability_for_winner))
         & (out["expected_value"] >= float(min_expected_value))
         & (out["clear_edge"])
         & (out["odd"] <= max_odd)
@@ -1138,12 +1216,41 @@ def result_to_market(home_goals: float, away_goals: float) -> str:
     return "Empate"
 
 
+def is_double_chance_market(market: str) -> bool:
+    return str(market) in {"Casa ou Empate", "Fora ou Empate"}
+
+
+def market_covers_result(selected_market: str, actual_market: str) -> bool:
+    selected = str(selected_market)
+    actual = str(actual_market)
+    if selected == actual:
+        return True
+    if selected == "Casa ou Empate":
+        return actual in {"Casa", "Empate"}
+    if selected == "Fora ou Empate":
+        return actual in {"Fora", "Empate"}
+    return False
+
+
 def probability_map(probs: MatchProbabilities) -> dict[str, float]:
     return {
         "Casa": float(probs.home_win),
         "Empate": float(probs.draw),
         "Fora": float(probs.away_win),
     }
+
+
+def market_probability_from_map(probabilities: dict[str, float], market: str) -> float:
+    selected = str(market)
+    if selected == "Casa ou Empate":
+        return float(probabilities.get("Casa", 0.0)) + float(probabilities.get("Empate", 0.0))
+    if selected == "Fora ou Empate":
+        return float(probabilities.get("Fora", 0.0)) + float(probabilities.get("Empate", 0.0))
+    return float(probabilities.get(selected, 0.0))
+
+
+def market_probability(probs: MatchProbabilities, market: str) -> float:
+    return market_probability_from_map(probability_map(probs), market)
 
 
 def normalized_implied_probabilities(odd_home: float, odd_draw: float, odd_away: float) -> dict[str, float]:
@@ -1164,11 +1271,15 @@ def pick_highest_probability_market(probs: MatchProbabilities) -> tuple[str, flo
 
 def market_probability_gap(probs: MatchProbabilities, selected_market: str) -> float:
     market_probs = probability_map(probs)
-    selected_probability = float(market_probs.get(str(selected_market), 0.0))
+    selected = str(selected_market)
+    selected_probability = market_probability_from_map(market_probs, selected)
+    if is_double_chance_market(selected):
+        excluded = "Fora" if selected == "Casa ou Empate" else "Casa"
+        return max(0.0, selected_probability - float(market_probs.get(excluded, 0.0)))
     other_probabilities = [
         float(probability)
         for market, probability in market_probs.items()
-        if str(market) != str(selected_market)
+        if str(market) != selected
     ]
     second_probability = max(other_probabilities) if other_probabilities else 0.0
     return max(0.0, selected_probability - second_probability)
@@ -1183,14 +1294,15 @@ def selection_has_clear_edge(
     min_gap: float = 0.08,
     max_draw_probability_for_winner: float = 0.25,
 ) -> bool:
-    selected_model_probability = float(probability_map(probs).get(str(selected_market), 0.0))
+    selected = str(selected_market)
+    selected_model_probability = market_probability(probs, selected)
     if float(selected_probability) < float(min_probability):
         return False
     if selected_model_probability < float(min_probability):
         return False
     if market_probability_gap(probs, selected_market) < float(min_gap):
         return False
-    if str(selected_market) != "Empate" and float(probs.draw) >= float(max_draw_probability_for_winner):
+    if selected in {"Casa", "Fora"} and float(probs.draw) >= float(max_draw_probability_for_winner):
         return False
     return True
 
@@ -1276,7 +1388,9 @@ def build_backtest_table(
             continue
 
         model_probs = probability_map(probs)
-        model_market, model_probability = max(model_probs.items(), key=lambda item: item[1])
+        raw_model_market, raw_model_probability = max(model_probs.items(), key=lambda item: item[1])
+        model_market = str(tip.best_market)
+        model_probability = float(tip.model_probability)
         house_probs = normalized_implied_probabilities(
             float(row["odds_home"]),
             float(row["odds_draw"]),
@@ -1288,6 +1402,22 @@ def build_backtest_table(
         model_odd = get_market_odd(row, model_market)
         house_odd = get_market_odd(row, house_market)
         value_odd = get_market_odd(row, str(tip.best_market))
+        model_hit = market_covers_result(model_market, actual_market)
+        value_hit = market_covers_result(str(tip.best_market), actual_market)
+        model_profit = (
+            0.0
+            if model_odd is None
+            else (float(model_odd) - 1.0)
+            if model_hit
+            else -1.0
+        )
+        value_profit = (
+            0.0
+            if value_odd is None
+            else (float(value_odd) - 1.0)
+            if value_hit
+            else -1.0
+        )
 
         rows.append(
             {
@@ -1300,8 +1430,11 @@ def build_backtest_table(
                 "model_market": model_market,
                 "model_probability": model_probability,
                 "model_odd": model_odd,
-                "model_hit": model_market == actual_market,
-                "model_edge": model_probability - house_probs.get(model_market, 0.0),
+                "model_hit": model_hit,
+                "model_edge": model_probability - market_probability_from_map(house_probs, model_market),
+                "raw_model_market": raw_model_market,
+                "raw_model_probability": raw_model_probability,
+                "raw_model_hit": raw_model_market == actual_market,
                 "house_market": house_market,
                 "house_probability": house_probability,
                 "house_odd": house_odd,
@@ -1309,15 +1442,15 @@ def build_backtest_table(
                 "value_market": str(tip.best_market),
                 "value_probability": float(tip.model_probability),
                 "value_odd": value_odd,
-                "value_hit": str(tip.best_market) == actual_market,
+                "value_hit": value_hit,
                 "value_ev": float(tip.expected_value),
                 "value_edge": float(tip.model_probability) - float(tip.implied_probability),
                 "bookmakers": int(row["bookmakers"]) if "bookmakers" in row and not pd.isna(row["bookmakers"]) else 0,
                 "history_size": int(len(history)),
-                "market_disagreement": model_market != house_market,
-                "model_profit": (float(model_odd) - 1.0) if model_odd and model_market == actual_market else -1.0,
+                "market_disagreement": not market_covers_result(model_market, house_market),
+                "model_profit": model_profit,
                 "house_profit": (float(house_odd) - 1.0) if house_odd and house_market == actual_market else -1.0,
-                "value_profit": (float(value_odd) - 1.0) if value_odd and str(tip.best_market) == actual_market else -1.0,
+                "value_profit": value_profit,
             }
         )
 

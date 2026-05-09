@@ -34,6 +34,7 @@ from analytics import (
     calculate_match_probabilities,
     default_model_config,
     get_team_context,
+    is_double_chance_market,
     normalize_model_config,
     pick_highest_probability_market,
     suggest_bet_strategy,
@@ -773,6 +774,10 @@ def market_label(market: str, home_team: str, away_team: str) -> str:
         return f"Vitoria {home_team}"
     if market == "Fora":
         return f"Vitoria {away_team}"
+    if market == "Casa ou Empate":
+        return f"Vitoria {home_team} ou empate"
+    if market == "Fora ou Empate":
+        return f"Vitoria {away_team} ou empate"
     return "Empate"
 
 
@@ -918,6 +923,10 @@ def market_badge_label(market: str, home_team: str, away_team: str) -> str:
         return f"Casa | {home_team}"
     if market == "Fora":
         return f"Fora | {away_team}"
+    if market == "Casa ou Empate":
+        return f"Casa/Empate | {home_team}"
+    if market == "Fora ou Empate":
+        return f"Fora/Empate | {away_team}"
     return "Empate"
 
 
@@ -1891,6 +1900,11 @@ def generate_nvidia_match_analysis(
     value_implied_probability: float,
     expected_value: float,
 ) -> str:
+    ev_text = (
+        "sem EV informativo porque a entrada protegida nao tem odd na base"
+        if value_implied_probability <= 0
+        else f"EV informativo {expected_value * 100:.2f}%"
+    )
     prompt = f"""
 Atue como um Analista Quantitativo de Apostas Esportivas (Quants).
 Sua tarefa e calcular um SCORE DE RISCO (0 a 100) para o jogo abaixo usando EXATAMENTE estes pesos:
@@ -1907,7 +1921,7 @@ Data: {date_text}
 Dados quantitativos:
 - Odds 1X2: Casa {odds_home:.2f}, Empate {odds_draw:.2f}, Fora {odds_away:.2f}
 - Probabilidades Modelo: Casa {home_win_prob * 100:.1f}%, Empate {draw_prob * 100:.2f}%, Fora {away_win_prob * 100:.1f}%
-- Entrada por probabilidade sugerida: {value_market} (EV informativo {expected_value * 100:.2f}%)
+- Entrada por probabilidade sugerida: {value_market} ({ev_text})
 
 Classificacao de Risco:
 0-39 = RISCO BAIXO
@@ -1986,6 +2000,12 @@ def build_match_chat_context(
         result_lines.append(f"- Placar final: {final_score}")
         result_lines.append(f"- Resultado realizado: {final_market}")
     result_context = "\n".join(result_lines)
+    if is_double_chance_market(str(tip.best_market)):
+        ev_context = "- EV informativo da entrada: indisponivel para dupla chance sem odd na base"
+        implied_context = "- Prob. implicita da odd: indisponivel para dupla chance sem odd na base"
+    else:
+        ev_context = f"- EV informativo da entrada: {tip.expected_value * 100:.2f}%"
+        implied_context = f"- Prob. implicita da odd: {tip.implied_probability * 100:.2f}%"
     return f"""
 Contexto do jogo atual:
 - Jogo: {fixture_row['home_team']} x {fixture_row['away_team']}
@@ -1995,9 +2015,9 @@ Contexto do jogo atual:
 - Probabilidades do modelo: Casa {probs.home_win * 100:.1f}% | Empate {probs.draw * 100:.1f}% | Fora {probs.away_win * 100:.1f}%
 - Resultado mais provavel: {probable_market} ({probable_probability * 100:.1f}%)
 - Entrada por probabilidade: {readable_market}
-- EV informativo da entrada: {tip.expected_value * 100:.2f}%
+- {ev_context[2:]}
 - Prob. modelo da entrada: {tip.model_probability * 100:.2f}%
-- Prob. implicita da odd: {tip.implied_probability * 100:.2f}%
+- {implied_context[2:]}
 - Stake sugerida: R$ {tip.suggested_stake:.2f}
 - Gols esperados: mandante {probs.expected_home_goals:.2f} | visitante {probs.expected_away_goals:.2f}
 - BTTS SIM: {probs.btts_yes * 100:.1f}%
@@ -4525,8 +4545,8 @@ elif page == "Analise de Jogo":
                                 "Favorito do modelo": probable_market,
                                 "Prob. modelo": probable_probability,
                                 "Entrada por probabilidade": readable_market,
-                                "Odd entrada": float(tip.best_odd),
-                                "EV informativo": float(tip.expected_value),
+                                "Odd entrada": None if is_double_chance_market(str(tip.best_market)) else float(tip.best_odd),
+                                "EV informativo": None if is_double_chance_market(str(tip.best_market)) else float(tip.expected_value),
                                 "Stake sugerida": float(tip.suggested_stake),
                             }
                         )
@@ -4549,8 +4569,12 @@ elif page == "Analise de Jogo":
                     if not summary_df.empty:
                         summary_view = summary_df.copy()
                         summary_view["Prob. modelo"] = (summary_view["Prob. modelo"] * 100).round(2).astype(str) + "%"
-                        summary_view["EV informativo"] = (summary_view["EV informativo"] * 100).round(2).astype(str) + "%"
-                        summary_view["Odd entrada"] = summary_view["Odd entrada"].round(2)
+                        summary_view["EV informativo"] = summary_view["EV informativo"].apply(
+                            lambda value: "-" if pd.isna(value) else f"{float(value) * 100:.2f}%"
+                        )
+                        summary_view["Odd entrada"] = summary_view["Odd entrada"].apply(
+                            lambda value: "-" if pd.isna(value) else f"{float(value):.2f}"
+                        )
                         summary_view["Stake sugerida"] = "R$ " + summary_view["Stake sugerida"].round(2).map(lambda x: f"{x:.2f}")
                         st.markdown("### Resumo comparativo dos jogos selecionados")
                         st.dataframe(summary_view, use_container_width=True, hide_index=True)
@@ -4604,12 +4628,18 @@ elif page == "Analise de Jogo":
                         [
                             f"Favorito do modelo: {market_badge_label(str(model_market), str(selected['home_team']), str(selected['away_team']))} ({probable_probability * 100:.2f}%).",
                             f"Favorito das casas: {market_badge_label(str(house_market), str(selected['home_team']), str(selected['away_team']))} ({market_probs[house_market] * 100:.2f}%).",
-                            f"Entrada por probabilidade: {readable_market} com edge de {(tip.model_probability - tip.implied_probability) * 100:.2f} pontos.",
+                            (
+                                f"Entrada protegida: {readable_market}; sem EV porque nao ha odd de dupla chance na base."
+                                if is_double_chance_market(str(tip.best_market))
+                                else f"Entrada por probabilidade: {readable_market} com edge de {(tip.model_probability - tip.implied_probability) * 100:.2f} pontos."
+                            ),
                         ],
                         tone="warm" if model_market != house_market else "neutral",
                     )
 
-                    if tip.expected_value > 0:
+                    if is_double_chance_market(str(tip.best_market)):
+                        st.info(f"Resultado em duvida. Leitura protegida: {readable_market}.")
+                    elif tip.expected_value > 0:
                         st.success(f"Entrada por probabilidade: {readable_market} | EV informativo: {tip.expected_value * 100:.2f}%")
                     else:
                         st.warning(f"Sem EV positivo no 1X2. Entrada por probabilidade no momento: {readable_market} (EV informativo {tip.expected_value * 100:.2f}%).")
@@ -4736,7 +4766,7 @@ elif page == "Analise de Jogo":
 **Odds atuais (1X2):** Casa `{selected['odds_home']:.2f}` | Empate `{selected['odds_draw']:.2f}` | Fora `{selected['odds_away']:.2f}`  
 **Probabilidades do modelo:** Casa `{probs.home_win*100:.1f}%` | Empate `{probs.draw*100:.1f}%` | Fora `{probs.away_win*100:.1f}%`  
 **Resultado mais provavel:** **{probable_market}** (`{probable_probability*100:.1f}%`)  
-**Entrada por probabilidade:** **{readable_market}** (EV informativo `{tip.expected_value*100:.2f}%`)  
+**Entrada por probabilidade:** **{readable_market}** {"(sem EV: mercado protegido sem odd na base)" if is_double_chance_market(str(tip.best_market)) else f"(EV informativo `{tip.expected_value*100:.2f}%`)"}  
 **Mercados extras:** {btts_line} Prob. BTTS `{probs.btts_yes*100:.1f}%`. {goal_line} Under 2.5 `{probs.under_25*100:.1f}%` / Over 2.5 `{probs.over_25*100:.1f}%`.
 """
                     )

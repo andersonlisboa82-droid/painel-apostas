@@ -21,8 +21,11 @@ from analytics import (
     calculate_match_probabilities,
     suggest_bet_strategy,
     get_team_context,
+    market_covers_result,
+    market_probability,
     market_probability_gap,
     probability_map,
+    result_to_market,
     selection_has_clear_edge,
 )
 from real_match_stats import build_match_stats_cache_key, load_real_match_stats_cache
@@ -363,6 +366,10 @@ def _market_label(market: str, home_team: str, away_team: str) -> str:
         return f"Vitoria {home_team}"
     if market == "Fora":
         return f"Vitoria {away_team}"
+    if market == "Casa ou Empate":
+        return f"Vitoria {home_team} ou empate"
+    if market == "Fora ou Empate":
+        return f"Vitoria {away_team} ou empate"
     return "Empate"
 
 
@@ -480,11 +487,24 @@ def _calculate_competition_accuracy(df: pd.DataFrame) -> dict[str, int]:
         try:
             probs = _get_cached_match_probabilities(df, row, prob_cache)
             model_result, _ = _best_model_result(probs, str(row.home_team), str(row.away_team))
+            model_market = "Casa" if model_result == f"Vitoria {row.home_team}" else "Fora" if model_result == f"Vitoria {row.away_team}" else "Empate"
+            if _can_build_tip_from_row(row):
+                tip = suggest_bet_strategy(
+                    probs,
+                    odd_home=float(getattr(row, "odds_home")),
+                    odd_draw=float(getattr(row, "odds_draw")),
+                    odd_away=float(getattr(row, "odds_away")),
+                    bankroll=1000.0,
+                    kelly_fractional=0.25,
+                )
+                model_market = str(tip.best_market)
+                model_result = _market_label(model_market, str(row.home_team), str(row.away_team))
         except Exception:
             continue
 
         model_evaluated += 1
-        if actual_result == model_result:
+        actual_market = result_to_market(float(getattr(row, "home_goals")), float(getattr(row, "away_goals")))
+        if market_covers_result(model_market, actual_market):
             model_hits += 1
 
         bookmaker_result = _best_bookmaker_result(
@@ -542,6 +562,19 @@ def _collect_daily_performance_entries(
         try:
             probs = _get_cached_match_probabilities(df, row, resolved_prob_cache)
             model_result, model_probability = _best_model_result(probs, str(row.home_team), str(row.away_team))
+            model_market = "Casa" if model_result == f"Vitoria {row.home_team}" else "Fora" if model_result == f"Vitoria {row.away_team}" else "Empate"
+            if _can_build_tip_from_row(row):
+                tip = suggest_bet_strategy(
+                    probs,
+                    odd_home=float(getattr(row, "odds_home")),
+                    odd_draw=float(getattr(row, "odds_draw")),
+                    odd_away=float(getattr(row, "odds_away")),
+                    bankroll=1000.0,
+                    kelly_fractional=0.25,
+                )
+                model_market = str(tip.best_market)
+                model_result = _market_label(model_market, str(row.home_team), str(row.away_team))
+                model_probability = float(tip.selected_probability or tip.model_probability)
         except Exception:
             continue
 
@@ -561,7 +594,10 @@ def _collect_daily_performance_entries(
                 "actual": actual_result,
                 "model": model_result,
                 "model_probability": round(float(model_probability) * 100.0, 1),
-                "model_hit": actual_result == model_result,
+                "model_hit": market_covers_result(
+                    model_market,
+                    result_to_market(float(getattr(row, "home_goals")), float(getattr(row, "away_goals"))),
+                ),
                 "house": house_result,
                 "house_hit": actual_result == house_result if house_result != "-" else None,
             }
@@ -705,7 +741,8 @@ def _risk_stage_context(stage: str, suggested_label: str, has_valid_odd: bool = 
 
 def _entry_rejection_context(probs, selected_market: str, selected_probability: float) -> str:
     reasons: list[str] = []
-    selected_model_probability = float(probability_map(probs).get(str(selected_market), 0.0))
+    selected = str(selected_market)
+    selected_model_probability = market_probability(probs, selected)
     gap = market_probability_gap(probs, str(selected_market))
     if float(selected_probability) < 0.58:
         reasons.append("probabilidade abaixo de 58%")
@@ -713,7 +750,7 @@ def _entry_rejection_context(probs, selected_market: str, selected_probability: 
         reasons.append("modelo nao sustenta 58% no mercado escolhido")
     if gap < 0.08:
         reasons.append("diferenca pequena para a segunda opcao")
-    if str(selected_market) != "Empate" and float(probs.draw) >= 0.25:
+    if selected in {"Casa", "Fora"} and float(probs.draw) >= 0.25:
         reasons.append("empate acima de 25%")
     if not reasons:
         reasons.append("criterio conservador de assertividade")
@@ -748,6 +785,8 @@ def _classify_model_risk(row, probs, home_team: str, away_team: str, tip=None) -
         context = f"{context} Favorito muito forte das casas foi priorizado para proteger o percentual de acerto."
     elif selection_source == "house_consensus":
         context = f"{context} Como a confianca do modelo ficou baixa, o consenso das casas entrou como criterio principal."
+    elif selection_source == "double_chance":
+        context = f"{context} Como o resultado ficou em duvida, a leitura foi protegida com vitoria ou empate."
     return stage, context
 
 
@@ -1254,7 +1293,12 @@ def _get_detail_json(
         )
         if actual_result != "-":
             model_hit = "Acertou" if actual_result == model_result else "Errou"
-            suggestion_hit = "Acertou" if actual_result == suggestion_result else "Errou"
+            suggestion_market = str(getattr(resolved_tip, "best_market", "") if resolved_tip is not None else "")
+            if suggestion_market:
+                actual_market = "Casa" if actual_result == f"Vitoria {row.home_team}" else "Fora" if actual_result == f"Vitoria {row.away_team}" else "Empate"
+                suggestion_hit = "Acertou" if market_covers_result(suggestion_market, actual_market) else "Errou"
+            else:
+                suggestion_hit = "Acertou" if actual_result == suggestion_result else "Errou"
             if house_result != "-":
                 house_hit = "Acertou" if actual_result == house_result else "Errou"
 
@@ -1438,6 +1482,8 @@ def _build_competition_section(
             detail_key = register_detail(detail_json)
             bookmakers = int(row.bookmakers) if row.bookmakers is not None else 0
             risk_stage = _risk_stage_from_metrics(selected_probability, float(tip.expected_value), float(tip.best_odd), bookmakers)
+            odd_display = f"{tip.best_odd:.2f}" if float(tip.best_odd) > 1.0 else "-"
+            ev_display = f"{tip.expected_value * 100:.2f}%" if float(tip.best_odd) > 1.0 else "-"
             if risk_stage != "Fora dos criterios":
                 risk_entries.append(
                     {
@@ -1459,9 +1505,9 @@ def _build_competition_section(
                 f"<td>{escape(display_date)}</td>"
                 f"<td>{escape(str(row.home_team))} x {escape(str(row.away_team))}</td>"
                 f"<td>{escape(_market_label(tip.best_market, str(row.home_team), str(row.away_team)))}</td>"
-                f"<td>{tip.best_odd:.2f}</td>"
+                f"<td>{escape(odd_display)}</td>"
                 f"<td>{selected_probability * 100:.1f}%</td>"
-                f"<td>{tip.expected_value * 100:.2f}%</td>"
+                f"<td>{escape(ev_display)}</td>"
                 f"<td>R$ {tip.suggested_stake:.2f}</td>"
                 f"<td><button class='btn-mini' data-detail-key='{escape(detail_key)}' onclick='showMatchDetails(this)'>Visualizar</button></td>"
                 "</tr>"
@@ -1496,9 +1542,15 @@ def _build_competition_section(
                     odd_away=float(getattr(row, "odds_away")),
                     bankroll=1000.0,
                     kelly_fractional=0.25,
-                )
+            )
             model_result, best_prob = _best_model_result(probs, str(row.home_team), str(row.away_team))
             model_probability = f"{best_prob * 100:.1f}%"
+            model_market = "Casa" if model_result == f"Vitoria {row.home_team}" else "Fora" if model_result == f"Vitoria {row.away_team}" else "Empate"
+            if tip is not None:
+                model_market = str(tip.best_market)
+                best_prob = float(tip.selected_probability or tip.model_probability)
+                model_result = _market_label(model_market, str(row.home_team), str(row.away_team))
+                model_probability = f"{best_prob * 100:.1f}%"
             bookmaker_result = _best_bookmaker_result(
                 str(row.home_team),
                 str(row.away_team),
@@ -1513,7 +1565,8 @@ def _build_competition_section(
                 str(row.away_team),
             )
             if actual_result != "-":
-                if actual_result == model_result:
+                actual_market = result_to_market(float(getattr(row, "home_goals")), float(getattr(row, "away_goals")))
+                if market_covers_result(model_market, actual_market):
                     model_hit_label = "Acertou"
                 else:
                     model_hit_label = "Errou"
@@ -4701,7 +4754,9 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           ? 'Consenso das casas (favorito muito forte)'
           : suggestionSource === 'house_consensus'
             ? 'Consenso das casas (confianca do modelo baixa)'
-            : 'Modelo estatistico';
+            : suggestionSource === 'double_chance'
+              ? 'Modelo protegido (vitoria ou empate)'
+              : 'Modelo estatistico';
         const suggestionTitle = suggestionSource === 'model' ? 'Sugestao do modelo' : 'Sugestao operacional';
         const modelLine = data.model_result
           ? `<strong>Favorito do modelo:</strong> ${{data.model_result}} (${{data.model_probability}}%)<br>`
@@ -4719,8 +4774,11 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         const hitLine = hitParts.length ? `<strong>Quem acertou:</strong> ${{hitParts.join(' | ')}}<br>` : '';
         const riskLine = data.model_risk_stage ? `<br><strong>Estagio de risco:</strong> ${{data.model_risk_stage}}` : '';
         const riskContext = data.model_risk_context ? `<br><strong>Contexto do risco:</strong> ${{data.model_risk_context}}` : '';
+        const hasMarketOdd = Number(data.tip.odd) > 1;
+        const oddText = hasMarketOdd ? Number(data.tip.odd).toFixed(2) : 'sem odd 1X2';
+        const evText = hasMarketOdd ? `${{data.tip.ev}}%` : '-';
         stratBox.innerHTML = `${{modelLine}}${{houseLine}}${{finalActualLine}}${{hitLine}}<strong>${{suggestionTitle}}:</strong> ${{data.tip.market}}<br>
-          <strong>Odd:</strong> ${{data.tip.odd.toFixed(2)}} | <strong>Prob:</strong> ${{data.tip.prob}}% | <strong>EV:</strong> ${{data.tip.ev}}%<br>
+          <strong>Odd:</strong> ${{oddText}} | <strong>Prob:</strong> ${{data.tip.prob}}% | <strong>EV:</strong> ${{evText}}<br>
           <strong>Stake Sugerida:</strong> R$ ${{data.tip.stake.toFixed(2)}}<br>
           <strong>Fonte da sugestao:</strong> ${{suggestionSourceLabel}}${{riskLine}}${{riskContext}}`;
       }} else if (data.status === 'Finalizado' && data.model_result) {{
@@ -5386,7 +5444,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         else if (probRaw >= 60) probClass = 'heatmap-prob-mid';
         
         const tipSource = (detail.tip && detail.tip.selection_source) || detail.suggestion_selection_source || 'model';
-        const tipSourceLabel = tipSource === 'house_lock' ? 'consenso casas' : tipSource === 'house_consensus' ? 'consenso casas' : 'modelo';
+        const tipSourceLabel = tipSource === 'house_lock' ? 'consenso casas' : tipSource === 'house_consensus' ? 'consenso casas' : tipSource === 'double_chance' ? 'vitoria ou empate' : 'modelo';
         const tipLabel = tipSource === 'model' ? 'Sugestao modelo' : 'Sugestao IA';
         
         let tipLine = 'Sem leitura disponivel';
@@ -5394,7 +5452,8 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         if (detail.tip) {{
           const evRaw = Number(detail.tip.ev);
           if (evRaw > 5) evClass = 'heatmap-ev-high';
-          tipLine = `<strong>${{detail.tip.market}}</strong> @ ${{detail.tip.odd.toFixed(2)}}`;
+          const oddLabel = Number(detail.tip.odd) > 1 ? ` @ ${{Number(detail.tip.odd).toFixed(2)}}` : '';
+          tipLine = `<strong>${{detail.tip.market}}</strong>${{oddLabel}}`;
         }} else if (item.model_result) {{
           tipLine = `<strong>${{item.model_result}}</strong>`;
         }}

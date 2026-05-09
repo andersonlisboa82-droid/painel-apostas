@@ -2024,21 +2024,14 @@ def _predict_match(
         key=lambda item: item[1],
     )[0]
 
-    confidence = int(
-        round(
-            max(
-                28.0,
-                min(
-                    92.0,
-                    44
-                    + abs(home_win - away_win) * 42
-                    + scorelines[0][1] * 55
-                    + abs(rating_diff) * 0.18,
-                    + float(model_adjustments.get("confidence_bias", 0.0))
-                ),
-            )
-        )
+    confidence_raw = (
+        44
+        + abs(home_win - away_win) * 42
+        + scorelines[0][1] * 55
+        + abs(rating_diff) * 0.18
+        + float(model_adjustments.get("confidence_bias", 0.0))
     )
+    confidence = int(round(max(28.0, min(92.0, confidence_raw))))
 
     return {
         "home_win": home_win,
@@ -2080,8 +2073,18 @@ def _update_live_state(
 
     team_state.setdefault(home_team, {"rating_shift": 0.0})
     team_state.setdefault(away_team, {"rating_shift": 0.0})
-    team_state[home_team]["rating_shift"] += (home_points - expected_home_points) * 1.9
-    team_state[away_team]["rating_shift"] += (away_points - expected_away_points) * 1.9
+    sample_weight = min(1.0, max(0.25, (len(history) + 1) / 10.0))
+    rating_learning_rate = 0.75 * sample_weight
+    team_state[home_team]["rating_shift"] = _clamp(
+        float(team_state[home_team].get("rating_shift", 0.0)) + (home_points - expected_home_points) * rating_learning_rate,
+        -10.0,
+        10.0,
+    )
+    team_state[away_team]["rating_shift"] = _clamp(
+        float(team_state[away_team].get("rating_shift", 0.0)) + (away_points - expected_away_points) * rating_learning_rate,
+        -10.0,
+        10.0,
+    )
 
     history.append(
         {
@@ -2094,31 +2097,35 @@ def _update_live_state(
         }
     )
 
-    if history:
+    if len(history) >= 4:
         avg_pred_draw = sum(item["pred_draw"] for item in history) / len(history)
         avg_actual_draw = sum(item["actual_draw"] for item in history) / len(history)
         avg_pred_home = sum(item["pred_home_goals"] for item in history) / len(history)
         avg_pred_away = sum(item["pred_away_goals"] for item in history) / len(history)
         avg_actual_home = sum(item["actual_home_goals"] for item in history) / len(history)
         avg_actual_away = sum(item["actual_away_goals"] for item in history) / len(history)
+        multiplier_weight = min(0.55, len(history) / 18.0)
 
         if avg_pred_draw > 0:
+            draw_ratio = avg_actual_draw / avg_pred_draw
             global_state["draw_multiplier"] = _clamp(
-                float(model_adjustments.get("draw_multiplier", 1.0)) * (avg_actual_draw / avg_pred_draw),
-                0.78,
-                1.48,
+                float(model_adjustments.get("draw_multiplier", 1.0)) * (1.0 + (draw_ratio - 1.0) * multiplier_weight),
+                0.88,
+                1.22,
             )
         if avg_pred_home > 0:
+            home_ratio = avg_actual_home / avg_pred_home
             global_state["home_goal_multiplier"] = _clamp(
-                float(model_adjustments.get("home_goal_multiplier", 1.0)) * (avg_actual_home / avg_pred_home),
-                0.72,
-                1.34,
+                float(model_adjustments.get("home_goal_multiplier", 1.0)) * (1.0 + (home_ratio - 1.0) * multiplier_weight),
+                0.88,
+                1.18,
             )
         if avg_pred_away > 0:
+            away_ratio = avg_actual_away / avg_pred_away
             global_state["away_goal_multiplier"] = _clamp(
-                float(model_adjustments.get("away_goal_multiplier", 1.0)) * (avg_actual_away / avg_pred_away),
-                0.72,
-                1.34,
+                float(model_adjustments.get("away_goal_multiplier", 1.0)) * (1.0 + (away_ratio - 1.0) * multiplier_weight),
+                0.88,
+                1.18,
             )
 
 

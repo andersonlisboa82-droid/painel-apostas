@@ -62,6 +62,10 @@ def market_label(market: str, home_team: str, away_team: str) -> str:
         return f"Vitoria {home_team}"
     if market == "Fora":
         return f"Vitoria {away_team}"
+    if market == "Casa ou Empate":
+        return f"Vitoria {home_team} ou empate"
+    if market == "Fora ou Empate":
+        return f"Vitoria {away_team} ou empate"
     return "Empate"
 
 
