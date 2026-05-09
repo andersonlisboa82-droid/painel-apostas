@@ -13,8 +13,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 APP_DIR = Path(__file__).resolve().parent
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+APP_DIR_STR = str(APP_DIR)
+if APP_DIR_STR in sys.path:
+    sys.path.remove(APP_DIR_STR)
+sys.path.insert(0, APP_DIR_STR)
 
 from analytics import (
     build_safe_bets_table,

@@ -18,8 +18,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
+BASE_DIR_STR = str(BASE_DIR)
+if BASE_DIR_STR in sys.path:
+    sys.path.remove(BASE_DIR_STR)
+sys.path.insert(0, BASE_DIR_STR)
 
 from analytics import calculate_match_probabilities, get_team_context, suggest_bet_strategy
 from gerar_copa_mundo_html import build_world_cup_schedule_html, update_world_cup_model_adjustments

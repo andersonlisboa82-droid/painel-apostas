@@ -21,8 +21,10 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 APP_DIR = Path(__file__).resolve().parent
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+APP_DIR_STR = str(APP_DIR)
+if APP_DIR_STR in sys.path:
+    sys.path.remove(APP_DIR_STR)
+sys.path.insert(0, APP_DIR_STR)
 
 from gerar_copa_mundo_html import build_world_cup_schedule_html
 from gerar_html import AI_PROMPT_TEMPLATE, build_index_html
