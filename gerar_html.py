@@ -21,15 +21,42 @@ from analytics import (
     calculate_match_probabilities,
     suggest_bet_strategy,
     get_team_context,
-    market_covers_result,
-    market_probability,
     market_probability_gap,
     probability_map,
-    result_to_market,
     selection_has_clear_edge,
 )
 from real_match_stats import build_match_stats_cache_key, load_real_match_stats_cache
 from scraper import COMPETITIONS, load_competition_matches
+
+try:
+    from analytics import market_covers_result, market_probability, result_to_market
+except ImportError:
+    def result_to_market(home_goals: float, away_goals: float) -> str:
+        if float(home_goals) > float(away_goals):
+            return "Casa"
+        if float(home_goals) < float(away_goals):
+            return "Fora"
+        return "Empate"
+
+    def market_covers_result(selected_market: str, actual_market: str) -> bool:
+        selected = str(selected_market)
+        actual = str(actual_market)
+        if selected == actual:
+            return True
+        if selected == "Casa ou Empate":
+            return actual in {"Casa", "Empate"}
+        if selected == "Fora ou Empate":
+            return actual in {"Fora", "Empate"}
+        return False
+
+    def market_probability(probs, market: str) -> float:
+        market_probs = probability_map(probs)
+        selected = str(market)
+        if selected == "Casa ou Empate":
+            return float(market_probs.get("Casa", 0.0)) + float(market_probs.get("Empate", 0.0))
+        if selected == "Fora ou Empate":
+            return float(market_probs.get("Fora", 0.0)) + float(market_probs.get("Empate", 0.0))
+        return float(market_probs.get(selected, 0.0))
 
 
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")

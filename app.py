@@ -34,7 +34,6 @@ from analytics import (
     calculate_match_probabilities,
     default_model_config,
     get_team_context,
-    is_double_chance_market,
     normalize_model_config,
     pick_highest_probability_market,
     suggest_bet_strategy,
@@ -126,6 +125,10 @@ WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
 MODEL_CONFIG_SESSION_KEY = "runtime_model_config"
 MODEL_CONFIG_FEEDBACK_KEY = "_runtime_model_feedback"
 PORTAL_REFRESH_FEEDBACK_KEY = "_portal_refresh_feedback"
+
+
+def is_double_chance_market(market: str) -> bool:
+    return str(market) in {"Casa ou Empate", "Fora ou Empate"}
 
 
 def _read_runtime_secret(name: str) -> str:
