@@ -452,7 +452,7 @@ def load_competition_matches(competition: str) -> pd.DataFrame:
     df = pd.DataFrame(data)
 
     df = df.drop_duplicates(
-        subset=["competition", "status", "home_team", "away_team", "date_text"],
+        subset=["competition", "home_team", "away_team"],
         keep="first",
     ).reset_index(drop=True)
 

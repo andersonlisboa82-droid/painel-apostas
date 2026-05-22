@@ -3528,7 +3528,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           </div>
         </div>
 
-        <div class="modal-section">
+        <div class="modal-section" style="display: none;">
           <h3>Estatisticas Reais do Jogo</h3>
           <div class="real-stats-grid">
             <div class="real-stat-card">
@@ -3553,7 +3553,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
         </div>
 
         <div class="modal-grid">
-          <div class="modal-section">
+          <div class="modal-section" style="display: none;">
             <h3>Medias Recentes por Time</h3>
             <div class="context-grid">
               <div class="context-card">
@@ -3574,7 +3574,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
               </div>
             </div>
           </div>
-          <div class="modal-section">
+          <div class="modal-section" style="display: none;">
             <h3>Projecao do Confronto</h3>
             <div class="projection-grid">
               <div class="real-stat-card">
@@ -3590,7 +3590,7 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
           </div>
         </div>
 
-        <div class="modal-section">
+        <div class="modal-section" style="display: none;">
           <h3>Aderencia ao Real</h3>
           <div class="projection-grid">
             <div class="real-stat-card">

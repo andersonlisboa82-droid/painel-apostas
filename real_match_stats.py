@@ -700,12 +700,11 @@ def get_real_match_stats(
     persist_result: bool = True,
     force_refresh: bool = False,
 ) -> dict[str, object]:
-    if (status or "").strip().lower() != "finalizado":
-        return {
-            "available": False,
-            "source": SOURCE_NAME,
-            "message": "Estatisticas reais ficam disponiveis apenas para jogos finalizados.",
-        }
+    return {
+        "available": False,
+        "source": SOURCE_NAME,
+        "message": "Atualizacao de estatisticas (escanteios, cartoes, posse) desativada.",
+    }
 
     cache_key = build_match_stats_cache_key(home_team, away_team, date_text, event_timestamp=event_timestamp)
     cached_payload: dict[str, object] | None = None

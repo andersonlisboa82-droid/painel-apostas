@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import copy
 import math
@@ -70,7 +70,7 @@ DEFAULT_MODEL_CONFIG: dict[str, object] = {
         "min_selection_probability": 0.58,
         "min_market_gap": 0.08,
         "max_draw_probability_for_winner": 0.25,
-        "double_chance_enabled": True,
+        "double_chance_enabled": False,
         "double_chance_draw_threshold": 0.25,
         "double_chance_gap_threshold": 0.08,
         "double_chance_min_probability": 0.62,
@@ -967,7 +967,7 @@ def suggest_bet_strategy(
     house_favorite_lock_threshold = _clamp(_safe_float(betting_cfg.get("house_favorite_lock_threshold"), 0.70), 0.0, 1.0)
     min_selection_probability = _clamp(_safe_float(betting_cfg.get("min_selection_probability"), 0.58), 0.0, 1.0)
     min_market_gap = _clamp(_safe_float(betting_cfg.get("min_market_gap"), 0.08), 0.0, 1.0)
-    double_chance_enabled = bool(betting_cfg.get("double_chance_enabled", True))
+    double_chance_enabled = bool(betting_cfg.get("double_chance_enabled", False))
     double_chance_draw_threshold = _clamp(
         _safe_float(betting_cfg.get("double_chance_draw_threshold"), 0.25),
         0.0,
