@@ -1408,6 +1408,8 @@ def _execute_public_portal_refresh(*, refresh_nonce: str) -> str:
         st.session_state["_public_portal_last_updated_at"] = updated_at
         refreshed_updated_at = updated_at
         st.session_state["_public_portal_refresh_feedback"] = f"Portal atualizado com sucesso em {updated_at}."
+        _read_cached_html_snapshot.clear()
+        st.cache_data.clear()
     except Exception:
         st.cache_data.clear()
         refreshed_updated_at = _current_app_timestamp()

@@ -5970,13 +5970,23 @@ def build_index_html(competition_frames: dict[str, pd.DataFrame] | None = None) 
     }}
 
     function reloadPortalShell() {{
+      const cacheBustUrl = (href) => {{
+        try {{
+          const url = new URL(href || window.location.href);
+          url.searchParams.set('view', 'portal');
+          url.searchParams.set('portal_reload_nonce', String(Date.now()));
+          return url.toString();
+        }} catch (error) {{
+          return href || window.location.href;
+        }}
+      }};
       try {{
         if (window.top && window.top !== window) {{
-          window.top.location.reload();
+          window.top.location.assign(cacheBustUrl(window.top.location.href));
           return;
         }}
       }} catch (error) {{}}
-      window.location.reload();
+      window.location.assign(cacheBustUrl(window.location.href));
     }}
 
     function requestStreamlitPortalRefresh() {{
