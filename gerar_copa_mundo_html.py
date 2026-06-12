@@ -34,6 +34,7 @@ FIFA_SCHEDULE_RELEASE_URL = (
 )
 TEAM_PRIORS_CACHE = Path(__file__).resolve().parent / "world_cup_2026_team_priors.json"
 MODEL_ADJUSTMENTS_FILE = Path(__file__).resolve().parent / "world_cup_2026_model_adjustments.json"
+RESULTS_OVERRIDES_FILE = Path(__file__).resolve().parent / "world_cup_2026_results_overrides.json"
 PLACEHOLDER_TEAMS = {"Por definir", "TBD", "-"}
 TEAM_NAME_ALIASES = {
     "mexico": "Mexico",
@@ -1499,13 +1500,16 @@ def build_world_cup_html() -> str:
     applyFilters();
 
     function reloadPortalShell() {{
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', 'copa');
+      url.searchParams.set('copa_reload_nonce', Date.now().toString());
       try {{
         if (window.top && window.top !== window) {{
-          window.top.location.reload();
+          window.top.location.href = url.toString();
           return;
         }}
       }} catch (error) {{}}
-      location.reload();
+      location.href = url.toString();
     }}
 
     async function refreshCopa(btn) {{
@@ -1899,34 +1903,136 @@ def _poisson_probability(goals: int, lam: float) -> float:
     return math.exp(-lam) * (lam**goals) / math.factorial(goals)
 
 
+def _coerce_int_goal(value: object) -> int | None:
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _add_result_lookup_entry(
+    lookup: dict[tuple[str, str, str], dict[str, object]],
+    home_team: object,
+    away_team: object,
+    date_key: str,
+    home_goals: object,
+    away_goals: object,
+    *,
+    event_dt: object = None,
+    source: str = "",
+    source_url: str = "",
+) -> None:
+    home = _canonical_team_name(str(home_team))
+    away = _canonical_team_name(str(away_team))
+    home_score = _coerce_int_goal(home_goals)
+    away_score = _coerce_int_goal(away_goals)
+    if not home or not away or not date_key or home_score is None or away_score is None:
+        return
+
+    lookup[(home, away, date_key)] = {
+        "home_goals": home_score,
+        "away_goals": away_score,
+        "actual_score": f"{home_score} x {away_score}",
+        "event_dt": event_dt,
+        "source": source,
+        "source_url": source_url,
+    }
+    lookup[(away, home, date_key)] = {
+        "home_goals": away_score,
+        "away_goals": home_score,
+        "actual_score": f"{away_score} x {home_score}",
+        "event_dt": event_dt,
+        "source": source,
+        "source_url": source_url,
+    }
+
+
+def _parse_result_date_key(value: object) -> str | None:
+    if value is None:
+        return None
+    value_text = str(value).strip()
+    parsed = pd.NaT
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value_text):
+        parsed = pd.to_datetime(value_text, errors="coerce", format="%Y-%m-%d")
+    elif re.fullmatch(r"\d{2}/\d{2}/\d{4}", value_text):
+        parsed = pd.to_datetime(value_text, errors="coerce", format="%d/%m/%Y")
+    if pd.isna(parsed):
+        parsed = pd.to_datetime(value_text, errors="coerce", dayfirst=True)
+    if pd.isna(parsed):
+        return None
+    if int(parsed.year) != 2026 or int(parsed.month) not in {6, 7}:
+        return None
+    return parsed.strftime("%Y-%m-%d")
+
+
+def _load_world_cup_result_overrides() -> dict[tuple[str, str, str], dict[str, object]]:
+    lookup: dict[tuple[str, str, str], dict[str, object]] = {}
+    if not RESULTS_OVERRIDES_FILE.exists():
+        return lookup
+    try:
+        rows = json.loads(RESULTS_OVERRIDES_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return lookup
+    if not isinstance(rows, list):
+        return lookup
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        date_key = _parse_result_date_key(row.get("date"))
+        if not date_key:
+            continue
+        _add_result_lookup_entry(
+            lookup,
+            row.get("home_team"),
+            row.get("away_team"),
+            date_key,
+            row.get("home_goals"),
+            row.get("away_goals"),
+            source=str(row.get("source", "")),
+            source_url=str(row.get("source_url", "")),
+        )
+    return lookup
+
+
 def _load_official_results_lookup() -> dict[tuple[str, str, str], dict[str, object]]:
+    lookup = _load_world_cup_result_overrides()
     df = load_competition_matches("Copa do Mundo")
     finished = df[df["status"] == "Finalizado"].copy()
     if finished.empty:
-        return {}
+        return lookup
 
     if "event_timestamp" in finished.columns:
         finished["event_dt_local"] = pd.to_datetime(finished["event_timestamp"], errors="coerce", utc=True)
-        finished = finished[finished["event_dt_local"].notna()].copy()
     else:
         finished["event_dt_local"] = pd.NaT
 
-    lookup: dict[tuple[str, str, str], dict[str, object]] = {}
     for row in finished.itertuples(index=False):
-        if pd.isna(row.event_dt_local):
+        local_dt = None
+        date_key = None
+        if not pd.isna(row.event_dt_local):
+            local_dt = row.event_dt_local.tz_convert(APP_TIMEZONE) if row.event_dt_local.tzinfo else row.event_dt_local
+            if int(local_dt.year) == 2026 and int(local_dt.month) in {6, 7}:
+                date_key = local_dt.strftime("%Y-%m-%d")
+        if not date_key and hasattr(row, "date_text"):
+            date_key = _parse_result_date_key(row.date_text)
+        if not date_key:
             continue
-        local_dt = row.event_dt_local.tz_convert(APP_TIMEZONE) if row.event_dt_local.tzinfo else row.event_dt_local
-        if int(local_dt.year) != 2026 or int(local_dt.month) not in {6, 7}:
-            continue
-        home = _canonical_team_name(str(row.home_team))
-        away = _canonical_team_name(str(row.away_team))
-        key = (home, away, local_dt.strftime("%Y-%m-%d"))
-        lookup[key] = {
-            "home_goals": int(row.home_goals),
-            "away_goals": int(row.away_goals),
-            "actual_score": f"{int(row.home_goals)} x {int(row.away_goals)}",
-            "event_dt": local_dt,
-        }
+        _add_result_lookup_entry(
+            lookup,
+            row.home_team,
+            row.away_team,
+            date_key,
+            row.home_goals,
+            row.away_goals,
+            event_dt=local_dt,
+            source="BetExplorer",
+        )
     return lookup
 
 
@@ -3414,13 +3520,16 @@ def build_world_cup_schedule_html() -> str:
   <div id="updateToast" class="update-toast"></div>
   <script>
     function reloadPortalShell() {{
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', 'copa');
+      url.searchParams.set('copa_reload_nonce', Date.now().toString());
       try {{
         if (window.top && window.top !== window) {{
-          window.top.location.reload();
+          window.top.location.href = url.toString();
           return;
         }}
       }} catch (error) {{}}
-      location.reload();
+      location.href = url.toString();
     }}
 
     const COPA_API_URL = "http://127.0.0.1:8765/api/refresh-copa";
