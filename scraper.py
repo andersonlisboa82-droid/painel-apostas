@@ -447,7 +447,11 @@ def load_competition_matches(competition: str) -> pd.DataFrame:
 
     data = [r.__dict__ for r in (result_rows + fixture_rows)]
     if not data:
-        raise ValueError(f"Sem dados disponiveis para {competition}.")
+        return pd.DataFrame(columns=[
+            "competition", "status", "date_text", "event_timestamp",
+            "home_team", "away_team", "home_goals", "away_goals",
+            "odds_home", "odds_draw", "odds_away", "bookmakers", "match_url"
+        ])
 
     df = pd.DataFrame(data)
 
