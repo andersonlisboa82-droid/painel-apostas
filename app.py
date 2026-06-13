@@ -1442,7 +1442,7 @@ def _run_public_portal_refresh_if_requested() -> bool:
     return True
 
 
-public_home_view = _query_param_str("view", "app")
+public_home_view = _query_param_str("view", "copa")
 if public_home_view == "landing":
     render_public_landing()
     st.stop()

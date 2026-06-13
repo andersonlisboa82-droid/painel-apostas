@@ -35,7 +35,7 @@ Para Streamlit Cloud, o projeto fixa o runtime em `python-3.11`.
 ```bash
 streamlit run app.py --server.port 8503
 ```
-Depois, acesse: `http://127.0.0.1:8503/?view=app`
+Depois, acesse: `http://127.0.0.1:8503/?view=copa`
 
 ## IA no Streamlit Cloud (sem erro de API local)
 No deploy da Streamlit Cloud, a UI do `index.html` nao consegue acessar `localhost:8765`.

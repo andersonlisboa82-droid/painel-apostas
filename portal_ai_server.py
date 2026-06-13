@@ -24,7 +24,11 @@ if BASE_DIR_STR in sys.path:
 sys.path.insert(0, BASE_DIR_STR)
 
 from analytics import calculate_match_probabilities, get_team_context, suggest_bet_strategy
-from gerar_copa_mundo_html import build_world_cup_schedule_html, update_world_cup_model_adjustments
+from gerar_copa_mundo_html import (
+    apply_team_translations,
+    build_world_cup_schedule_html,
+    update_world_cup_model_adjustments,
+)
 from gerar_html import build_index_html
 from nvidia_client import request_nvidia_completion
 from real_match_stats import (
@@ -383,8 +387,8 @@ def refresh_portal_snapshot_with_progress(
 
 
 def refresh_copa_snapshot() -> dict[str, str]:
-    """Regenera o copa_do_mundo.html buscando dados frescos do betexplorer."""
-    html = build_world_cup_schedule_html()
+    """Regenera o copa_do_mundo.html buscando dados frescos de resultados."""
+    html = apply_team_translations(build_world_cup_schedule_html())
     copa_path = BASE_DIR / "copa_do_mundo.html"
     copa_path.write_text(html, encoding="utf-8")
     updated_at = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")

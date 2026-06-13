@@ -17,5 +17,5 @@ if /I not "%APP_SERVER_UP%"=="True" (
   start "Portal App" /min cmd /c "cd /d %~dp0 && python -m streamlit run app.py --server.port 8503 --server.headless true"
   timeout /t 2 /nobreak >nul
 )
-start "" "http://127.0.0.1:8503/?view=app"
+start "" "http://127.0.0.1:8503/?view=copa"
 exit /b 0

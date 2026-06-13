@@ -32,6 +32,7 @@ TELEMUNDO_SCHEDULE_URL = (
 FIFA_SCHEDULE_RELEASE_URL = (
     "https://inside.fifa.com/organisation/president/news/world-cup-2026-match-schedule-fixtures-ronaldo-infantino"
 )
+ESPN_WORLD_CUP_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
 TEAM_PRIORS_CACHE = Path(__file__).resolve().parent / "world_cup_2026_team_priors.json"
 MODEL_ADJUSTMENTS_FILE = Path(__file__).resolve().parent / "world_cup_2026_model_adjustments.json"
 RESULTS_OVERRIDES_FILE = Path(__file__).resolve().parent / "world_cup_2026_results_overrides.json"
@@ -44,7 +45,9 @@ TEAM_NAME_ALIASES = {
     "chequia": "Czechia",
     "canada": "Canada",
     "bosnia y herzegovina": "Bosnia and Herzegovina",
+    "bosnia herzegovina": "Bosnia and Herzegovina",
     "estados unidos": "USA",
+    "united states": "USA",
     "catar": "Qatar",
     "suiza": "Switzerland",
     "brasil": "Brazil",
@@ -2000,11 +2003,100 @@ def _load_world_cup_result_overrides() -> dict[tuple[str, str, str], dict[str, o
     return lookup
 
 
+def _load_espn_world_cup_results_lookup() -> dict[tuple[str, str, str], dict[str, object]]:
+    lookup: dict[tuple[str, str, str], dict[str, object]] = {}
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    for date_range in ("202606", "202607"):
+        try:
+            response = requests.get(
+                ESPN_WORLD_CUP_SCOREBOARD_URL,
+                params={"dates": date_range},
+                headers=headers,
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            continue
+
+        events = payload.get("events", [])
+        if not isinstance(events, list):
+            continue
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            status_type = event.get("status", {}).get("type", {})
+            if not isinstance(status_type, dict) or not bool(status_type.get("completed")):
+                continue
+
+            event_dt = pd.to_datetime(event.get("date"), errors="coerce", utc=True)
+            if pd.isna(event_dt):
+                continue
+            local_dt = event_dt.tz_convert(APP_TIMEZONE)
+            date_key = local_dt.strftime("%Y-%m-%d")
+
+            competitions = event.get("competitions", [])
+            competition = competitions[0] if isinstance(competitions, list) and competitions else {}
+            competitors = competition.get("competitors", []) if isinstance(competition, dict) else []
+            if not isinstance(competitors, list):
+                continue
+
+            home_entry = None
+            away_entry = None
+            for competitor in competitors:
+                if not isinstance(competitor, dict):
+                    continue
+                home_away = str(competitor.get("homeAway", "")).strip().lower()
+                if home_away == "home":
+                    home_entry = competitor
+                elif home_away == "away":
+                    away_entry = competitor
+
+            if not home_entry or not away_entry:
+                continue
+
+            home_team = home_entry.get("team", {}).get("displayName") if isinstance(home_entry.get("team"), dict) else ""
+            away_team = away_entry.get("team", {}).get("displayName") if isinstance(away_entry.get("team"), dict) else ""
+            source_url = ""
+            links = event.get("links", [])
+            if isinstance(links, list):
+                for link in links:
+                    if isinstance(link, dict) and link.get("href"):
+                        source_url = str(link.get("href"))
+                        break
+
+            _add_result_lookup_entry(
+                lookup,
+                home_team,
+                away_team,
+                date_key,
+                home_entry.get("score"),
+                away_entry.get("score"),
+                event_dt=local_dt,
+                source="ESPN",
+                source_url=source_url,
+            )
+
+    return lookup
+
+
 def _load_official_results_lookup() -> dict[tuple[str, str, str], dict[str, object]]:
-    lookup = _load_world_cup_result_overrides()
-    df = load_competition_matches("Copa do Mundo")
+    lookup = _load_espn_world_cup_results_lookup()
+    try:
+        df = load_competition_matches("Copa do Mundo")
+    except Exception:
+        lookup.update(_load_world_cup_result_overrides())
+        return lookup
+
+    if "status" not in df.columns:
+        lookup.update(_load_world_cup_result_overrides())
+        return lookup
+
     finished = df[df["status"] == "Finalizado"].copy()
     if finished.empty:
+        lookup.update(_load_world_cup_result_overrides())
         return lookup
 
     if "event_timestamp" in finished.columns:
@@ -2033,6 +2125,7 @@ def _load_official_results_lookup() -> dict[tuple[str, str, str], dict[str, obje
             event_dt=local_dt,
             source="BetExplorer",
         )
+    lookup.update(_load_world_cup_result_overrides())
     return lookup
 
 
