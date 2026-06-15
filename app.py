@@ -124,6 +124,7 @@ NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-70b-instruct"
 INDEX_HTML_FILE = APP_DIR / "index.html"
 WORLD_CUP_HTML_FILE = APP_DIR / "copa_do_mundo.html"
+RUNTIME_MODEL_CONFIG_FILE = APP_DIR / "model_config_runtime.json"
 MODEL_CONFIG_SESSION_KEY = "runtime_model_config"
 MODEL_CONFIG_FEEDBACK_KEY = "_runtime_model_feedback"
 PORTAL_REFRESH_FEEDBACK_KEY = "_portal_refresh_feedback"
@@ -165,8 +166,31 @@ CURRENT_GIT_SHORT_HASH = _current_git_short_hash()
 APP_RELEASE_LABEL = f"{datetime.now(APP_TIMEZONE).strftime('%Y-%m-%d')} | {CURRENT_GIT_SHORT_HASH}"
 
 
+def _load_runtime_model_config_file() -> dict[str, object]:
+    if not RUNTIME_MODEL_CONFIG_FILE.exists():
+        return default_model_config()
+    try:
+        loaded = json.loads(RUNTIME_MODEL_CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default_model_config()
+    return normalize_model_config(loaded if isinstance(loaded, dict) else None)
+
+
+def _save_runtime_model_config(config: dict[str, object]) -> dict[str, object]:
+    normalized = normalize_model_config(config)
+    RUNTIME_MODEL_CONFIG_FILE.write_text(
+        json.dumps(normalized, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    st.session_state[MODEL_CONFIG_SESSION_KEY] = normalized
+    return normalized
+
+
 def _get_runtime_model_config() -> dict[str, object]:
-    config = normalize_model_config(st.session_state.get(MODEL_CONFIG_SESSION_KEY))
+    source_config = st.session_state.get(MODEL_CONFIG_SESSION_KEY)
+    if source_config is None:
+        source_config = _load_runtime_model_config_file()
+    config = normalize_model_config(source_config)
     st.session_state[MODEL_CONFIG_SESSION_KEY] = config
     return config
 
@@ -3213,7 +3237,7 @@ with st.sidebar:
         st.markdown(
             """
 1. Ajuste os campos em `Calibragem Avancada do Modelo`.
-2. Clique em `Recalibrar Modelo Agora` para aplicar sem editar codigo.
+2. Clique em `Recalibrar Modelo Agora` para aplicar e salvar em `model_config_runtime.json`.
 3. Clique em `Atualizar agora` para reprocessar o portal com os novos criterios.
 4. Se precisar voltar ao ponto inicial, use `Restaurar Criterios Padrao`.
 """
@@ -3229,7 +3253,7 @@ with st.sidebar:
         )
 
     with st.expander("Calibragem Avancada do Modelo", expanded=False):
-        st.caption("Edite os criterios tecnicos do motor e clique em recalibrar para reprocessar sem alterar codigo.")
+        st.caption("Edite os criterios tecnicos do motor e clique em recalibrar para salvar em arquivo e reprocessar sem alterar codigo.")
 
         max_goals_input = st.slider(
             "Poisson - maximo de gols simulados",
@@ -3569,7 +3593,7 @@ with st.sidebar:
             if parsed_bins is None:
                 st.error("Formato invalido para bins. Exemplo: 0, 0.20, 0.35, 0.50, 0.65, 1.01")
             else:
-                st.session_state[MODEL_CONFIG_SESSION_KEY] = normalize_model_config(
+                _save_runtime_model_config(
                     {
                         "poisson": {
                             "max_goals": int(max_goals_input),
@@ -3619,15 +3643,18 @@ with st.sidebar:
                     }
                 )
                 st.cache_data.clear()
-                st.session_state[MODEL_CONFIG_FEEDBACK_KEY] = f"Modelo recalibrado em {datetime.now(APP_TIMEZONE).strftime('%d/%m/%Y %H:%M:%S')}."
+                st.session_state[MODEL_CONFIG_FEEDBACK_KEY] = (
+                    f"Modelo recalibrado e salvo em {RUNTIME_MODEL_CONFIG_FILE.name} "
+                    f"as {datetime.now(APP_TIMEZONE).strftime('%d/%m/%Y %H:%M:%S')}."
+                )
                 st.rerun()
 
         if st.button("Restaurar Criterios Padrao", use_container_width=True, key="model_cfg_reset"):
-            st.session_state[MODEL_CONFIG_SESSION_KEY] = default_model_config()
+            _save_runtime_model_config(default_model_config())
             for widget_key in model_widget_keys:
                 st.session_state.pop(widget_key, None)
             st.cache_data.clear()
-            st.session_state[MODEL_CONFIG_FEEDBACK_KEY] = "Criterios do modelo restaurados para o padrao."
+            st.session_state[MODEL_CONFIG_FEEDBACK_KEY] = "Criterios do modelo restaurados para o padrao e salvos em arquivo."
             st.rerun()
 
     render_portal_refresh_action_button(
