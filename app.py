@@ -26,7 +26,7 @@ if APP_DIR_STR in sys.path:
     sys.path.remove(APP_DIR_STR)
 sys.path.insert(0, APP_DIR_STR)
 
-from gerar_copa_mundo_html import build_world_cup_schedule_html
+from gerar_copa_mundo_html import apply_team_translations, build_world_cup_schedule_html
 from gerar_html import AI_PROMPT_TEMPLATE, build_index_html
 from analytics import (
     build_backtest_table,
@@ -1140,8 +1140,37 @@ def _load_world_cup_portal_html() -> str:
     return html
 
 
+def _refresh_world_cup_portal_html() -> str:
+    html = apply_team_translations(build_world_cup_schedule_html())
+    WORLD_CUP_HTML_FILE.write_text(html, encoding="utf-8")
+    _read_cached_html_snapshot.clear()
+    return datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
+
+
 def render_embedded_world_cup_portal() -> None:
     ensure_portal_ai_server_running()
+    refresh_col, status_col = st.columns([0.28, 0.72])
+    with refresh_col:
+        refresh_requested = st.button(
+            "Atualizar placares",
+            key="refresh_world_cup_scores_streamlit",
+            use_container_width=True,
+        )
+    if refresh_requested:
+        with st.spinner("Buscando resultados oficiais da Copa..."):
+            try:
+                updated_at = _refresh_world_cup_portal_html()
+            except Exception as exc:
+                st.error(f"Nao foi possivel atualizar os placares: {exc}")
+            else:
+                st.session_state["world_cup_scores_updated_at"] = updated_at
+                st.rerun()
+    with status_col:
+        updated_at = st.session_state.get("world_cup_scores_updated_at")
+        if updated_at:
+            st.caption(f"Placares atualizados em {updated_at}.")
+        else:
+            st.caption("Use o botao para buscar os placares oficiais mais recentes.")
     components.html(_load_world_cup_portal_html(), height=1200, scrolling=True)
 
 

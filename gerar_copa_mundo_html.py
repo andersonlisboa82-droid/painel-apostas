@@ -55,8 +55,10 @@ TEAM_NAME_ALIASES = {
     "haiti": "Haiti",
     "escocia": "Scotland",
     "turquia": "Turkey",
+    "turkiye": "Turkey",
     "alemania": "Germany",
     "curazao": "Curacao",
+    "curacao": "Curacao",
     "paises bajos": "Netherlands",
     "japon": "Japan",
     "costa de marfil": "Ivory Coast",
@@ -2129,6 +2131,34 @@ def _load_official_results_lookup() -> dict[tuple[str, str, str], dict[str, obje
     return lookup
 
 
+def _find_official_result(
+    lookup: dict[tuple[str, str, str], dict[str, object]],
+    home_team: str,
+    away_team: str,
+    date_key: str,
+) -> dict[str, object] | None:
+    exact_result = lookup.get((home_team, away_team, date_key))
+    if exact_result:
+        return exact_result
+
+    parsed_date = pd.to_datetime(date_key, errors="coerce")
+    if pd.isna(parsed_date):
+        return None
+
+    candidates: list[tuple[int, dict[str, object]]] = []
+    for offset in (-1, 1):
+        nearby_key = (parsed_date + pd.Timedelta(days=offset)).strftime("%Y-%m-%d")
+        nearby_result = lookup.get((home_team, away_team, nearby_key))
+        if nearby_result:
+            candidates.append((abs(offset), nearby_result))
+
+    if candidates:
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
+
+    return None
+
+
 def _outcome_from_score(home_goals: int, away_goals: int) -> str:
     if home_goals > away_goals:
         return "Casa"
@@ -2393,8 +2423,12 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
                 }
             )
 
-            result_key = (home_team, away_team, record["datetime_brt"].strftime("%Y-%m-%d"))
-            result = results_lookup.get(result_key)
+            result = _find_official_result(
+                results_lookup,
+                home_team,
+                away_team,
+                record["datetime_brt"].strftime("%Y-%m-%d"),
+            )
             if result:
                 actual_outcome = _outcome_from_score(int(result["home_goals"]), int(result["away_goals"]))
                 exact_hit = record["suggested_score"] == result["actual_score"]
