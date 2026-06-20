@@ -2295,25 +2295,17 @@ def _select_suggested_score(
     scorelines: list[tuple[str, float]],
     predicted_outcome: str,
     *,
-    min_relative_probability: float = 0.82,
+    second_score_relative_floor: float = 0.75,
 ) -> str:
+    del predicted_outcome
     if not scorelines:
         return "-"
 
     top_score, top_probability = scorelines[0]
-    if _outcome_from_scoreline(top_score) == predicted_outcome:
-        return top_score
-
-    best_for_outcome = next(
-        ((score, probability) for score, probability in scorelines if _outcome_from_scoreline(score) == predicted_outcome),
-        None,
-    )
-    if not best_for_outcome:
-        return top_score
-
-    score, probability = best_for_outcome
-    if top_probability <= 0 or probability >= top_probability * min_relative_probability:
-        return score
+    if len(scorelines) > 1 and top_probability > 0:
+        second_score, second_probability = scorelines[1]
+        if second_probability >= top_probability * second_score_relative_floor:
+            return second_score
     return top_score
 
 
@@ -2622,6 +2614,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
     enriched: list[dict[str, object]] = []
     exact_hits = 0
     top3_exact_hits = 0
+    suggested_hits = 0
     outcome_hits = 0
     finished_matches = 0
 
@@ -2681,10 +2674,12 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
                 actual_outcome = _outcome_from_score(int(result["home_goals"]), int(result["away_goals"]))
                 exact_hit = record["exact_score_pick"] == result["actual_score"]
                 top3_exact_hit = result["actual_score"] in [score for score, _ in record.get("top_scores", [])[:3]]
+                suggested_hit = record["suggested_score"] == result["actual_score"]
                 outcome_hit = record["predicted_outcome"] == actual_outcome
                 finished_matches += 1
                 exact_hits += 1 if exact_hit else 0
                 top3_exact_hits += 1 if top3_exact_hit else 0
+                suggested_hits += 1 if suggested_hit else 0
                 outcome_hits += 1 if outcome_hit else 0
                 record.update(
                     {
@@ -2693,6 +2688,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
                         "actual_outcome": actual_outcome,
                         "exact_hit": exact_hit,
                         "top3_exact_hit": top3_exact_hit,
+                        "suggested_hit": suggested_hit,
                         "outcome_hit": outcome_hit,
                         "result_label": (
                             "Acerto exato" if exact_hit else "Acerto de direcao" if outcome_hit else "Erro da leitura"
@@ -2718,6 +2714,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
         "finished_matches": finished_matches,
         "exact_hit_pct": round((exact_hits / finished_matches) * 100, 1) if finished_matches else 0.0,
         "top3_exact_hit_pct": round((top3_exact_hits / finished_matches) * 100, 1) if finished_matches else 0.0,
+        "suggested_hit_pct": round((suggested_hits / finished_matches) * 100, 1) if finished_matches else 0.0,
         "outcome_hit_pct": round((outcome_hits / finished_matches) * 100, 1) if finished_matches else 0.0,
         "draw_multiplier": round(global_state["draw_multiplier"], 3),
         "home_goal_multiplier": round(global_state["home_goal_multiplier"], 3),
@@ -3838,6 +3835,7 @@ def build_world_cup_schedule_html() -> str:
         <div class="stat"><span>Jogos com leitura</span><strong>{stats['predicted_matches']}</strong></div>
         <div class="stat"><span>Jogos finalizados</span><strong>{stats['finished_matches']}</strong></div>
         <div class="stat"><span>Acerto exato</span><strong>{stats['exact_hit_pct']:.1f}%</strong></div>
+        <div class="stat"><span>Acerto sugestao</span><strong>{stats['suggested_hit_pct']:.1f}%</strong></div>
         <div class="stat"><span>Top 3 exato</span><strong>{stats['top3_exact_hit_pct']:.1f}%</strong></div>
         <div class="stat"><span>Acerto de direcao</span><strong>{stats['outcome_hit_pct']:.1f}%</strong></div>
       </div>
