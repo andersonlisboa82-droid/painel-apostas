@@ -2282,6 +2282,40 @@ def _outcome_from_score(home_goals: int, away_goals: int) -> str:
     return "Empate"
 
 
+def _outcome_from_scoreline(scoreline: str) -> str | None:
+    try:
+        home_raw, away_raw = scoreline.split(" x ", 1)
+        return _outcome_from_score(int(home_raw), int(away_raw))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _select_suggested_score(
+    scorelines: list[tuple[str, float]],
+    predicted_outcome: str,
+    *,
+    min_relative_probability: float = 0.82,
+) -> str:
+    if not scorelines:
+        return "-"
+
+    top_score, top_probability = scorelines[0]
+    if _outcome_from_scoreline(top_score) == predicted_outcome:
+        return top_score
+
+    best_for_outcome = next(
+        ((score, probability) for score, probability in scorelines if _outcome_from_scoreline(score) == predicted_outcome),
+        None,
+    )
+    if not best_for_outcome:
+        return top_score
+
+    score, probability = best_for_outcome
+    if top_probability <= 0 or probability >= top_probability * min_relative_probability:
+        return score
+    return top_score
+
+
 def _team_form_component(
     team: str,
     team_state: dict[str, dict[str, float]],
@@ -2378,11 +2412,11 @@ def _predict_match(
     scorelines = [(score, prob / total) for score, prob in scorelines]
     scorelines.sort(key=lambda item: item[1], reverse=True)
 
-    suggested_score = scorelines[0][0]
     predicted_outcome = max(
         [("Casa", home_win), ("Empate", draw), ("Fora", away_win)],
         key=lambda item: item[1],
     )[0]
+    suggested_score = _select_suggested_score(scorelines, predicted_outcome)
 
     confidence_raw = (
         44
