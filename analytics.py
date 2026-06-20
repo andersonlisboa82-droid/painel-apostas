@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -18,6 +18,7 @@ class MatchProbabilities:
     under_25: float
     over_25: float
     top_scorelines: list[tuple[str, float]]
+    scoreline_probabilities: list[tuple[str, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -383,6 +384,50 @@ def _poisson_pmf(k: int, lam: float) -> float:
     return math.exp(-lam) * (lam**k) / math.factorial(k)
 
 
+def _scoreline_market(scoreline: str) -> str | None:
+    try:
+        home_raw, away_raw = scoreline.split(" x ", 1)
+        home_goals = int(home_raw)
+        away_goals = int(away_raw)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if home_goals > away_goals:
+        return "Casa"
+    if home_goals < away_goals:
+        return "Fora"
+    return "Empate"
+
+
+def _sync_scorelines_to_market_probabilities(
+    scorelines: list[tuple[str, float]],
+    market_probabilities: dict[str, float],
+) -> list[tuple[str, float]]:
+    if not scorelines:
+        return []
+
+    by_market = {"Casa": 0.0, "Empate": 0.0, "Fora": 0.0}
+    for scoreline, probability in scorelines:
+        market = _scoreline_market(scoreline)
+        if market in by_market:
+            by_market[market] += max(0.0, float(probability))
+
+    adjusted: list[tuple[str, float]] = []
+    for scoreline, probability in scorelines:
+        market = _scoreline_market(scoreline)
+        if market not in by_market:
+            adjusted.append((scoreline, max(0.0, float(probability))))
+            continue
+
+        market_total = by_market[market]
+        target_total = max(0.0, float(market_probabilities.get(market, 0.0)))
+        if market_total <= 0:
+            adjusted.append((scoreline, 0.0))
+        else:
+            adjusted.append((scoreline, max(0.0, float(probability)) * (target_total / market_total)))
+
+    return sorted(adjusted, key=lambda item: item[1], reverse=True)
+
+
 def _safe_mean(series: pd.Series, default: float) -> float:
     value = series.mean()
     if pd.isna(value):
@@ -485,6 +530,7 @@ def _calculate_raw_match_probabilities(
         home_win /= normalizer
         draw /= normalizer
         away_win /= normalizer
+        scoreline_probs = [(scoreline, probability / normalizer) for scoreline, probability in scoreline_probs]
 
     p_home_0 = probs_home[0] if probs_home else 0.0
     p_away_0 = probs_away[0] if probs_away else 0.0
@@ -510,6 +556,7 @@ def _calculate_raw_match_probabilities(
         under_25=under_25,
         over_25=over_25,
         top_scorelines=top_scorelines,
+        scoreline_probabilities=scoreline_probs,
     )
 
 
@@ -714,16 +761,27 @@ def _apply_probability_calibration(
     if normalizer <= 0:
         return probs
 
+    adjusted_market_probabilities = {
+        "Casa": adjusted["Casa"] / normalizer,
+        "Empate": adjusted["Empate"] / normalizer,
+        "Fora": adjusted["Fora"] / normalizer,
+    }
+    adjusted_scorelines = _sync_scorelines_to_market_probabilities(
+        probs.scoreline_probabilities or probs.top_scorelines,
+        adjusted_market_probabilities,
+    )
+
     return MatchProbabilities(
-        home_win=adjusted["Casa"] / normalizer,
-        draw=adjusted["Empate"] / normalizer,
-        away_win=adjusted["Fora"] / normalizer,
+        home_win=adjusted_market_probabilities["Casa"],
+        draw=adjusted_market_probabilities["Empate"],
+        away_win=adjusted_market_probabilities["Fora"],
         expected_home_goals=probs.expected_home_goals,
         expected_away_goals=probs.expected_away_goals,
         btts_yes=probs.btts_yes,
         under_25=probs.under_25,
         over_25=probs.over_25,
-        top_scorelines=probs.top_scorelines,
+        top_scorelines=adjusted_scorelines[:5],
+        scoreline_probabilities=adjusted_scorelines,
     )
 
 
@@ -788,16 +846,27 @@ def apply_market_anchor(
     if normalizer <= 0:
         return probs
 
+    adjusted_market_probabilities = {
+        "Casa": adjusted["Casa"] / normalizer,
+        "Empate": adjusted["Empate"] / normalizer,
+        "Fora": adjusted["Fora"] / normalizer,
+    }
+    adjusted_scorelines = _sync_scorelines_to_market_probabilities(
+        probs.scoreline_probabilities or probs.top_scorelines,
+        adjusted_market_probabilities,
+    )
+
     return MatchProbabilities(
-        home_win=adjusted["Casa"] / normalizer,
-        draw=adjusted["Empate"] / normalizer,
-        away_win=adjusted["Fora"] / normalizer,
+        home_win=adjusted_market_probabilities["Casa"],
+        draw=adjusted_market_probabilities["Empate"],
+        away_win=adjusted_market_probabilities["Fora"],
         expected_home_goals=probs.expected_home_goals,
         expected_away_goals=probs.expected_away_goals,
         btts_yes=probs.btts_yes,
         under_25=probs.under_25,
         over_25=probs.over_25,
-        top_scorelines=probs.top_scorelines,
+        top_scorelines=adjusted_scorelines[:5],
+        scoreline_probabilities=adjusted_scorelines,
     )
 
 

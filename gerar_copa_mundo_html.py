@@ -33,6 +33,7 @@ FIFA_SCHEDULE_RELEASE_URL = (
     "https://inside.fifa.com/organisation/president/news/world-cup-2026-match-schedule-fixtures-ronaldo-infantino"
 )
 ESPN_WORLD_CUP_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
+FIFA_MENS_RANKING_URL = "https://api.fifa.com/api/v3/rankings?gender=1&count=211&dateId=FRS_Male_Football_20260401"
 TEAM_PRIORS_CACHE = Path(__file__).resolve().parent / "world_cup_2026_team_priors.json"
 MODEL_ADJUSTMENTS_FILE = Path(__file__).resolve().parent / "world_cup_2026_model_adjustments.json"
 RESULTS_OVERRIDES_FILE = Path(__file__).resolve().parent / "world_cup_2026_results_overrides.json"
@@ -42,12 +43,14 @@ TEAM_NAME_ALIASES = {
     "sudafrica": "South Africa",
     "republica de corea": "South Korea",
     "corea del sur": "South Korea",
+    "korea republic": "South Korea",
     "chequia": "Czechia",
     "canada": "Canada",
     "bosnia y herzegovina": "Bosnia and Herzegovina",
     "bosnia herzegovina": "Bosnia and Herzegovina",
     "estados unidos": "USA",
     "united states": "USA",
+    "united states of america": "USA",
     "catar": "Qatar",
     "suiza": "Switzerland",
     "brasil": "Brazil",
@@ -62,6 +65,7 @@ TEAM_NAME_ALIASES = {
     "paises bajos": "Netherlands",
     "japon": "Japan",
     "costa de marfil": "Ivory Coast",
+    "cote d ivoire": "Ivory Coast",
     "ecuador": "Ecuador",
     "suecia": "Sweden",
     "tunez": "Tunisia",
@@ -83,6 +87,8 @@ TEAM_NAME_ALIASES = {
     "jordania": "Jordan",
     "portugal": "Portugal",
     "rd del congo": "D.R. Congo",
+    "congo dr": "D.R. Congo",
+    "dr congo": "D.R. Congo",
     "inglaterra": "England",
     "croacia": "Croatia",
     "ghana": "Ghana",
@@ -248,6 +254,16 @@ def _fmt_num(value: float | None, digits: int = 2) -> str:
     return f"{float(value):.{digits}f}"
 
 
+def _fmt_fifa_rank(value: object) -> str:
+    rank = _safe_int_or_none(value)
+    return f"#{rank}" if rank is not None else "-"
+
+
+def _fmt_fifa_points(value: object) -> str:
+    points = _safe_float_or_none(value)
+    return f"{points:.2f} pts" if points is not None else "sem pontos"
+
+
 def _team_label_from_market(market: str, home_team: str, away_team: str) -> str:
     if market == "Casa":
         return f"Vitoria {home_team}"
@@ -312,9 +328,9 @@ def _generate_ai_summary(records: list[dict[str, object]], stats: dict[str, int 
                     f"Status: {item['status']}",
                     f"Data: {item['date_text']}",
                     f"Placar sugerido: {item['suggested_score']}",
-                    f"Mandante {item['home_win_pct']}",
+                    f"{item['home_team']} {item['home_win_pct']}",
                     f"Empate {item['draw_pct']}",
-                    f"Visitante {item['away_win_pct']}",
+                    f"{item['away_team']} {item['away_win_pct']}",
                     f"BTTS {item['btts_pct']}",
                     f"Over 2.5 {item['over_25_pct']}",
                     f"Confianca {item['confidence_score']}/100",
@@ -521,7 +537,7 @@ def _match_card_html(item: dict[str, object]) -> str:
         f"""
         <div class="prob-grid">
           <div class="prob-item">
-            <label>Mandante</label>
+            <label>{escape(str(item['home_team']))}</label>
             <strong>{escape(str(item['home_win_pct']))}</strong>
           </div>
           <div class="prob-item">
@@ -529,7 +545,7 @@ def _match_card_html(item: dict[str, object]) -> str:
             <strong>{escape(str(item['draw_pct']))}</strong>
           </div>
           <div class="prob-item">
-            <label>Visitante</label>
+            <label>{escape(str(item['away_team']))}</label>
             <strong>{escape(str(item['away_win_pct']))}</strong>
           </div>
         </div>
@@ -1407,7 +1423,7 @@ def build_world_cup_html() -> str:
           <div class="method-list">
             <div class="method-item">
               <strong>Probabilidades 1X2</strong>
-              <p>O motor usa o modelo Poisson do proprio projeto para estimar vitoria mandante, empate e vitoria visitante.</p>
+              <p>O motor usa o modelo Poisson do proprio projeto para estimar a chance de cada selecao e empate em campo neutro.</p>
             </div>
             <div class="method-item">
               <strong>Placar sugerido</strong>
@@ -1739,6 +1755,8 @@ def _extract_json_block(text: str) -> str:
 def _fallback_prior(team: str) -> dict[str, object]:
     return {
         "strength": 62,
+        "fifa_rank": None,
+        "fifa_points": None,
         "attack": 1.0,
         "defense": 1.0,
         "draw_bias": 1.0,
@@ -1751,12 +1769,35 @@ def _clamp(value: float, min_value: float, max_value: float) -> float:
     return max(min_value, min(max_value, value))
 
 
+def _safe_int_or_none(value: object) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float_or_none(value: object) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(value: object, default: float) -> float:
+    resolved = _safe_float_or_none(value)
+    return float(default) if resolved is None else resolved
+
+
 def _default_model_adjustments() -> dict[str, object]:
     return {
         "draw_multiplier": 1.0,
         "home_goal_multiplier": 1.0,
         "away_goal_multiplier": 1.0,
-        "home_advantage_points": 2.3,
+        "home_advantage_points": 0.0,
         "confidence_bias": 0.0,
         "team_rating_adjustments": {},
     }
@@ -1770,7 +1811,7 @@ def _normalize_model_adjustments_payload(adjustments: dict[str, object] | None) 
         "draw_multiplier": round(_clamp(float(raw.get("draw_multiplier", 1.0)), 0.78, 1.48), 3),
         "home_goal_multiplier": round(_clamp(float(raw.get("home_goal_multiplier", 1.0)), 0.72, 1.34), 3),
         "away_goal_multiplier": round(_clamp(float(raw.get("away_goal_multiplier", 1.0)), 0.72, 1.34), 3),
-        "home_advantage_points": round(_clamp(float(raw.get("home_advantage_points", 2.3)), 0.0, 6.0), 2),
+        "home_advantage_points": round(_clamp(float(raw.get("home_advantage_points", 0.0)), -2.0, 3.0), 2),
         "confidence_bias": round(_clamp(float(raw.get("confidence_bias", 0.0)), -12.0, 12.0), 2),
         "team_rating_adjustments": {},
     }
@@ -1828,7 +1869,7 @@ def _request_team_priors_from_ai(teams: list[str]) -> dict[str, dict[str, object
     prompt = (
         "Voce vai montar uma base pre-torneio para a Copa do Mundo 2026. "
         "Para cada selecao abaixo, devolva um JSON com os campos: "
-        "team, strength, attack, defense, draw_bias, note. "
+        "team, strength, fifa_rank, fifa_points, attack, defense, draw_bias, note. "
         "Use estes limites: strength inteiro de 45 a 92; attack numero de 0.82 a 1.22; "
         "defense numero de 0.82 a 1.22 onde maior significa defesa melhor; "
         "draw_bias numero de 0.92 a 1.10; note com no maximo 6 palavras. "
@@ -1864,6 +1905,8 @@ def _request_team_priors_from_ai(teams: list[str]) -> dict[str, dict[str, object
         priors[_canonical_team_name(team)] = {
             "team": _canonical_team_name(team),
             "strength": int(round(float(item.get("strength", 62)))),
+            "fifa_rank": _safe_int_or_none(item.get("fifa_rank")),
+            "fifa_points": _safe_float_or_none(item.get("fifa_points")),
             "attack": round(float(item.get("attack", 1.0)), 3),
             "defense": round(float(item.get("defense", 1.0)), 3),
             "draw_bias": round(float(item.get("draw_bias", 1.0)), 3),
@@ -1872,13 +1915,72 @@ def _request_team_priors_from_ai(teams: list[str]) -> dict[str, dict[str, object
     return priors
 
 
+def _normalize_team_prior(team: str, prior: dict[str, object] | None) -> dict[str, object]:
+    fallback = _fallback_prior(team)
+    raw = prior if isinstance(prior, dict) else {}
+    normalized = {
+        "team": _canonical_team_name(str(raw.get("team") or team)),
+        "strength": int(round(_clamp(_safe_float(raw.get("strength"), float(fallback["strength"])), 45.0, 92.0))),
+        "fifa_rank": _safe_int_or_none(raw.get("fifa_rank")),
+        "fifa_points": _safe_float_or_none(raw.get("fifa_points")),
+        "attack": round(_clamp(_safe_float(raw.get("attack"), float(fallback["attack"])), 0.82, 1.22), 3),
+        "defense": round(_clamp(_safe_float(raw.get("defense"), float(fallback["defense"])), 0.82, 1.22), 3),
+        "draw_bias": round(_clamp(_safe_float(raw.get("draw_bias"), float(fallback["draw_bias"])), 0.92, 1.10), 3),
+        "note": str(raw.get("note") or fallback["note"]).strip()[:80],
+    }
+    return normalized
+
+
+def _team_name_from_fifa_entry(entry: dict[str, object]) -> str | None:
+    raw_names = entry.get("TeamName")
+    if isinstance(raw_names, list):
+        for raw_name in raw_names:
+            if isinstance(raw_name, dict) and str(raw_name.get("Description") or "").strip():
+                return _canonical_team_name(str(raw_name["Description"]))
+    return None
+
+
+def _fetch_fifa_ranking_map() -> dict[str, dict[str, float | int]]:
+    response = requests.get(
+        FIFA_MENS_RANKING_URL,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://inside.fifa.com/fifa-world-ranking/men",
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    results = payload.get("Results") if isinstance(payload, dict) else None
+    if not isinstance(results, list):
+        return {}
+
+    ranking_map: dict[str, dict[str, float | int]] = {}
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        team = _team_name_from_fifa_entry(entry)
+        rank = _safe_int_or_none(entry.get("Rank"))
+        points = _safe_float_or_none(entry.get("DecimalTotalPoints"))
+        if team and rank is not None:
+            ranking_map[team] = {
+                "fifa_rank": rank,
+                "fifa_points": round(points, 2) if points is not None else 0.0,
+            }
+    return ranking_map
+
+
 def _load_team_priors(teams: list[str]) -> dict[str, dict[str, object]]:
     existing: dict[str, dict[str, object]] = {}
     if TEAM_PRIORS_CACHE.exists():
         try:
             loaded = json.loads(TEAM_PRIORS_CACHE.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
-                existing = {str(k): v for k, v in loaded.items() if isinstance(v, dict)}
+                existing = {
+                    _canonical_team_name(str(k)): _normalize_team_prior(_canonical_team_name(str(k)), v)
+                    for k, v in loaded.items()
+                    if isinstance(v, dict)
+                }
         except Exception:
             existing = {}
 
@@ -1899,7 +2001,20 @@ def _load_team_priors(teams: list[str]) -> dict[str, dict[str, object]]:
                 encoding="utf-8",
             )
 
-    return {team: existing.get(team, _fallback_prior(team)) for team in teams}
+    try:
+        fifa_ranking = _fetch_fifa_ranking_map()
+        for team in teams:
+            ranking = fifa_ranking.get(team)
+            if ranking:
+                existing.setdefault(team, _fallback_prior(team))
+                existing[team]["fifa_rank"] = ranking["fifa_rank"]
+                existing[team]["fifa_points"] = ranking["fifa_points"]
+    except Exception:
+        pass
+
+    normalized = {team: _normalize_team_prior(team, existing.get(team)) for team in teams}
+    TEAM_PRIORS_CACHE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    return normalized
 
 
 def _poisson_probability(goals: int, lam: float) -> float:
@@ -2177,6 +2292,22 @@ def _team_form_component(
     return float(state.get("rating_shift", 0.0)) + manual_shift
 
 
+def _strength_from_fifa_rank(rank: object) -> float | None:
+    fifa_rank = _safe_int_or_none(rank)
+    if fifa_rank is None or fifa_rank <= 0:
+        return None
+    clamped_rank = _clamp(float(fifa_rank), 1.0, 211.0)
+    return 92.0 - ((clamped_rank - 1.0) / 210.0) * 47.0
+
+
+def _effective_team_strength(prior: dict[str, object]) -> float:
+    internal_strength = _safe_float(prior.get("strength"), 62.0)
+    rank_strength = _strength_from_fifa_rank(prior.get("fifa_rank"))
+    if rank_strength is None:
+        return internal_strength
+    return (rank_strength * 0.65) + (internal_strength * 0.35)
+
+
 def _predict_match(
     home_team: str,
     away_team: str,
@@ -2189,22 +2320,22 @@ def _predict_match(
     away_prior = priors.get(away_team, _fallback_prior(away_team))
 
     rating_diff = (
-        float(home_prior["strength"]) - float(away_prior["strength"])
+        _effective_team_strength(home_prior) - _effective_team_strength(away_prior)
         + _team_form_component(home_team, team_state, model_adjustments)
         - _team_form_component(away_team, team_state, model_adjustments)
-        + float(model_adjustments.get("home_advantage_points", 2.3))
+        + float(model_adjustments.get("home_advantage_points", 0.0))
     )
     rating_factor = math.exp(rating_diff / 80.0)
 
     expected_home = (
-        1.18
+        1.10
         * float(home_prior["attack"])
         / max(float(away_prior["defense"]), 0.78)
         * rating_factor
         * float(global_state.get("home_goal_multiplier", 1.0))
     )
     expected_away = (
-        1.02
+        1.10
         * float(away_prior["attack"])
         / max(float(home_prior["defense"]), 0.78)
         / rating_factor
@@ -2274,7 +2405,8 @@ def _predict_match(
         "scorelines": scorelines[:4],
         "analysis": (
             f"Base IA: {home_team} ({home_prior['note']}) vs {away_team} ({away_prior['note']}). "
-            f"O estudo ve {home_win * 100:.1f}% casa, {draw * 100:.1f}% empate e {away_win * 100:.1f}% fora."
+            f"O estudo ve {home_team} {home_win * 100:.1f}%, empate {draw * 100:.1f}% "
+            f"e {away_team} {away_win * 100:.1f}%."
         ),
     }
 
@@ -2303,16 +2435,16 @@ def _update_live_state(
     team_state.setdefault(home_team, {"rating_shift": 0.0})
     team_state.setdefault(away_team, {"rating_shift": 0.0})
     sample_weight = min(1.0, max(0.25, (len(history) + 1) / 10.0))
-    rating_learning_rate = 0.75 * sample_weight
+    rating_learning_rate = 1.05 * sample_weight
     team_state[home_team]["rating_shift"] = _clamp(
         float(team_state[home_team].get("rating_shift", 0.0)) + (home_points - expected_home_points) * rating_learning_rate,
-        -10.0,
-        10.0,
+        -12.0,
+        12.0,
     )
     team_state[away_team]["rating_shift"] = _clamp(
         float(team_state[away_team].get("rating_shift", 0.0)) + (away_points - expected_away_points) * rating_learning_rate,
-        -10.0,
-        10.0,
+        -12.0,
+        12.0,
     )
 
     history.append(
@@ -2405,12 +2537,31 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
         record["has_result"] = False
 
         if home_team and away_team:
+            home_prior = priors.get(str(home_team), _fallback_prior(str(home_team)))
+            away_prior = priors.get(str(away_team), _fallback_prior(str(away_team)))
+            record.update(
+                {
+                    "home_fifa_rank": home_prior.get("fifa_rank"),
+                    "home_fifa_points": home_prior.get("fifa_points"),
+                    "away_fifa_rank": away_prior.get("fifa_rank"),
+                    "away_fifa_points": away_prior.get("fifa_points"),
+                    "home_fifa_rank_display": _fmt_fifa_rank(home_prior.get("fifa_rank")),
+                    "home_fifa_points_display": _fmt_fifa_points(home_prior.get("fifa_points")),
+                    "away_fifa_rank_display": _fmt_fifa_rank(away_prior.get("fifa_rank")),
+                    "away_fifa_points_display": _fmt_fifa_points(away_prior.get("fifa_points")),
+                }
+            )
             prediction = _predict_match(home_team, away_team, priors, team_state, global_state, model_adjustments)
             record.update(
                 {
                     "has_prediction": True,
                     "suggested_score": prediction["suggested_score"],
                     "predicted_outcome": prediction["predicted_outcome"],
+                    "predicted_outcome_label": _team_label_from_market(
+                        str(prediction["predicted_outcome"]),
+                        str(home_team),
+                        str(away_team),
+                    ),
                     "home_win_pct": _fmt_pct(prediction["home_win"]),
                     "draw_pct": _fmt_pct(prediction["draw"]),
                     "away_win_pct": _fmt_pct(prediction["away_win"]),
@@ -2860,6 +3011,16 @@ def _analysis_card_html(item: dict[str, object]) -> str:
     )
     home_html = _team_html(str(item.get("display_home_team") or item.get("home_team") or ""), item.get("home_team"))
     away_html = _team_html(str(item.get("display_away_team") or item.get("away_team") or ""), item.get("away_team"))
+    home_rank_html = (
+        f"{escape(str(item.get('display_home_team') or item.get('home_team') or 'Selecao A'))} "
+        f"{escape(str(item.get('home_fifa_rank_display', '-')))}"
+        f" · {escape(str(item.get('home_fifa_points_display', 'sem pontos')))}"
+    )
+    away_rank_html = (
+        f"{escape(str(item.get('display_away_team') or item.get('away_team') or 'Selecao B'))} "
+        f"{escape(str(item.get('away_fifa_rank_display', '-')))}"
+        f" · {escape(str(item.get('away_fifa_points_display', 'sem pontos')))}"
+    )
 
     return f"""
     <article class="analysis-card"
@@ -2871,19 +3032,23 @@ def _analysis_card_html(item: dict[str, object]) -> str:
         <span class="date-pill">{escape(str(item['date_sp']))} &bull; {escape(str(item['time_sp']))}</span>
       </div>
       <h3 class="matchup-line">{home_html}<span class="matchup-x">x</span>{away_html}</h3>
+      <div class="ranking-row">
+        <span>Ranking FIFA {home_rank_html}</span>
+        <span>Ranking FIFA {away_rank_html}</span>
+      </div>
       <div class="meta-row">
         <span>SP {escape(str(item['time_sp']))}</span>
         <span>ET {escape(str(item['time_et']))}</span>
         <span>Confianca {escape(str(item.get('confidence', '-')))}</span>
       </div>
       <div class="prob-grid">
-        <div class="prob-item"><label>Casa</label><strong>{escape(str(item.get('home_win_pct', '-')))}</strong></div>
+        <div class="prob-item"><label>{escape(str(item.get('home_team', 'Selecao A')))}</label><strong>{escape(str(item.get('home_win_pct', '-')))}</strong></div>
         <div class="prob-item"><label>Empate</label><strong>{escape(str(item.get('draw_pct', '-')))}</strong></div>
-        <div class="prob-item"><label>Fora</label><strong>{escape(str(item.get('away_win_pct', '-')))}</strong></div>
+        <div class="prob-item"><label>{escape(str(item.get('away_team', 'Selecao B')))}</label><strong>{escape(str(item.get('away_win_pct', '-')))}</strong></div>
       </div>
       <div class="micro-row">
         <span>Gols esperados {escape(str(item.get('expected_goals', '-')))}</span>
-        <span>Leitura {escape(str(item.get('predicted_outcome', '-')))}</span>
+        <span>Leitura {escape(str(item.get('predicted_outcome_label', '-')))}</span>
       </div>
       <div class="scoreline-list">{top_scores}</div>
       <div class="dual-card">
@@ -2933,18 +3098,18 @@ def build_world_cup_schedule_html() -> str:
             <p>Base manual e multiplicador efetivo apos recalibracao.</p>
           </div>
           <div class="model-card">
-            <span class="model-kicker">Gols mandante</span>
+            <span class="model-kicker">Gols selecao A</span>
             <strong>{stats['base_home_goal_multiplier']:.3f} -> {stats['home_goal_multiplier']:.3f}</strong>
-            <p>Ajuste de volume de gols para o time da casa.</p>
+            <p>Ajuste de volume de gols para o primeiro time listado no confronto.</p>
           </div>
           <div class="model-card">
-            <span class="model-kicker">Gols visitante</span>
+            <span class="model-kicker">Gols selecao B</span>
             <strong>{stats['base_away_goal_multiplier']:.3f} -> {stats['away_goal_multiplier']:.3f}</strong>
-            <p>Ajuste de volume de gols para o time visitante.</p>
+            <p>Ajuste de volume de gols para o segundo time listado no confronto.</p>
           </div>
           <div class="model-card">
             <span class="model-kicker">Parametros extras</span>
-            <strong>Casa {stats['home_advantage_points']:.2f} | Confianca {stats['confidence_bias']:+.1f}</strong>
+            <strong>Vantagem neutra {stats['home_advantage_points']:.2f} | Confianca {stats['confidence_bias']:+.1f}</strong>
             <p>{stats['manual_team_adjustment_count']} selecoes com ajuste manual. Preview: {escape(str(stats['manual_team_adjustments_preview']))}</p>
           </div>
         </div>
@@ -3453,6 +3618,25 @@ def build_world_cup_schedule_html() -> str:
       font-size: 0.95em;
       opacity: 0.78;
     }}
+    .ranking-row {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }}
+    .ranking-row span {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 0;
+      padding: 7px 9px;
+      border-radius: 12px;
+      background: rgba(28,86,184,0.07);
+      border: 1px solid rgba(28,86,184,0.10);
+      color: var(--ink);
+      font-size: 0.78rem;
+      font-weight: 750;
+      text-align: center;
+    }}
     .meta-row, .micro-row {{ display: flex; flex-wrap: wrap; gap: 8px; }}
     .meta-row span, .micro-row span, .scoreline-list span {{
       display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 999px;
@@ -3523,7 +3707,7 @@ def build_world_cup_schedule_html() -> str:
       .calibration-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
     }}
     @media (max-width: 720px) {{
-      .stats, .prob-grid, .dual-card {{ grid-template-columns: 1fr; }}
+      .stats, .prob-grid, .ranking-row, .dual-card {{ grid-template-columns: 1fr; }}
       .hero, .main-card {{ padding: 18px; border-radius: 22px; }}
       .calibration-grid {{ grid-template-columns: 1fr; }}
     }}
@@ -3602,16 +3786,16 @@ def build_world_cup_schedule_html() -> str:
               <input id="cfgDrawMultiplier" type="number" min="0.78" max="1.48" step="0.001" />
             </div>
             <div class="field">
-              <label for="cfgHomeGoalMultiplier">Multiplicador gols casa</label>
+              <label for="cfgHomeGoalMultiplier">Multiplicador gols selecao A</label>
               <input id="cfgHomeGoalMultiplier" type="number" min="0.72" max="1.34" step="0.001" />
             </div>
             <div class="field">
-              <label for="cfgAwayGoalMultiplier">Multiplicador gols fora</label>
+              <label for="cfgAwayGoalMultiplier">Multiplicador gols selecao B</label>
               <input id="cfgAwayGoalMultiplier" type="number" min="0.72" max="1.34" step="0.001" />
             </div>
             <div class="field">
-              <label for="cfgHomeAdvantagePoints">Vantagem de mandante (pontos)</label>
-              <input id="cfgHomeAdvantagePoints" type="number" min="0.0" max="6.0" step="0.01" />
+              <label for="cfgHomeAdvantagePoints">Vies posicional A/B (pontos)</label>
+              <input id="cfgHomeAdvantagePoints" type="number" min="-2.0" max="3.0" step="0.01" />
             </div>
             <div class="field">
               <label for="cfgConfidenceBias">Bias de confiança</label>

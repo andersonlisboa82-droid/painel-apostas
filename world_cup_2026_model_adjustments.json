@@ -1,8 +1,8 @@
 {
-  "draw_multiplier": 1.15,
-  "home_goal_multiplier": 0.95,
-  "away_goal_multiplier": 0.95,
-  "home_advantage_points": 0.8,
+  "draw_multiplier": 1.0,
+  "home_goal_multiplier": 1.0,
+  "away_goal_multiplier": 1.0,
+  "home_advantage_points": 0.0,
   "confidence_bias": 0.0,
   "team_rating_adjustments": {}
 }

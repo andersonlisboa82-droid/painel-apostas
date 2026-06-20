@@ -2,6 +2,8 @@
   "Algeria": {
     "team": "Algeria",
     "strength": 68,
+    "fifa_rank": 28,
+    "fifa_points": 1571.03,
     "attack": 1.02,
     "defense": 1.05,
     "draw_bias": 1.0,
@@ -10,6 +12,8 @@
   "Argentina": {
     "team": "Argentina",
     "strength": 85,
+    "fifa_rank": 1,
+    "fifa_points": 1877.27,
     "attack": 1.18,
     "defense": 1.1,
     "draw_bias": 1.02,
@@ -18,6 +22,8 @@
   "Australia": {
     "team": "Australia",
     "strength": 62,
+    "fifa_rank": 27,
+    "fifa_points": 1579.34,
     "attack": 0.98,
     "defense": 1.02,
     "draw_bias": 1.0,
@@ -26,6 +32,8 @@
   "Austria": {
     "team": "Austria",
     "strength": 70,
+    "fifa_rank": 24,
+    "fifa_points": 1597.4,
     "attack": 1.05,
     "defense": 1.08,
     "draw_bias": 1.02,
@@ -34,6 +42,8 @@
   "Belgium": {
     "team": "Belgium",
     "strength": 82,
+    "fifa_rank": 9,
+    "fifa_points": 1742.24,
     "attack": 1.15,
     "defense": 1.12,
     "draw_bias": 1.04,
@@ -42,6 +52,8 @@
   "Bosnia and Herzegovina": {
     "team": "Bosnia and Herzegovina",
     "strength": 65,
+    "fifa_rank": 64,
+    "fifa_points": 1387.22,
     "attack": 1.0,
     "defense": 1.04,
     "draw_bias": 1.0,
@@ -50,6 +62,8 @@
   "Brazil": {
     "team": "Brazil",
     "strength": 88,
+    "fifa_rank": 6,
+    "fifa_points": 1765.86,
     "attack": 1.2,
     "defense": 1.15,
     "draw_bias": 1.06,
@@ -58,6 +72,8 @@
   "Canada": {
     "team": "Canada",
     "strength": 60,
+    "fifa_rank": 30,
+    "fifa_points": 1559.48,
     "attack": 0.95,
     "defense": 1.0,
     "draw_bias": 0.98,
@@ -66,6 +82,8 @@
   "Cape Verde": {
     "team": "Cape Verde",
     "strength": 55,
+    "fifa_rank": 67,
+    "fifa_points": 1371.11,
     "attack": 0.9,
     "defense": 0.95,
     "draw_bias": 0.96,
@@ -74,6 +92,8 @@
   "Colombia": {
     "team": "Colombia",
     "strength": 75,
+    "fifa_rank": 13,
+    "fifa_points": 1698.35,
     "attack": 1.08,
     "defense": 1.1,
     "draw_bias": 1.02,
@@ -82,6 +102,8 @@
   "Croatia": {
     "team": "Croatia",
     "strength": 80,
+    "fifa_rank": 11,
+    "fifa_points": 1714.87,
     "attack": 1.12,
     "defense": 1.14,
     "draw_bias": 1.04,
@@ -90,6 +112,8 @@
   "Curacao": {
     "team": "Curacao",
     "strength": 50,
+    "fifa_rank": 82,
+    "fifa_points": 1294.77,
     "attack": 0.85,
     "defense": 0.9,
     "draw_bias": 0.94,
@@ -98,6 +122,8 @@
   "Czechia": {
     "team": "Czechia",
     "strength": 65,
+    "fifa_rank": 40,
+    "fifa_points": 1505.74,
     "attack": 1.0,
     "defense": 1.04,
     "draw_bias": 1.0,
@@ -106,6 +132,8 @@
   "D.R. Congo": {
     "team": "D.R. Congo",
     "strength": 58,
+    "fifa_rank": 46,
+    "fifa_points": 1474.43,
     "attack": 0.92,
     "defense": 0.96,
     "draw_bias": 0.98,
@@ -114,6 +142,8 @@
   "Ecuador": {
     "team": "Ecuador",
     "strength": 68,
+    "fifa_rank": 23,
+    "fifa_points": 1598.52,
     "attack": 1.02,
     "defense": 1.05,
     "draw_bias": 1.0,
@@ -122,6 +152,8 @@
   "Egypt": {
     "team": "Egypt",
     "strength": 62,
+    "fifa_rank": 29,
+    "fifa_points": 1562.37,
     "attack": 0.98,
     "defense": 1.02,
     "draw_bias": 1.0,
@@ -130,6 +162,8 @@
   "England": {
     "team": "England",
     "strength": 84,
+    "fifa_rank": 4,
+    "fifa_points": 1828.02,
     "attack": 1.18,
     "defense": 1.12,
     "draw_bias": 1.04,
@@ -138,6 +172,8 @@
   "France": {
     "team": "France",
     "strength": 90,
+    "fifa_rank": 3,
+    "fifa_points": 1870.7,
     "attack": 1.22,
     "defense": 1.18,
     "draw_bias": 1.08,
@@ -146,6 +182,8 @@
   "Germany": {
     "team": "Germany",
     "strength": 86,
+    "fifa_rank": 10,
+    "fifa_points": 1735.77,
     "attack": 1.2,
     "defense": 1.15,
     "draw_bias": 1.06,
@@ -154,6 +192,8 @@
   "Ghana": {
     "team": "Ghana",
     "strength": 60,
+    "fifa_rank": 73,
+    "fifa_points": 1346.88,
     "attack": 0.95,
     "defense": 1.0,
     "draw_bias": 0.98,
@@ -162,6 +202,8 @@
   "Haiti": {
     "team": "Haiti",
     "strength": 52,
+    "fifa_rank": 83,
+    "fifa_points": 1293.1,
     "attack": 0.88,
     "defense": 0.92,
     "draw_bias": 0.94,
@@ -170,6 +212,8 @@
   "Iran": {
     "team": "Iran",
     "strength": 70,
+    "fifa_rank": null,
+    "fifa_points": null,
     "attack": 1.05,
     "defense": 1.08,
     "draw_bias": 1.02,
@@ -178,6 +222,8 @@
   "Iraq": {
     "team": "Iraq",
     "strength": 58,
+    "fifa_rank": 57,
+    "fifa_points": 1446.28,
     "attack": 0.92,
     "defense": 0.96,
     "draw_bias": 0.98,
@@ -186,6 +232,8 @@
   "Ivory Coast": {
     "team": "Ivory Coast",
     "strength": 68,
+    "fifa_rank": 33,
+    "fifa_points": 1540.87,
     "attack": 1.02,
     "defense": 1.05,
     "draw_bias": 1.0,
@@ -194,6 +242,8 @@
   "Japan": {
     "team": "Japan",
     "strength": 72,
+    "fifa_rank": 18,
+    "fifa_points": 1661.58,
     "attack": 1.08,
     "defense": 1.1,
     "draw_bias": 1.02,
@@ -202,6 +252,8 @@
   "Jordan": {
     "team": "Jordan",
     "strength": 55,
+    "fifa_rank": 63,
+    "fifa_points": 1387.74,
     "attack": 0.9,
     "defense": 0.95,
     "draw_bias": 0.96,
@@ -210,6 +262,8 @@
   "Mexico": {
     "team": "Mexico",
     "strength": 78,
+    "fifa_rank": 14,
+    "fifa_points": 1687.48,
     "attack": 1.12,
     "defense": 1.12,
     "draw_bias": 1.04,
@@ -218,6 +272,8 @@
   "Morocco": {
     "team": "Morocco",
     "strength": 75,
+    "fifa_rank": 7,
+    "fifa_points": 1755.1,
     "attack": 1.08,
     "defense": 1.1,
     "draw_bias": 1.02,
@@ -226,6 +282,8 @@
   "Netherlands": {
     "team": "Netherlands",
     "strength": 82,
+    "fifa_rank": 8,
+    "fifa_points": 1753.57,
     "attack": 1.15,
     "defense": 1.12,
     "draw_bias": 1.04,
@@ -234,6 +292,8 @@
   "New Zealand": {
     "team": "New Zealand",
     "strength": 50,
+    "fifa_rank": 85,
+    "fifa_points": 1275.58,
     "attack": 0.85,
     "defense": 0.9,
     "draw_bias": 0.94,
@@ -242,6 +302,8 @@
   "Norway": {
     "team": "Norway",
     "strength": 68,
+    "fifa_rank": 31,
+    "fifa_points": 1557.44,
     "attack": 1.02,
     "defense": 1.05,
     "draw_bias": 1.0,
@@ -250,6 +312,8 @@
   "Panama": {
     "team": "Panama",
     "strength": 60,
+    "fifa_rank": 34,
+    "fifa_points": 1539.16,
     "attack": 0.95,
     "defense": 1.0,
     "draw_bias": 0.98,
@@ -258,6 +322,8 @@
   "Paraguay": {
     "team": "Paraguay",
     "strength": 65,
+    "fifa_rank": 41,
+    "fifa_points": 1505.35,
     "attack": 1.0,
     "defense": 1.04,
     "draw_bias": 1.0,
@@ -266,6 +332,8 @@
   "Portugal": {
     "team": "Portugal",
     "strength": 80,
+    "fifa_rank": 5,
+    "fifa_points": 1767.85,
     "attack": 1.12,
     "defense": 1.14,
     "draw_bias": 1.04,
@@ -274,6 +342,8 @@
   "Qatar": {
     "team": "Qatar",
     "strength": 58,
+    "fifa_rank": 56,
+    "fifa_points": 1450.31,
     "attack": 0.92,
     "defense": 0.96,
     "draw_bias": 0.98,
@@ -282,6 +352,8 @@
   "Saudi Arabia": {
     "team": "Saudi Arabia",
     "strength": 62,
+    "fifa_rank": 61,
+    "fifa_points": 1423.88,
     "attack": 0.98,
     "defense": 1.02,
     "draw_bias": 1.0,
@@ -290,6 +362,8 @@
   "Scotland": {
     "team": "Scotland",
     "strength": 70,
+    "fifa_rank": 42,
+    "fifa_points": 1503.34,
     "attack": 1.05,
     "defense": 1.08,
     "draw_bias": 1.02,
@@ -298,6 +372,8 @@
   "Senegal": {
     "team": "Senegal",
     "strength": 72,
+    "fifa_rank": 15,
+    "fifa_points": 1684.07,
     "attack": 1.08,
     "defense": 1.1,
     "draw_bias": 1.02,
@@ -306,6 +382,8 @@
   "South Africa": {
     "team": "South Africa",
     "strength": 60,
+    "fifa_rank": 60,
+    "fifa_points": 1428.38,
     "attack": 0.95,
     "defense": 1.0,
     "draw_bias": 0.98,
@@ -314,6 +392,8 @@
   "South Korea": {
     "team": "South Korea",
     "strength": 70,
+    "fifa_rank": 25,
+    "fifa_points": 1591.63,
     "attack": 1.05,
     "defense": 1.08,
     "draw_bias": 1.02,
@@ -322,6 +402,8 @@
   "Spain": {
     "team": "Spain",
     "strength": 84,
+    "fifa_rank": 2,
+    "fifa_points": 1874.71,
     "attack": 1.18,
     "defense": 1.12,
     "draw_bias": 1.04,
@@ -330,6 +412,8 @@
   "Sweden": {
     "team": "Sweden",
     "strength": 75,
+    "fifa_rank": 38,
+    "fifa_points": 1509.79,
     "attack": 1.08,
     "defense": 1.1,
     "draw_bias": 1.02,
@@ -338,6 +422,8 @@
   "Switzerland": {
     "team": "Switzerland",
     "strength": 78,
+    "fifa_rank": 19,
+    "fifa_points": 1650.06,
     "attack": 1.12,
     "defense": 1.12,
     "draw_bias": 1.04,
@@ -346,6 +432,8 @@
   "Tunisia": {
     "team": "Tunisia",
     "strength": 65,
+    "fifa_rank": 45,
+    "fifa_points": 1476.41,
     "attack": 1.0,
     "defense": 1.04,
     "draw_bias": 1.0,
@@ -354,6 +442,8 @@
   "Turkey": {
     "team": "Turkey",
     "strength": 72,
+    "fifa_rank": 22,
+    "fifa_points": 1605.73,
     "attack": 1.08,
     "defense": 1.1,
     "draw_bias": 1.02,
@@ -362,6 +452,8 @@
   "USA": {
     "team": "USA",
     "strength": 78,
+    "fifa_rank": 17,
+    "fifa_points": 1671.23,
     "attack": 1.12,
     "defense": 1.12,
     "draw_bias": 1.04,
@@ -370,6 +462,8 @@
   "Uruguay": {
     "team": "Uruguay",
     "strength": 80,
+    "fifa_rank": 16,
+    "fifa_points": 1673.07,
     "attack": 1.12,
     "defense": 1.14,
     "draw_bias": 1.04,
@@ -378,6 +472,8 @@
   "Uzbekistan": {
     "team": "Uzbekistan",
     "strength": 55,
+    "fifa_rank": 50,
+    "fifa_points": 1458.73,
     "attack": 0.9,
     "defense": 0.95,
     "draw_bias": 0.96,
