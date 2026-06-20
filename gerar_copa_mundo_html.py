@@ -2318,12 +2318,53 @@ def _select_suggested_score(
 
 def _team_form_component(
     team: str,
-    team_state: dict[str, dict[str, float]],
+    team_state: dict[str, dict[str, object]],
     model_adjustments: dict[str, object],
 ) -> float:
     state = team_state.get(team, {})
     manual_shift = float(model_adjustments.get("team_rating_adjustments", {}).get(team, 0.0))
     return float(state.get("rating_shift", 0.0)) + manual_shift
+
+
+def _record_team_result(
+    team_state: dict[str, dict[str, object]],
+    team: str,
+    *,
+    goals_for: int,
+    goals_against: int,
+    points: int,
+) -> None:
+    state = team_state.setdefault(team, {"rating_shift": 0.0})
+    state["played"] = int(state.get("played", 0)) + 1
+    state["points"] = int(state.get("points", 0)) + int(points)
+    state["goals_for"] = int(state.get("goals_for", 0)) + int(goals_for)
+    state["goals_against"] = int(state.get("goals_against", 0)) + int(goals_against)
+
+    if points == 3:
+        result_token = "V"
+    elif points == 1:
+        result_token = "E"
+    else:
+        result_token = "D"
+    form = state.get("form", [])
+    if not isinstance(form, list):
+        form = []
+    state["form"] = [str(item) for item in form[-4:]] + [result_token]
+
+
+def _team_cup_moment_text(team: str, team_state: dict[str, dict[str, object]]) -> str:
+    state = team_state.get(team, {})
+    played = int(state.get("played", 0) or 0)
+    if played <= 0:
+        return f"{team} sem resultado anterior nesta Copa"
+
+    points = int(state.get("points", 0) or 0)
+    goals_for = int(state.get("goals_for", 0) or 0)
+    goals_against = int(state.get("goals_against", 0) or 0)
+    goal_diff = goals_for - goals_against
+    form = state.get("form", [])
+    form_text = "-".join(str(item) for item in form) if isinstance(form, list) and form else "-"
+    return f"{team} {played}J, {points} pts, SG {goal_diff:+d}, forma {form_text}"
 
 
 def _strength_from_fifa_rank(rank: object) -> float | None:
@@ -2346,7 +2387,7 @@ def _predict_match(
     home_team: str,
     away_team: str,
     priors: dict[str, dict[str, object]],
-    team_state: dict[str, dict[str, float]],
+    team_state: dict[str, dict[str, object]],
     global_state: dict[str, float],
     model_adjustments: dict[str, object],
 ) -> dict[str, object]:
@@ -2426,6 +2467,8 @@ def _predict_match(
         + float(model_adjustments.get("confidence_bias", 0.0))
     )
     confidence = int(round(max(28.0, min(92.0, confidence_raw))))
+    home_moment = _team_cup_moment_text(home_team, team_state)
+    away_moment = _team_cup_moment_text(away_team, team_state)
 
     return {
         "home_win": home_win,
@@ -2439,6 +2482,7 @@ def _predict_match(
         "scorelines": scorelines[:4],
         "analysis": (
             f"Base IA: {home_team} ({home_prior['note']}) vs {away_team} ({away_prior['note']}). "
+            f"Momento na Copa: {home_moment}; {away_moment}. "
             f"O estudo ve {home_team} {home_win * 100:.1f}%, empate {draw * 100:.1f}% "
             f"e {away_team} {away_win * 100:.1f}%."
         ),
@@ -2450,7 +2494,7 @@ def _update_live_state(
     away_team: str,
     prediction: dict[str, object],
     result: dict[str, object],
-    team_state: dict[str, dict[str, float]],
+    team_state: dict[str, dict[str, object]],
     history: list[dict[str, float]],
     global_state: dict[str, float],
     model_adjustments: dict[str, object],
@@ -2479,6 +2523,20 @@ def _update_live_state(
         float(team_state[away_team].get("rating_shift", 0.0)) + (away_points - expected_away_points) * rating_learning_rate,
         -12.0,
         12.0,
+    )
+    _record_team_result(
+        team_state,
+        home_team,
+        goals_for=actual_home,
+        goals_against=actual_away,
+        points=home_points,
+    )
+    _record_team_result(
+        team_state,
+        away_team,
+        goals_for=actual_away,
+        goals_against=actual_home,
+        points=away_points,
     )
 
     history.append(
@@ -2550,7 +2608,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
     priors = _load_team_priors(teams) if teams else {}
     model_adjustments = _load_model_adjustments()
     results_lookup = _load_official_results_lookup()
-    team_state: dict[str, dict[str, float]] = {}
+    team_state: dict[str, dict[str, object]] = {}
     history: list[dict[str, float]] = []
     global_state = {
         "draw_multiplier": float(model_adjustments["draw_multiplier"]),
