@@ -1195,7 +1195,7 @@ def render_embedded_world_cup_portal() -> None:
             st.caption(f"Placares atualizados em {updated_at}.")
         else:
             st.caption("Use o botao para buscar os placares oficiais mais recentes.")
-    components.html(_load_world_cup_portal_html(), height=1200, scrolling=True)
+    components.html(_load_world_cup_portal_html(), height=2200, scrolling=True)
 
 
 def queue_page_navigation(page_name: str) -> None:
@@ -1285,6 +1285,17 @@ header[data-testid="stHeader"],
 .stApp .block-container {
   max-width: none !important;
   padding: 0 !important;
+}
+.stApp [data-testid="stVerticalBlock"],
+.stApp [data-testid="stVerticalBlock"] > div,
+.stApp div[data-testid="element-container"],
+.stApp iframe {
+  width: 100% !important;
+  max-width: none !important;
+}
+.stApp iframe {
+  min-height: 100vh !important;
+  border: 0 !important;
 }
 [data-testid="stAppViewContainer"] {
   background:

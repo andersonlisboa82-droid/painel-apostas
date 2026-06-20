@@ -709,9 +709,10 @@ def build_world_cup_html() -> str:
     .shell {{
       position: relative;
       z-index: 1;
-      max-width: 1480px;
-      margin: 0 auto;
-      padding: 28px 20px 60px;
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      padding: 18px clamp(10px, 1.2vw, 22px) 48px;
     }}
 
     /* ============================================================
@@ -2812,7 +2813,7 @@ def build_world_cup_schedule_html() -> str:
         repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0, rgba(255,255,255,0.08) 1px, transparent 1px, transparent 120px),
         linear-gradient(180deg, #f7f0e1 0%, #ede3cf 52%, #f2ebde 100%);
     }}
-    .shell {{ max-width: 1380px; margin: 0 auto; padding: 24px 18px 40px; }}
+    .shell {{ width: 100%; max-width: none; margin: 0; padding: 18px clamp(10px, 1.2vw, 22px) 40px; }}
     .hero {{
       position: relative;
       overflow: hidden;
@@ -3268,7 +3269,7 @@ def build_world_cup_schedule_html() -> str:
       opacity: 0.8;
       z-index: 0;
     }}
-    .shell {{ position: relative; z-index: 1; max-width: 1440px; margin: 0 auto; padding: 24px 18px 40px; }}
+    .shell {{ position: relative; z-index: 1; width: 100%; max-width: none; margin: 0; padding: 18px clamp(10px, 1.2vw, 22px) 40px; }}
     .hero {{
       position: relative;
       overflow: hidden;
