@@ -2454,6 +2454,7 @@ def _predict_match(
     scorelines = [(score, prob / total) for score, prob in scorelines]
     scorelines.sort(key=lambda item: item[1], reverse=True)
 
+    exact_score_pick = scorelines[0][0]
     predicted_outcome = max(
         [("Casa", home_win), ("Empate", draw), ("Fora", away_win)],
         key=lambda item: item[1],
@@ -2477,6 +2478,7 @@ def _predict_match(
         "away_win": away_win,
         "expected_home": expected_home,
         "expected_away": expected_away,
+        "exact_score_pick": exact_score_pick,
         "suggested_score": suggested_score,
         "predicted_outcome": predicted_outcome,
         "confidence": confidence,
@@ -2619,6 +2621,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
 
     enriched: list[dict[str, object]] = []
     exact_hits = 0
+    top3_exact_hits = 0
     outcome_hits = 0
     finished_matches = 0
 
@@ -2648,6 +2651,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
             record.update(
                 {
                     "has_prediction": True,
+                    "exact_score_pick": prediction["exact_score_pick"],
                     "suggested_score": prediction["suggested_score"],
                     "predicted_outcome": prediction["predicted_outcome"],
                     "predicted_outcome_label": _team_label_from_market(
@@ -2675,10 +2679,12 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
             )
             if result:
                 actual_outcome = _outcome_from_score(int(result["home_goals"]), int(result["away_goals"]))
-                exact_hit = record["suggested_score"] == result["actual_score"]
+                exact_hit = record["exact_score_pick"] == result["actual_score"]
+                top3_exact_hit = result["actual_score"] in [score for score, _ in record.get("top_scores", [])[:3]]
                 outcome_hit = record["predicted_outcome"] == actual_outcome
                 finished_matches += 1
                 exact_hits += 1 if exact_hit else 0
+                top3_exact_hits += 1 if top3_exact_hit else 0
                 outcome_hits += 1 if outcome_hit else 0
                 record.update(
                     {
@@ -2686,6 +2692,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
                         "actual_score": result["actual_score"],
                         "actual_outcome": actual_outcome,
                         "exact_hit": exact_hit,
+                        "top3_exact_hit": top3_exact_hit,
                         "outcome_hit": outcome_hit,
                         "result_label": (
                             "Acerto exato" if exact_hit else "Acerto de direcao" if outcome_hit else "Erro da leitura"
@@ -2710,6 +2717,7 @@ def _build_enriched_schedule(records: list[dict[str, str]]) -> tuple[list[dict[s
         "predicted_matches": sum(1 for item in enriched if item.get("has_prediction")),
         "finished_matches": finished_matches,
         "exact_hit_pct": round((exact_hits / finished_matches) * 100, 1) if finished_matches else 0.0,
+        "top3_exact_hit_pct": round((top3_exact_hits / finished_matches) * 100, 1) if finished_matches else 0.0,
         "outcome_hit_pct": round((outcome_hits / finished_matches) * 100, 1) if finished_matches else 0.0,
         "draw_multiplier": round(global_state["draw_multiplier"], 3),
         "home_goal_multiplier": round(global_state["home_goal_multiplier"], 3),
@@ -3141,6 +3149,7 @@ def _analysis_card_html(item: dict[str, object]) -> str:
       </div>
       <div class="micro-row">
         <span>Gols esperados {escape(str(item.get('expected_goals', '-')))}</span>
+        <span>Exato provavel {escape(str(item.get('exact_score_pick', '-')))}</span>
         <span>Leitura {escape(str(item.get('predicted_outcome_label', '-')))}</span>
       </div>
       <div class="scoreline-list">{top_scores}</div>
@@ -3829,6 +3838,7 @@ def build_world_cup_schedule_html() -> str:
         <div class="stat"><span>Jogos com leitura</span><strong>{stats['predicted_matches']}</strong></div>
         <div class="stat"><span>Jogos finalizados</span><strong>{stats['finished_matches']}</strong></div>
         <div class="stat"><span>Acerto exato</span><strong>{stats['exact_hit_pct']:.1f}%</strong></div>
+        <div class="stat"><span>Top 3 exato</span><strong>{stats['top3_exact_hit_pct']:.1f}%</strong></div>
         <div class="stat"><span>Acerto de direcao</span><strong>{stats['outcome_hit_pct']:.1f}%</strong></div>
       </div>
     </section>
